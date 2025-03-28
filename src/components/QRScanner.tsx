@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -7,12 +8,14 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { addAttendanceRecord } from '@/utils/attendanceUtils';
 import { getEmployeeById } from '@/utils/employeeUtils';
+import { SwitchCamera } from 'lucide-react';
 
 const QRScanner: React.FC = () => {
   const webcamRef = useRef<Webcam>(null);
   const [scanning, setScanning] = useState(true);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>('');
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment'); 
   const { toast } = useToast();
   const rafId = useRef<number | null>(null);
   const lastScanTime = useRef<number>(0);
@@ -157,24 +160,40 @@ const QRScanner: React.FC = () => {
     setScanning(prev => !prev);
   };
 
+  const handleFlipCamera = () => {
+    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+  };
+
   const videoConstraints = {
     deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
-    facingMode: "environment",
+    facingMode: facingMode,
     width: { ideal: 1280 },
     height: { ideal: 720 },
   };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
+    <Card className="w-full max-w-2xl mx-auto bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/50 dark:to-slate-800/50">
       <CardHeader>
         <CardTitle className="flex justify-between items-center">
           <span>QR Code Scanner</span>
-          <Button 
-            variant={scanning ? "destructive" : "default"}
-            onClick={handleToggleScanning}
-          >
-            {scanning ? "Pause" : "Resume"} Scanning
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleFlipCamera}
+              className="flex items-center gap-1 bg-white dark:bg-slate-800"
+            >
+              <SwitchCamera className="h-4 w-4" />
+              <span className="hidden sm:inline">{facingMode === 'user' ? 'Rear Camera' : 'Front Camera'}</span>
+            </Button>
+            <Button 
+              variant={scanning ? "destructive" : "default"}
+              size="sm"
+              onClick={handleToggleScanning}
+            >
+              {scanning ? "Pause" : "Resume"}
+            </Button>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -193,7 +212,7 @@ const QRScanner: React.FC = () => {
             </select>
           )}
           
-          <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+          <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden shadow-xl">
             <Webcam
               ref={webcamRef}
               audio={false}
