@@ -77,7 +77,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
         }
       } else {
         // Add new employee
-        const result = await addEmployee(formData as Employee);
+        const result = await addEmployee(formData);
         if (result) {
           toast({
             title: 'Employee Added',
