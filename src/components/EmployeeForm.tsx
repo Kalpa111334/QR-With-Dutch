@@ -15,11 +15,12 @@ interface EmployeeFormProps {
 }
 
 const defaultEmployee: Omit<Employee, 'id'> = {
-  name: '',
+  firstName: '',
+  lastName: '',
   email: '',
   department: '',
-  phone: '',
   position: '',
+  phone: '',
   joinDate: new Date().toISOString().split('T')[0],
   status: 'active',
 };
@@ -70,7 +71,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
         if (result) {
           toast({
             title: 'Employee Updated',
-            description: `${formData.name} has been updated successfully.`,
+            description: `${formData.firstName} ${formData.lastName} has been updated successfully.`,
           });
           onSave();
         }
@@ -80,7 +81,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
         if (result) {
           toast({
             title: 'Employee Added',
-            description: `${formData.name} has been added successfully.`,
+            description: `${formData.firstName} ${formData.lastName} has been added successfully.`,
           });
           setFormData(defaultEmployee);
           onSave();
@@ -107,11 +108,22 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
+              <Label htmlFor="firstName">First Name</Label>
               <Input
-                id="name"
-                name="name"
-                value={formData.name}
+                id="firstName"
+                name="firstName"
+                value={formData.firstName}
+                onChange={handleChange}
+                required
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input
+                id="lastName"
+                name="lastName"
+                value={formData.lastName}
                 onChange={handleChange}
                 required
               />

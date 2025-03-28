@@ -45,6 +45,13 @@ export type Database = {
             referencedRelation: "employees"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "attendance_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees_view"
+            referencedColumns: ["id"]
+          },
         ]
       }
       departments: {
@@ -70,8 +77,10 @@ export type Database = {
           created_at: string
           department_id: string | null
           email: string | null
+          first_name: string | null
           id: string
           join_date: string
+          last_name: string | null
           name: string
           phone: string | null
           position: string | null
@@ -82,8 +91,10 @@ export type Database = {
           created_at?: string
           department_id?: string | null
           email?: string | null
+          first_name?: string | null
           id?: string
           join_date?: string
+          last_name?: string | null
           name: string
           phone?: string | null
           position?: string | null
@@ -94,8 +105,10 @@ export type Database = {
           created_at?: string
           department_id?: string | null
           email?: string | null
+          first_name?: string | null
           id?: string
           join_date?: string
+          last_name?: string | null
           name?: string
           phone?: string | null
           position?: string | null
@@ -114,7 +127,31 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      employees_view: {
+        Row: {
+          created_at: string | null
+          department: string | null
+          department_id: string | null
+          email: string | null
+          first_name: string | null
+          id: string | null
+          join_date: string | null
+          last_name: string | null
+          phone: string | null
+          position: string | null
+          status: string | null
+          updated_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employees_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       [_ in never]: never
