@@ -43,12 +43,14 @@ interface EmployeeTableProps {
   employees: Employee[];
   onDelete: (id: string) => void;
   onEdit: (employee: Employee) => void;
+  loading?: boolean;
 }
 
 const EmployeeTable: React.FC<EmployeeTableProps> = ({ 
   employees, 
   onDelete, 
-  onEdit 
+  onEdit,
+  loading = false
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -107,7 +109,15 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredEmployees.length === 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center h-24">
+                  <div className="flex justify-center">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : filteredEmployees.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center h-24">
                   No employees found

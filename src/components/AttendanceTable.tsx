@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Table, 
   TableBody, 
@@ -25,21 +25,47 @@ import { getAttendanceRecords } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 
 interface AttendanceTableProps {
-  attendanceRecords?: Attendance[];
+  attendanceRecords?: Attendance[] | Promise<Attendance[]>;
 }
 
 const AttendanceTable: React.FC<AttendanceTableProps> = ({ 
-  attendanceRecords = getAttendanceRecords() 
+  attendanceRecords: propAttendanceRecords
 }) => {
   const today = new Date().toISOString().split('T')[0];
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [department, setDepartment] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [departments, setDepartments] = useState<string[]>(['all']);
+  const [records, setRecords] = useState<Attendance[]>([]);
+  const [loading, setLoading] = useState(true);
   
-  const departments = ['all', ...getDepartments()];
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch departments
+        const deptData = await getDepartments();
+        setDepartments(['all', ...deptData]);
+        
+        // Fetch attendance records if not provided as props
+        let attendanceData: Attendance[];
+        if (propAttendanceRecords) {
+          attendanceData = await Promise.resolve(propAttendanceRecords);
+        } else {
+          attendanceData = await getAttendanceRecords();
+        }
+        setRecords(attendanceData);
+      } catch (error) {
+        console.error('Error loading attendance data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchData();
+  }, [propAttendanceRecords]);
   
-  const filteredRecords = attendanceRecords.filter(record => {
+  const filteredRecords = records.filter(record => {
     const matchesDate = record.date >= startDate && record.date <= endDate;
     const matchesDepartment = department === 'all' || record.employeeName.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesSearch = searchTerm === '' || 
@@ -163,7 +189,15 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRecords.length === 0 ? (
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center h-24">
+                      <div className="flex justify-center">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : filteredRecords.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center h-24">
                       No attendance records found
