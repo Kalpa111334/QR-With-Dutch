@@ -1,6 +1,8 @@
 import { supabase } from '../integrations/supabase/client';
 import { Employee } from '../types';
 import { toast } from '@/components/ui/use-toast';
+import * as XLSX from 'xlsx';
+import Papa from 'papaparse';
 
 export const getEmployees = async (): Promise<Employee[]> => {
   try {
@@ -263,36 +265,97 @@ export const getDepartments = async (): Promise<string[]> => {
   }
 };
 
-// Adding the missing bulkImportEmployees function
 export const bulkImportEmployees = async (
   file: File,
   onProgress?: (progress: number) => void
 ): Promise<{ total: number; success: number; failed: number; errors: string[] }> => {
   try {
-    // Simulate file processing for now
-    // In a real implementation, you would parse the CSV/XLSX file and process it
-    
-    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-    
-    // Simulate some processing time
-    await delay(1000);
-    
+    if (onProgress) onProgress(10);
+    const fileData = await parseFileToEmployeeData(file);
     if (onProgress) onProgress(30);
-    await delay(500);
-    if (onProgress) onProgress(60);
-    await delay(500);
-    if (onProgress) onProgress(90);
-    await delay(500);
-    if (onProgress) onProgress(100);
     
-    // In a real implementation, this would be the actual result
-    // For now, return a simulated success result
-    return {
-      total: 5,
-      success: 4,
-      failed: 1,
-      errors: ["Row 3: Invalid email format for john@example"]
+    const results = {
+      total: fileData.length,
+      success: 0,
+      failed: 0,
+      errors: [] as string[]
     };
+    
+    // Get all existing departments for validation
+    const existingDepartments = await getDepartments();
+    if (onProgress) onProgress(40);
+    
+    // Process each employee row
+    for (let i = 0; i < fileData.length; i++) {
+      const row = fileData[i];
+      const rowIndex = i + 2; // +2 because of 0-indexing and header row
+      
+      try {
+        // Validate required fields
+        if (!row.firstName) {
+          results.failed++;
+          results.errors.push(`Row ${rowIndex}: Missing first name`);
+          continue;
+        }
+        
+        if (!row.lastName) {
+          results.failed++;
+          results.errors.push(`Row ${rowIndex}: Missing last name`);
+          continue;
+        }
+        
+        if (!row.email) {
+          results.failed++;
+          results.errors.push(`Row ${rowIndex}: Missing email`);
+          continue;
+        }
+        
+        if (!row.department) {
+          results.failed++;
+          results.errors.push(`Row ${rowIndex}: Missing department`);
+          continue;
+        }
+        
+        // Validate department exists
+        if (!existingDepartments.includes(row.department)) {
+          results.failed++;
+          results.errors.push(`Row ${rowIndex}: Department "${row.department}" does not exist`);
+          continue;
+        }
+        
+        // Add employee
+        const result = await addEmployee({
+          firstName: row.firstName,
+          lastName: row.lastName,
+          email: row.email,
+          department: row.department,
+          position: row.position || '',
+          phone: row.phone || '',
+          joinDate: row.joinDate || new Date().toISOString().split('T')[0],
+          status: (row.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+          name: `${row.firstName} ${row.lastName}`
+        });
+        
+        if (result) {
+          results.success++;
+        } else {
+          results.failed++;
+          results.errors.push(`Row ${rowIndex}: Failed to add employee (${row.firstName} ${row.lastName})`);
+        }
+      } catch (error) {
+        results.failed++;
+        results.errors.push(`Row ${rowIndex}: ${(error as Error).message}`);
+      }
+      
+      // Update progress periodically
+      if (onProgress) {
+        const progressValue = Math.floor(40 + ((i + 1) / fileData.length) * 50);
+        onProgress(progressValue);
+      }
+    }
+    
+    if (onProgress) onProgress(100);
+    return results;
   } catch (error) {
     console.error('Error processing file:', error);
     return {
@@ -303,3 +366,64 @@ export const bulkImportEmployees = async (
     };
   }
 };
+
+// Helper function to parse either CSV or XLSX files
+async function parseFileToEmployeeData(file: File): Promise<Partial<Employee>[]> {
+  return new Promise((resolve, reject) => {
+    if (file.name.endsWith('.csv')) {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          try {
+            const employees = results.data.map(mapRowToEmployee);
+            resolve(employees);
+          } catch (err) {
+            reject(new Error(`Failed to parse CSV: ${err}`));
+          }
+        },
+        error: (error) => {
+          reject(new Error(`CSV parsing error: ${error}`));
+        }
+      });
+    } else if (file.name.endsWith('.xlsx')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          
+          // Get first sheet
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          
+          // Convert to JSON
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          const employees = jsonData.map(mapRowToEmployee);
+          resolve(employees);
+        } catch (err) {
+          reject(new Error(`Failed to parse Excel file: ${err}`));
+        }
+      };
+      reader.onerror = () => reject(new Error('Error reading Excel file'));
+      reader.readAsArrayBuffer(file);
+    } else {
+      reject(new Error('Unsupported file format. Please use CSV or XLSX.'));
+    }
+  });
+}
+
+// Map a row from the parsed file to an Employee object
+function mapRowToEmployee(row: any): Partial<Employee> {
+  // Handle different possible column names from import files
+  return {
+    firstName: row.firstName || row['First Name'] || row.first_name || row['First name'] || '',
+    lastName: row.lastName || row['Last Name'] || row.last_name || row['Last name'] || '',
+    email: row.email || row.Email || '',
+    department: row.department || row.Department || '',
+    position: row.position || row.Position || row.title || row.Title || '',
+    phone: row.phone || row.Phone || row.phoneNumber || row['Phone Number'] || '',
+    joinDate: row.joinDate || row['Join Date'] || row.join_date || '',
+    status: row.status || row.Status || 'active'
+  };
+}
