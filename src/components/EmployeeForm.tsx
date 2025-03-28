@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +22,7 @@ const defaultEmployee: Omit<Employee, 'id'> = {
   phone: '',
   joinDate: new Date().toISOString().split('T')[0],
   status: 'active',
+  name: '', // Add default name property
 };
 
 const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {

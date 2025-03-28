@@ -40,6 +40,7 @@ export const getEmployees = async (): Promise<Employee[]> => {
       position: emp.position || '',
       joinDate: emp.join_date,
       status: emp.status as 'active' | 'inactive',
+      name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(), // Ensure name is always set
     }));
   } catch (error) {
     console.error('Error fetching employees:', error);
@@ -103,6 +104,7 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
       position: data.position || '',
       joinDate: data.join_date,
       status: data.status as 'active' | 'inactive',
+      name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
     };
   } catch (error) {
     console.error('Error adding employee:', error);
@@ -164,10 +166,11 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<Employe
       lastName: data.last_name || '',
       email: data.email || '',
       department: updatedEmployee.department,
-      phone: updatedEmployee.phone || '',
-      position: updatedEmployee.position || '',
+      phone: data.phone || '',
+      position: data.position || '',
       joinDate: data.join_date,
       status: data.status as 'active' | 'inactive',
+      name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
     };
   } catch (error) {
     console.error('Error updating employee:', error);
@@ -233,6 +236,7 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
       position: data.position || '',
       joinDate: data.join_date,
       status: data.status as 'active' | 'inactive',
+      name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
     };
   } catch (error) {
     console.error('Error fetching employee:', error);

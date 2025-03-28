@@ -9,6 +9,8 @@ export interface Employee {
   position: string;
   joinDate: string;
   status: 'active' | 'inactive';
+  // Add a computed name property for backward compatibility
+  name?: string;
 }
 
 export interface Attendance {
