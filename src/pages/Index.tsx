@@ -10,20 +10,45 @@ import EmployeeForm from '@/components/EmployeeForm';
 import QRScanner from '@/components/QRScanner';
 import AttendanceTable from '@/components/AttendanceTable';
 import Dashboard from '@/components/Dashboard';
+import { useToast } from '@/components/ui/use-toast';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
   
   useEffect(() => {
-    // Load employees from local storage
-    setEmployees(getEmployees());
-  }, []);
+    // Load employees from Supabase
+    const fetchEmployees = async () => {
+      setLoading(true);
+      try {
+        const data = await getEmployees();
+        setEmployees(data);
+      } catch (error) {
+        console.error('Error fetching employees:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load employees',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchEmployees();
+  }, [toast]);
   
-  const refreshEmployees = () => {
-    setEmployees(getEmployees());
+  const refreshEmployees = async () => {
+    try {
+      const data = await getEmployees();
+      setEmployees(data);
+    } catch (error) {
+      console.error('Error refreshing employees:', error);
+    }
   };
   
   const handleAddEmployee = () => {
@@ -38,9 +63,15 @@ const Index = () => {
     setActiveTab('employees');
   };
   
-  const handleDeleteEmployee = (id: string) => {
-    deleteEmployee(id);
-    refreshEmployees();
+  const handleDeleteEmployee = async (id: string) => {
+    const success = await deleteEmployee(id);
+    if (success) {
+      toast({
+        title: 'Employee Deleted',
+        description: 'Employee has been removed successfully',
+      });
+      await refreshEmployees();
+    }
   };
   
   const handleFormClose = () => {
@@ -107,7 +138,8 @@ const Index = () => {
             <EmployeeTable 
               employees={employees} 
               onEdit={handleEditEmployee} 
-              onDelete={handleDeleteEmployee} 
+              onDelete={handleDeleteEmployee}
+              loading={loading}
             />
           )}
         </TabsContent>

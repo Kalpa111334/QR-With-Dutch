@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -49,16 +48,16 @@ const QRScanner: React.FC = () => {
     };
   }, [toast]);
 
-  const processQRCode = useCallback((employeeData: any) => {
+  const processQRCode = useCallback(async (employeeData: any) => {
     try {
       // Add attendance record
-      const attendance = addAttendanceRecord(employeeData.id);
+      const attendance = await addAttendanceRecord(employeeData.id);
       
       if (!attendance) {
         throw new Error("Failed to record attendance");
       }
       
-      const employee = getEmployeeById(employeeData.id);
+      const employee = await getEmployeeById(employeeData.id);
       
       if (!employee) {
         throw new Error("Employee not found");

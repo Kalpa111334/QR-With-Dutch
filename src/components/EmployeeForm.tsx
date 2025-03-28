@@ -29,6 +29,7 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
     ...defaultEmployee,
   });
   const [existingDepartments, setExistingDepartments] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -36,7 +37,17 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
       setFormData(employee);
     }
     
-    setExistingDepartments(getDepartments());
+    // Fetch departments from Supabase
+    const fetchDepartments = async () => {
+      try {
+        const departments = await getDepartments();
+        setExistingDepartments(departments);
+      } catch (error) {
+        console.error('Error fetching departments:', error);
+      }
+    };
+    
+    fetchDepartments();
   }, [employee]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,32 +59,42 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
     try {
       if (employee?.id) {
-        updateEmployee({ ...formData, id: employee.id });
-        toast({
-          title: 'Employee Updated',
-          description: `${formData.name} has been updated successfully.`,
-        });
+        // Update existing employee
+        const result = await updateEmployee({ ...formData, id: employee.id });
+        if (result) {
+          toast({
+            title: 'Employee Updated',
+            description: `${formData.name} has been updated successfully.`,
+          });
+          onSave();
+        }
       } else {
-        addEmployee(formData as Employee);
-        toast({
-          title: 'Employee Added',
-          description: `${formData.name} has been added successfully.`,
-        });
-        setFormData(defaultEmployee);
+        // Add new employee
+        const result = await addEmployee(formData as Employee);
+        if (result) {
+          toast({
+            title: 'Employee Added',
+            description: `${formData.name} has been added successfully.`,
+          });
+          setFormData(defaultEmployee);
+          onSave();
+        }
       }
-      
-      onSave();
     } catch (error) {
+      console.error('Error saving employee:', error);
       toast({
         title: 'Error',
         description: 'There was an error saving the employee.',
         variant: 'destructive',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -123,14 +144,6 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
                       {dept}
                     </SelectItem>
                   ))}
-                  <SelectItem value="IT">IT</SelectItem>
-                  <SelectItem value="HR">HR</SelectItem>
-                  <SelectItem value="Finance">Finance</SelectItem>
-                  <SelectItem value="Marketing">Marketing</SelectItem>
-                  <SelectItem value="Operations">Operations</SelectItem>
-                  <SelectItem value="Sales">Sales</SelectItem>
-                  <SelectItem value="Engineering">Engineering</SelectItem>
-                  <SelectItem value="Customer Support">Customer Support</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -187,11 +200,18 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
           </div>
           
           <div className="flex justify-end space-x-2 pt-4">
-            <Button type="button" variant="outline" onClick={onSave}>
+            <Button type="button" variant="outline" onClick={onSave} disabled={loading}>
               Cancel
             </Button>
-            <Button type="submit">
-              {employee?.id ? 'Update' : 'Add'} Employee
+            <Button type="submit" disabled={loading}>
+              {loading ? (
+                <span className="flex items-center">
+                  <span className="animate-spin mr-2 h-4 w-4 border-2 border-current border-t-transparent rounded-full"></span>
+                  Processing...
+                </span>
+              ) : (
+                `${employee?.id ? 'Update' : 'Add'} Employee`
+              )}
             </Button>
           </div>
         </form>

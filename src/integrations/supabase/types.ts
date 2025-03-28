@@ -9,7 +9,109 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      attendance: {
+        Row: {
+          check_in_time: string
+          check_out_time: string | null
+          created_at: string
+          date: string
+          employee_id: string
+          id: string
+          status: string
+        }
+        Insert: {
+          check_in_time?: string
+          check_out_time?: string | null
+          created_at?: string
+          date?: string
+          employee_id: string
+          id?: string
+          status?: string
+        }
+        Update: {
+          check_in_time?: string
+          check_out_time?: string | null
+          created_at?: string
+          date?: string
+          employee_id?: string
+          id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      departments: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      employees: {
+        Row: {
+          created_at: string
+          department_id: string | null
+          email: string | null
+          id: string
+          join_date: string
+          name: string
+          phone: string | null
+          position: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          department_id?: string | null
+          email?: string | null
+          id?: string
+          join_date?: string
+          name: string
+          phone?: string | null
+          position?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          department_id?: string | null
+          email?: string | null
+          id?: string
+          join_date?: string
+          name?: string
+          phone?: string | null
+          position?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employees_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
