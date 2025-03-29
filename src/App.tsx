@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import LandingPage from "./components/LandingPage";
+import { setupAutoReportScheduling } from "./utils/attendanceUtils";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,9 @@ const App = () => {
     if (hasEntered === 'true') {
       setShowApp(true);
     }
+    
+    // Set up automatic report scheduling when the app loads
+    setupAutoReportScheduling();
   }, []);
 
   const handleGetStarted = () => {

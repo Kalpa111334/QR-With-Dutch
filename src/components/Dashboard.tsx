@@ -1,18 +1,30 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { getAttendanceRecords } from '@/utils/attendanceUtils';
+import { getAttendanceRecords, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary } from '@/utils/attendanceUtils';
 import { getEmployees } from '@/utils/employeeUtils';
-import { User, Users, Clock, CheckCircle, UploadCloud } from 'lucide-react';
+import { User, Users, Clock, CheckCircle, UploadCloud, Share2 } from 'lucide-react';
 import { Attendance, Employee } from '@/types';
 import { Button } from '@/components/ui/button';
 import BulkEmployeeUpload from './BulkEmployeeUpload';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { toast } from '@/components/ui/use-toast';
 
 const Dashboard: React.FC = () => {
   const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  
+  // Admin contact settings
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [sendMethod, setSendMethod] = useState<'whatsapp' | 'sms'>('whatsapp');
+  const [isAutoShareEnabled, setIsAutoShareEnabled] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
   
   const today = new Date().toISOString().split('T')[0];
   
@@ -20,13 +32,19 @@ const Dashboard: React.FC = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [attendanceData, employeesData] = await Promise.all([
+        const [attendanceData, employeesData, adminSettings] = await Promise.all([
           getAttendanceRecords(),
-          getEmployees()
+          getEmployees(),
+          getAdminContactInfo()
         ]);
         
         setAttendanceRecords(attendanceData);
         setEmployees(employeesData);
+        
+        // Set admin settings
+        setPhoneNumber(adminSettings.phoneNumber);
+        setSendMethod(adminSettings.sendMethod);
+        setIsAutoShareEnabled(adminSettings.isAutoShareEnabled);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -55,6 +73,52 @@ const Dashboard: React.FC = () => {
     };
   }, [attendanceRecords, employees, today]);
 
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    
+    try {
+      const success = await saveAdminContactInfo(
+        phoneNumber,
+        sendMethod,
+        isAutoShareEnabled
+      );
+      
+      if (success) {
+        toast({
+          title: 'Settings saved',
+          description: 'Automatic sharing settings have been updated',
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to save settings',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+  
+  const handleShareNow = async () => {
+    const result = await autoShareAttendanceSummary();
+    
+    if (!result) {
+      toast({
+        title: 'Sharing failed',
+        description: 'Please check your settings and try again',
+        variant: 'destructive',
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -71,17 +135,103 @@ const Dashboard: React.FC = () => {
     return <BulkEmployeeUpload onComplete={handleBulkUploadComplete} />;
   }
 
+  if (showSettings) {
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-semibold">Automatic Sharing Settings</h2>
+          <Button 
+            variant="outline" 
+            onClick={() => setShowSettings(false)}
+          >
+            Back to Dashboard
+          </Button>
+        </div>
+        
+        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 border-none shadow-md">
+          <CardHeader>
+            <CardTitle>Configure Automatic Attendance Reports</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-3">
+              <Label htmlFor="phone-number">Admin Phone Number</Label>
+              <Input 
+                id="phone-number" 
+                placeholder="e.g. +1234567890" 
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+              />
+              <p className="text-sm text-muted-foreground">
+                Enter the phone number including country code (e.g., +1 for US)
+              </p>
+            </div>
+            
+            <div className="space-y-3">
+              <Label>Sharing Method</Label>
+              <RadioGroup value={sendMethod} onValueChange={(value) => setSendMethod(value as 'whatsapp' | 'sms')}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="whatsapp" id="whatsapp" />
+                  <Label htmlFor="whatsapp">WhatsApp</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="sms" id="sms" />
+                  <Label htmlFor="sms">SMS</Label>
+                </div>
+              </RadioGroup>
+            </div>
+            
+            <div className="flex items-center space-x-2 pt-4">
+              <Switch 
+                id="auto-share" 
+                checked={isAutoShareEnabled}
+                onCheckedChange={setIsAutoShareEnabled}
+              />
+              <Label htmlFor="auto-share">Enable Automatic Daily Sharing (at 6:00 PM)</Label>
+            </div>
+            
+            <div className="flex space-x-2 pt-4">
+              <Button
+                className="flex-1"
+                onClick={handleSaveSettings}
+                disabled={savingSettings}
+              >
+                {savingSettings ? 'Saving...' : 'Save Settings'}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleShareNow}
+                disabled={!phoneNumber || phoneNumber.length < 10}
+              >
+                Share Now (Test)
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
         <h2 className="text-2xl font-semibold">Dashboard Overview</h2>
-        <Button 
-          onClick={() => setShowBulkUpload(true)}
-          className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white shadow-md transition-all duration-300"
-        >
-          <UploadCloud size={18} />
-          <span>Bulk Import Employees</span>
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            onClick={() => setShowSettings(true)}
+            className="flex items-center gap-2 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white shadow-md transition-all duration-300"
+          >
+            <Share2 size={18} />
+            <span>Auto-Share Settings</span>
+          </Button>
+          <Button 
+            onClick={() => setShowBulkUpload(true)}
+            className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white shadow-md transition-all duration-300"
+          >
+            <UploadCloud size={18} />
+            <span>Bulk Import</span>
+          </Button>
+        </div>
       </div>
       
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

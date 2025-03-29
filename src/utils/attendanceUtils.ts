@@ -1,3 +1,4 @@
+
 import { supabase } from '../integrations/supabase/client';
 import { Attendance, Employee } from '../types';
 import { getEmployeeById } from './employeeUtils';
@@ -484,4 +485,20 @@ export const shouldSendDailyReport = (): boolean => {
   
   // Send report at 6 PM (18:00)
   return hour === 18;
+};
+
+// Set up automatic report scheduling
+export const setupAutoReportScheduling = (): void => {
+  // Check if we should run the auto-share every 5 minutes
+  setInterval(async () => {
+    if (shouldSendDailyReport()) {
+      // Check if auto-sharing is enabled before attempting to share
+      const { isAutoShareEnabled } = await getAdminContactInfo();
+      
+      if (isAutoShareEnabled) {
+        console.log('Auto-sharing daily attendance report...');
+        await autoShareAttendanceSummary();
+      }
+    }
+  }, 5 * 60 * 1000); // Check every 5 minutes
 };
