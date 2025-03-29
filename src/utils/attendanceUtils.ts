@@ -1,4 +1,3 @@
-
 import { supabase } from '../integrations/supabase/client';
 import { Attendance, Employee } from '../types';
 import { getEmployeeById } from './employeeUtils';
@@ -319,4 +318,170 @@ export const getAttendanceByDepartment = async (
     console.error('Error fetching department attendance:', error);
     return [];
   }
+};
+
+// Generate a formatted summary text for attendance records
+export const generateAttendanceSummaryText = (
+  date: Date,
+  attendanceRecords: Attendance[]
+): string => {
+  const dateStr = new Intl.DateTimeFormat('en-US', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  }).format(date);
+  
+  let summary = `*Attendance Summary for ${dateStr}*\n\n`;
+  
+  const present = attendanceRecords.length;
+  const late = attendanceRecords.filter(r => r.status === 'late').length;
+  const checkedOut = attendanceRecords.filter(r => r.checkOutTime).length;
+  
+  summary += `Total Present: ${present}\n`;
+  summary += `On Time: ${present - late}\n`;
+  summary += `Late Arrivals: ${late}\n`;
+  summary += `Checked Out: ${checkedOut}\n\n`;
+  
+  summary += `*Employee Details:*\n`;
+  attendanceRecords.forEach((record, index) => {
+    const checkinTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const checkoutTime = record.checkOutTime 
+      ? new Date(record.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : 'Not checked out';
+    
+    summary += `${index + 1}. ${record.employeeName} - ${record.status === 'late' ? '⚠️ Late' : '✅ On Time'}\n`;
+    summary += `   In: ${checkinTime} | Out: ${checkoutTime}\n`;
+  });
+  
+  return summary;
+};
+
+// Get the saved admin contact information
+export const getAdminContactInfo = async (): Promise<{
+  phoneNumber: string;
+  sendMethod: 'whatsapp' | 'sms';
+  isAutoShareEnabled: boolean;
+}> => {
+  try {
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('*')
+      .eq('setting_type', 'contact_info')
+      .single();
+    
+    if (error) {
+      console.error('Error fetching admin contact info:', error);
+      return {
+        phoneNumber: '',
+        sendMethod: 'whatsapp',
+        isAutoShareEnabled: false
+      };
+    }
+    
+    return {
+      phoneNumber: data.phone_number || '',
+      sendMethod: data.send_method || 'whatsapp',
+      isAutoShareEnabled: data.auto_share_enabled || false
+    };
+  } catch (error) {
+    console.error('Error getting admin contact info:', error);
+    return {
+      phoneNumber: '',
+      sendMethod: 'whatsapp',
+      isAutoShareEnabled: false
+    };
+  }
+};
+
+// Save the admin contact information
+export const saveAdminContactInfo = async (
+  phoneNumber: string,
+  sendMethod: 'whatsapp' | 'sms',
+  isAutoShareEnabled: boolean
+): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('admin_settings')
+      .upsert({
+        setting_type: 'contact_info',
+        phone_number: phoneNumber,
+        send_method: sendMethod,
+        auto_share_enabled: isAutoShareEnabled,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'setting_type'
+      });
+    
+    if (error) {
+      console.error('Error saving admin contact info:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error saving admin contact info:', error);
+    return false;
+  }
+};
+
+// Automatically share attendance summary
+export const autoShareAttendanceSummary = async (): Promise<boolean> => {
+  try {
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date();
+    const dateStr = today.toISOString().split('T')[0];
+    
+    // Get today's attendance records
+    const attendanceRecords = await getDailyAttendance(dateStr);
+    
+    // Get admin contact information
+    const { phoneNumber, sendMethod, isAutoShareEnabled } = await getAdminContactInfo();
+    
+    // Check if auto-sharing is enabled and we have a phone number
+    if (!isAutoShareEnabled || !phoneNumber) {
+      console.log('Auto-sharing is disabled or no phone number found');
+      return false;
+    }
+    
+    // Clean the phone number to keep only digits
+    const cleanNumber = phoneNumber.replace(/\D/g, '');
+    
+    if (cleanNumber.length < 10) {
+      console.error('Invalid phone number');
+      return false;
+    }
+    
+    // Generate the summary text
+    const summaryText = generateAttendanceSummaryText(today, attendanceRecords);
+    const encodedSummary = encodeURIComponent(summaryText);
+    
+    // Create the sharing URL
+    let sharingUrl = '';
+    if (sendMethod === 'whatsapp') {
+      sharingUrl = `https://wa.me/${cleanNumber}?text=${encodedSummary}`;
+    } else {
+      sharingUrl = `sms:${cleanNumber}?body=${encodedSummary}`;
+    }
+    
+    // Use window.open to open the sharing URL in a new window/tab
+    // Note: This approach will work when the function is called in a browser environment
+    if (typeof window !== 'undefined') {
+      window.open(sharingUrl, '_blank');
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error auto-sharing attendance summary:', error);
+    return false;
+  }
+};
+
+// Check if it's time to send the daily report (e.g., at 6 PM every day)
+export const shouldSendDailyReport = (): boolean => {
+  const now = new Date();
+  const hour = now.getHours();
+  
+  // Send report at 6 PM (18:00)
+  return hour === 18;
 };

@@ -1,15 +1,34 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { Attendance } from '@/types';
-import { getAttendanceRecords } from '@/utils/attendanceUtils';
-import { CalendarIcon, Send, Phone, MessageSquare } from 'lucide-react';
+import { 
+  getAttendanceRecords, 
+  generateAttendanceSummaryText,
+  getAdminContactInfo,
+  saveAdminContactInfo,
+  autoShareAttendanceSummary
+} from '@/utils/attendanceUtils';
+import { CalendarIcon, Send, Phone, MessageSquare, Clock, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/components/ui/switch';
+import { Label } from "@/components/ui/label";
+import { 
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage 
+} from "@/components/ui/form";
+import { useForm } from "react-hook-form";
 
 const AttendanceSummaryShare: React.FC = () => {
   const [date, setDate] = useState<Date>(new Date());
@@ -17,6 +36,8 @@ const AttendanceSummaryShare: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [sendingMethod, setSendingMethod] = useState<'whatsapp' | 'sms'>('whatsapp');
+  const [autoShareEnabled, setAutoShareEnabled] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -43,32 +64,47 @@ const AttendanceSummaryShare: React.FC = () => {
     fetchAttendance();
   }, [date, toast]);
 
-  const generateSummaryText = () => {
-    const dateStr = format(date, 'dd MMM yyyy');
-    let summary = `*Attendance Summary for ${dateStr}*\n\n`;
-    
-    const present = attendanceRecords.length;
-    const late = attendanceRecords.filter(r => r.status === 'late').length;
-    const checkedOut = attendanceRecords.filter(r => r.checkOutTime).length;
-    
-    summary += `Total Present: ${present}\n`;
-    summary += `On Time: ${present - late}\n`;
-    summary += `Late Arrivals: ${late}\n`;
-    summary += `Checked Out: ${checkedOut}\n\n`;
-    
-    summary += `*Employee Details:*\n`;
-    attendanceRecords.forEach((record, index) => {
-      const checkinTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const checkoutTime = record.checkOutTime 
-        ? new Date(record.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : 'Not checked out';
+  useEffect(() => {
+    // Load admin contact information
+    const loadAdminContactInfo = async () => {
+      const contactInfo = await getAdminContactInfo();
+      setPhoneNumber(contactInfo.phoneNumber);
+      setSendingMethod(contactInfo.sendMethod);
+      setAutoShareEnabled(contactInfo.isAutoShareEnabled);
+    };
+
+    loadAdminContactInfo();
+  }, []);
+
+  // Setup auto-sharing interval checker
+  useEffect(() => {
+    // Check every 5 minutes if it's time to send the report
+    const intervalId = setInterval(() => {
+      const now = new Date();
+      const hour = now.getHours();
+      const minute = now.getMinutes();
       
-      summary += `${index + 1}. ${record.employeeName} - ${record.status === 'late' ? '⚠️ Late' : '✅ On Time'}\n`;
-      summary += `   In: ${checkinTime} | Out: ${checkoutTime}\n`;
-    });
-    
-    return encodeURIComponent(summary);
-  };
+      // Send report at 6 PM (18:00)
+      if (hour === 18 && minute >= 0 && minute < 5) {
+        if (autoShareEnabled && phoneNumber) {
+          autoShareAttendanceSummary()
+            .then(success => {
+              if (success) {
+                toast({
+                  title: 'Auto-Share Success',
+                  description: `Attendance summary automatically shared via ${sendingMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}`,
+                });
+              }
+            })
+            .catch(err => {
+              console.error('Error in auto-sharing:', err);
+            });
+        }
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+
+    return () => clearInterval(intervalId);
+  }, [autoShareEnabled, phoneNumber, sendingMethod, toast]);
 
   const handleShare = () => {
     if (!phoneNumber) {
@@ -92,7 +128,7 @@ const AttendanceSummaryShare: React.FC = () => {
       return;
     }
 
-    const summaryText = generateSummaryText();
+    const summaryText = encodeURIComponent(generateAttendanceSummaryText(date, attendanceRecords));
     
     if (sendingMethod === 'whatsapp') {
       // WhatsApp URL scheme
@@ -108,6 +144,43 @@ const AttendanceSummaryShare: React.FC = () => {
     });
   };
 
+  const saveSettings = async () => {
+    setLoading(true);
+    try {
+      const success = await saveAdminContactInfo(
+        phoneNumber,
+        sendingMethod,
+        autoShareEnabled
+      );
+      
+      if (success) {
+        setSettingsSaved(true);
+        toast({
+          title: 'Settings Saved',
+          description: `Admin contact information saved successfully. Auto-sharing is ${autoShareEnabled ? 'enabled' : 'disabled'}.`,
+        });
+
+        // Reset the saved status after 3 seconds
+        setTimeout(() => setSettingsSaved(false), 3000);
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to save admin contact information',
+          variant: 'destructive'
+        });
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred while saving settings',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Card className="w-full max-w-2xl mx-auto bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/40 dark:to-purple-900/40 shadow-lg">
       <CardHeader>
@@ -116,12 +189,12 @@ const AttendanceSummaryShare: React.FC = () => {
           Share Attendance Summary
         </CardTitle>
         <CardDescription>
-          Send today's attendance summary to supervisors via WhatsApp or SMS
+          Set up automatic daily attendance summary sharing to supervisors
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <label className="text-sm font-medium">Select Date</label>
+          <label className="text-sm font-medium">Select Date for Preview</label>
           <Popover>
             <PopoverTrigger asChild>
               <Button
@@ -144,7 +217,7 @@ const AttendanceSummaryShare: React.FC = () => {
         </div>
         
         <div className="space-y-2">
-          <label className="text-sm font-medium">Attendance Summary</label>
+          <label className="text-sm font-medium">Attendance Summary Preview</label>
           <Card className="bg-white/80 dark:bg-black/20">
             <CardContent className="p-4 max-h-60 overflow-y-auto">
               {loading ? (
@@ -195,48 +268,77 @@ const AttendanceSummaryShare: React.FC = () => {
           </Card>
         </div>
         
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Send Method</label>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant={sendingMethod === 'whatsapp' ? 'default' : 'outline'}
-              className={cn("flex-1", sendingMethod === 'whatsapp' && "bg-green-600 hover:bg-green-700")}
-              onClick={() => setSendingMethod('whatsapp')}
+        <div className="space-y-6 pt-2 border-t">
+          <h3 className="text-lg font-medium flex items-center gap-2 mt-4">
+            <Clock className="h-5 w-5" />
+            Automatic Sharing Settings
+          </h3>
+          
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Send Method</label>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={sendingMethod === 'whatsapp' ? 'default' : 'outline'}
+                className={cn("flex-1", sendingMethod === 'whatsapp' && "bg-green-600 hover:bg-green-700")}
+                onClick={() => setSendingMethod('whatsapp')}
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                WhatsApp
+              </Button>
+              <Button
+                type="button"
+                variant={sendingMethod === 'sms' ? 'default' : 'outline'}
+                className={cn("flex-1", sendingMethod === 'sms' && "bg-blue-600 hover:bg-blue-700")}
+                onClick={() => setSendingMethod('sms')}
+              >
+                <Phone className="mr-2 h-4 w-4" />
+                SMS
+              </Button>
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Admin Phone Number</label>
+            <Input 
+              value={phoneNumber} 
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              placeholder="Enter phone number with country code (e.g. +1234567890)"
+              className="bg-white dark:bg-black/20"
+            />
+            <p className="text-xs text-muted-foreground">Include country code without spaces or special characters</p>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <Switch 
+              id="auto-share" 
+              checked={autoShareEnabled}
+              onCheckedChange={setAutoShareEnabled}
+            />
+            <Label htmlFor="auto-share">Enable automatic daily sharing at 6:00 PM</Label>
+          </div>
+          
+          <div className="flex gap-3">
+            <Button 
+              onClick={saveSettings} 
+              disabled={loading} 
+              className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
             >
-              <MessageSquare className="mr-2 h-4 w-4" />
-              WhatsApp
+              <Save className="mr-2 h-4 w-4" />
+              Save Settings
+              {settingsSaved && <span className="ml-2 text-green-200">✓</span>}
             </Button>
-            <Button
-              type="button"
-              variant={sendingMethod === 'sms' ? 'default' : 'outline'}
-              className={cn("flex-1", sendingMethod === 'sms' && "bg-blue-600 hover:bg-blue-700")}
-              onClick={() => setSendingMethod('sms')}
+            
+            <Button 
+              onClick={handleShare} 
+              disabled={loading || attendanceRecords.length === 0} 
+              className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700"
             >
-              <Phone className="mr-2 h-4 w-4" />
-              SMS
+              <Send className="mr-2 h-4 w-4" />
+              Send Now
             </Button>
           </div>
         </div>
-        
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Recipient Phone Number</label>
-          <Input 
-            value={phoneNumber} 
-            onChange={(e) => setPhoneNumber(e.target.value)}
-            placeholder="Enter phone number with country code (e.g. +1234567890)"
-            className="bg-white dark:bg-black/20"
-          />
-          <p className="text-xs text-muted-foreground">Include country code without spaces or special characters</p>
-        </div>
-        
-        <Button 
-          onClick={handleShare} 
-          disabled={loading || attendanceRecords.length === 0} 
-          className="w-full bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700"
-        >
-          Send Summary
-        </Button>
       </CardContent>
     </Card>
   );
