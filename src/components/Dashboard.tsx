@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getAttendanceRecords, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary } from '@/utils/attendanceUtils';
 import { getEmployees } from '@/utils/employeeUtils';
-import { User, Users, Clock, CheckCircle, UploadCloud, Share2 } from 'lucide-react';
+import { User, Users, Clock, CheckCircle, UploadCloud, Share2, AlertTriangle } from 'lucide-react';
 import { Attendance, Employee } from '@/types';
 import { Button } from '@/components/ui/button';
 import BulkEmployeeUpload from './BulkEmployeeUpload';
@@ -12,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from '@/components/ui/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const Dashboard: React.FC = () => {
   const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
@@ -25,6 +25,7 @@ const Dashboard: React.FC = () => {
   const [sendMethod, setSendMethod] = useState<'whatsapp' | 'sms'>('whatsapp');
   const [isAutoShareEnabled, setIsAutoShareEnabled] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [sharingError, setSharingError] = useState<string | null>(null);
   
   const today = new Date().toISOString().split('T')[0];
   
@@ -75,8 +76,15 @@ const Dashboard: React.FC = () => {
 
   const handleSaveSettings = async () => {
     setSavingSettings(true);
+    setSharingError(null);
     
     try {
+      if (!phoneNumber || phoneNumber.trim().length < 10) {
+        setSharingError("Please enter a valid phone number with country code (e.g. +1234567890)");
+        setSavingSettings(false);
+        return;
+      }
+      
       const success = await saveAdminContactInfo(
         phoneNumber,
         sendMethod,
@@ -108,12 +116,35 @@ const Dashboard: React.FC = () => {
   };
   
   const handleShareNow = async () => {
-    const result = await autoShareAttendanceSummary();
+    setSharingError(null);
     
-    if (!result) {
+    if (!phoneNumber || phoneNumber.trim().length < 10) {
+      setSharingError("Please enter a valid phone number with country code (e.g. +1234567890)");
+      return;
+    }
+    
+    try {
+      const result = await autoShareAttendanceSummary();
+      
+      if (!result) {
+        setSharingError("Sharing failed. This might be due to a popup blocker or an invalid phone number. Please check your browser settings and ensure your phone number includes the country code.");
+        toast({
+          title: 'Sharing failed',
+          description: 'Please check your settings and try again',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Sharing initiated',
+          description: `Report is being shared via ${sendMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}`,
+        });
+      }
+    } catch (error) {
+      console.error('Error sharing report:', error);
+      setSharingError("An unexpected error occurred while sharing");
       toast({
-        title: 'Sharing failed',
-        description: 'Please check your settings and try again',
+        title: 'Error',
+        description: 'An unexpected error occurred while sharing',
         variant: 'destructive',
       });
     }
@@ -147,6 +178,14 @@ const Dashboard: React.FC = () => {
             Back to Dashboard
           </Button>
         </div>
+        
+        {sharingError && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Sharing Error</AlertTitle>
+            <AlertDescription>{sharingError}</AlertDescription>
+          </Alert>
+        )}
         
         <Card className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 border-none shadow-md">
           <CardHeader>
@@ -205,6 +244,16 @@ const Dashboard: React.FC = () => {
               >
                 Share Now (Test)
               </Button>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-medium mb-2">Troubleshooting</h3>
+              <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                <li>Make sure your phone number includes the country code</li>
+                <li>Check if your browser blocks popups</li>
+                <li>WhatsApp Web needs to be authenticated on your browser</li>
+                <li>SMS sharing works best on mobile devices</li>
+              </ul>
             </div>
           </CardContent>
         </Card>

@@ -462,22 +462,51 @@ export const autoShareAttendanceSummary = async (): Promise<boolean> => {
     const summaryText = generateAttendanceSummaryText(today, attendanceRecords);
     const encodedSummary = encodeURIComponent(summaryText);
     
-    // Create the sharing URL
+    // Create the sharing URL based on sharing method
     let sharingUrl = '';
     if (sendMethod === 'whatsapp') {
       sharingUrl = `https://wa.me/${cleanNumber}?text=${encodedSummary}`;
+      console.log(`WhatsApp sharing URL created: ${sharingUrl.substring(0, 50)}...`);
     } else {
       sharingUrl = `sms:${cleanNumber}?body=${encodedSummary}`;
+      console.log(`SMS sharing URL created: ${sharingUrl.substring(0, 50)}...`);
     }
     
     // Use window.open to open the sharing URL in a new window/tab
-    // Note: This approach will work when the function is called in a browser environment
     if (typeof window !== 'undefined') {
-      window.open(sharingUrl, '_blank');
-      return true;
+      // Check browser compatibility for window.open
+      try {
+        const newWindow = window.open(sharingUrl, '_blank');
+        
+        // If window.open failed (e.g., was blocked by popup blocker)
+        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+          console.error('Opening sharing window was blocked or failed');
+          // As a fallback, provide the URL for manual sharing
+          console.log('Manual sharing URL:', sharingUrl);
+          
+          // Show the URL on the page or provide a clickable link
+          const shareLink = document.createElement('a');
+          shareLink.href = sharingUrl;
+          shareLink.target = '_blank';
+          shareLink.textContent = `Share via ${sendMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}`;
+          
+          // Alternatively, copy to clipboard
+          navigator.clipboard.writeText(sharingUrl)
+            .then(() => console.log('Sharing URL copied to clipboard'))
+            .catch(err => console.error('Could not copy URL: ', err));
+            
+          return false;
+        }
+        
+        return true;
+      } catch (windowError) {
+        console.error('Error opening sharing window:', windowError);
+        return false;
+      }
+    } else {
+      console.error('Window object not available - are you running in a browser environment?');
+      return false;
     }
-    
-    return false;
   } catch (error) {
     console.error('Error auto-sharing attendance summary:', error);
     return false;
