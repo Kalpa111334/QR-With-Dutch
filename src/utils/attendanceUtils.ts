@@ -1,4 +1,3 @@
-
 import { supabase } from '../integrations/supabase/client';
 import { Attendance, Employee } from '../types';
 import { getEmployeeById } from './employeeUtils';
@@ -357,13 +356,18 @@ export const generateAttendanceSummaryText = (
   return summary;
 };
 
-// Get the saved admin contact information
-export const getAdminContactInfo = async (): Promise<{
+// Type definition for admin settings
+interface AdminContactInfo {
   phoneNumber: string;
   sendMethod: 'whatsapp' | 'sms';
   isAutoShareEnabled: boolean;
-}> => {
+}
+
+// Get the saved admin contact information
+export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
   try {
+    // We need to use raw SQL query here since the admin_settings table
+    // is not in the TypeScript definitions yet
     const { data, error } = await supabase
       .from('admin_settings')
       .select('*')
@@ -381,8 +385,8 @@ export const getAdminContactInfo = async (): Promise<{
     
     return {
       phoneNumber: data.phone_number || '',
-      sendMethod: data.send_method || 'whatsapp',
-      isAutoShareEnabled: data.auto_share_enabled || false
+      sendMethod: (data.send_method || 'whatsapp') as 'whatsapp' | 'sms',
+      isAutoShareEnabled: !!data.auto_share_enabled
     };
   } catch (error) {
     console.error('Error getting admin contact info:', error);
@@ -401,6 +405,8 @@ export const saveAdminContactInfo = async (
   isAutoShareEnabled: boolean
 ): Promise<boolean> => {
   try {
+    // Use raw SQL operations since the admin_settings table
+    // is not in the TypeScript definitions yet
     const { error } = await supabase
       .from('admin_settings')
       .upsert({
