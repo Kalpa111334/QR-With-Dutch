@@ -4,8 +4,8 @@ import { Employee } from '@/types';
 
 // Helper function to generate QR code SVG data
 const generateQRSVG = async (employee: Employee): Promise<string> => {
-  // We need to dynamically import QRCodeSVG here to use it in a non-React context
-  const { QRCodeSVG } = await import('qrcode.react');
+  // We need to dynamically import QRCode library here
+  const QRCode = await import('qrcode');
   
   // Create QR code data that includes employee ID
   const qrCodeData = JSON.stringify({
@@ -14,34 +14,24 @@ const generateQRSVG = async (employee: Employee): Promise<string> => {
     department: employee.department
   });
   
-  // Create a temporary div to render the SVG
-  const div = document.createElement('div');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '200');
-  svg.setAttribute('height', '200');
-  div.appendChild(svg);
-  
-  // Use React to render the QR code into the temporary div
-  const ReactDOM = await import('react-dom/client');
-  const root = ReactDOM.createRoot(svg);
-  root.render(
-    <QRCodeSVG
-      value={qrCodeData}
-      size={200}
-      bgColor={"#ffffff"}
-      fgColor={"#000000"}
-      level={"L"}
-      includeMargin={true}
-    />
-  );
-  
-  // Get the SVG string
-  const svgString = div.innerHTML;
-  
-  // Clean up
-  root.unmount();
-  
-  return svgString;
+  // Generate SVG string directly using QRCode library
+  try {
+    // Use QRCode.toString to generate SVG string
+    const svgString = await QRCode.toString(qrCodeData, {
+      type: 'svg',
+      width: 200,
+      margin: 1,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    
+    return svgString;
+  } catch (error) {
+    console.error('Error generating QR code:', error);
+    throw new Error('Failed to generate QR code');
+  }
 };
 
 // Generate a PNG from SVG string
