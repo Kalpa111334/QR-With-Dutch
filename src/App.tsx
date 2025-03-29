@@ -1,10 +1,10 @@
 
+import React from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useState, useEffect } from "react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import LandingPage from "./components/LandingPage";
@@ -12,11 +12,11 @@ import { setupAutoReportScheduling } from "./utils/attendanceUtils";
 
 const queryClient = new QueryClient();
 
-const App = () => {
-  const [showApp, setShowApp] = useState<boolean>(false);
+const App: React.FC = () => {
+  const [showApp, setShowApp] = React.useState<boolean>(false);
   
   // Check local storage to see if user has already entered the app
-  useEffect(() => {
+  React.useEffect(() => {
     const hasEntered = localStorage.getItem('hasEnteredApp');
     if (hasEntered === 'true') {
       setShowApp(true);
