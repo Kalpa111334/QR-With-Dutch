@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, QrCode, Users, FileText, Clock } from 'lucide-react';
+import { PlusCircle, QrCode, Users, FileText, Clock, Calendar, BarChartHorizontal } from 'lucide-react';
 import { Employee } from '@/types';
 import { getEmployees, deleteEmployee } from '@/utils/employeeUtils';
 import EmployeeTable from '@/components/EmployeeTable';
@@ -99,6 +100,22 @@ const Index = () => {
           </Button>
         </div>
       </header>
+      
+      {/* Quick Access Menu for New Features */}
+      <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Link to="/roster">
+          <Button variant="outline" className="w-full h-20 flex flex-col items-center justify-center gap-2">
+            <Calendar className="h-6 w-6" />
+            <span>Roster Management</span>
+          </Button>
+        </Link>
+        <Link to="/gate-pass">
+          <Button variant="outline" className="w-full h-20 flex flex-col items-center justify-center gap-2">
+            <BarChartHorizontal className="h-6 w-6" />
+            <span>Gate Pass System</span>
+          </Button>
+        </Link>
+      </div>
       
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid grid-cols-4 md:w-auto">

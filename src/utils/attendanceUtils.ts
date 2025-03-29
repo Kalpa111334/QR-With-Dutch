@@ -1,25 +1,41 @@
 import { supabase } from '../integrations/supabase/client';
-import { Attendance, Employee } from '../types';
-import { getEmployeeById } from './employeeUtils';
-import { toast } from '@/components/ui/use-toast';
+import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { Attendance } from '../types';
+import { toast } from '../components/ui/use-toast';
 
-export const getAttendanceRecords = async (): Promise<Attendance[]> => {
+// Admin settings interface for proper typing
+interface AdminSettings {
+  id: string;
+  setting_type: string;
+  send_method: string;
+  phone_number: string;
+  created_at: string;
+  updated_at: string;
+  auto_share_enabled: boolean;
+}
+
+// Get all attendance records
+export const getAttendance = async (): Promise<Attendance[]> => {
   try {
     const { data, error } = await supabase
       .from('attendance')
       .select(`
         id,
-        employee_id,
+        date,
         check_in_time,
         check_out_time,
-        date,
         status,
-        employees(name)
+        employee_id,
+        employees (
+          id,
+          first_name,
+          last_name
+        )
       `)
       .order('date', { ascending: false });
     
     if (error) {
-      console.error('Error fetching attendance records:', error);
+      console.error('Error fetching attendance:', error);
       return [];
     }
     
@@ -27,202 +43,35 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
     return data.map(record => ({
       id: record.id,
       employeeId: record.employee_id,
-      employeeName: record.employees?.name || '',
+      employeeName: `${record.employees?.first_name || ''} ${record.employees?.last_name || ''}`.trim(),
       checkInTime: record.check_in_time,
       checkOutTime: record.check_out_time,
-      date: record.date,
-      status: record.status as 'present' | 'late' | 'absent',
+      date: format(new Date(record.date), 'yyyy-MM-dd'),
+      status: record.status
     }));
   } catch (error) {
-    console.error('Error fetching attendance records:', error);
+    console.error('Error in getAttendance:', error);
     return [];
   }
 };
 
-export const addAttendanceRecord = async (employeeId: string): Promise<Attendance | null> => {
-  try {
-    const employee = await getEmployeeById(employeeId);
-    if (!employee) {
-      toast({
-        title: 'Error',
-        description: 'Employee not found',
-        variant: 'destructive',
-      });
-      return null;
-    }
-    
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
-    
-    // Check if employee already checked in today
-    const { data: existingRecords, error: checkError } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeId)
-      .eq('date', dateStr);
-    
-    if (checkError) {
-      console.error('Error checking attendance:', checkError);
-      return null;
-    }
-    
-    const todayRecord = existingRecords[0];
-    
-    if (todayRecord && !todayRecord.check_out_time) {
-      // Employee is checking out
-      const { data: updatedRecord, error: updateError } = await supabase
-        .from('attendance')
-        .update({ check_out_time: now.toISOString() })
-        .eq('id', todayRecord.id)
-        .select()
-        .single();
-      
-      if (updateError) {
-        console.error('Error updating attendance record:', updateError);
-        return null;
-      }
-      
-      return {
-        id: updatedRecord.id,
-        employeeId: updatedRecord.employee_id,
-        employeeName: employee.name,
-        checkInTime: updatedRecord.check_in_time,
-        checkOutTime: updatedRecord.check_out_time,
-        date: updatedRecord.date,
-        status: updatedRecord.status as 'present' | 'late' | 'absent',
-      };
-    } else if (todayRecord && todayRecord.check_out_time) {
-      // Already checked in and out today
-      toast({
-        title: 'Already Checked Out',
-        description: `${employee.name} has already checked in and out today`,
-        variant: 'default',
-      });
-      return null;
-    }
-    
-    // Employee is checking in
-    const workStartHour = 9; // 9 AM
-    const isLate = now.getHours() > workStartHour || 
-                  (now.getHours() === workStartHour && now.getMinutes() > 0);
-    
-    const { data: newRecord, error: insertError } = await supabase
-      .from('attendance')
-      .insert({
-        employee_id: employeeId,
-        check_in_time: now.toISOString(),
-        date: dateStr,
-        status: isLate ? 'late' : 'present',
-      })
-      .select()
-      .single();
-    
-    if (insertError) {
-      console.error('Error creating attendance record:', insertError);
-      return null;
-    }
-    
-    return {
-      id: newRecord.id,
-      employeeId: newRecord.employee_id,
-      employeeName: employee.name,
-      checkInTime: newRecord.check_in_time,
-      checkOutTime: newRecord.check_out_time,
-      date: newRecord.date,
-      status: newRecord.status as 'present' | 'late' | 'absent',
-    };
-  } catch (error) {
-    console.error('Error processing attendance:', error);
-    return null;
-  }
-};
-
-export const getEmployeeAttendance = async (employeeId: string): Promise<Attendance[]> => {
+// Get attendance records by date range
+export const getAttendanceByDateRange = async (startDate: string, endDate: string): Promise<Attendance[]> => {
   try {
     const { data, error } = await supabase
       .from('attendance')
       .select(`
         id,
-        employee_id,
+        date,
         check_in_time,
         check_out_time,
-        date,
         status,
-        employees(name)
-      `)
-      .eq('employee_id', employeeId)
-      .order('date', { ascending: false });
-    
-    if (error) {
-      console.error('Error fetching employee attendance:', error);
-      return [];
-    }
-    
-    return data.map(record => ({
-      id: record.id,
-      employeeId: record.employee_id,
-      employeeName: record.employees?.name || '',
-      checkInTime: record.check_in_time,
-      checkOutTime: record.check_out_time,
-      date: record.date,
-      status: record.status as 'present' | 'late' | 'absent',
-    }));
-  } catch (error) {
-    console.error('Error fetching employee attendance:', error);
-    return [];
-  }
-};
-
-export const getDailyAttendance = async (date: string): Promise<Attendance[]> => {
-  try {
-    const { data, error } = await supabase
-      .from('attendance')
-      .select(`
-        id,
         employee_id,
-        check_in_time,
-        check_out_time,
-        date,
-        status,
-        employees(name)
-      `)
-      .eq('date', date);
-    
-    if (error) {
-      console.error('Error fetching daily attendance:', error);
-      return [];
-    }
-    
-    return data.map(record => ({
-      id: record.id,
-      employeeId: record.employee_id,
-      employeeName: record.employees?.name || '',
-      checkInTime: record.check_in_time,
-      checkOutTime: record.check_out_time,
-      date: record.date,
-      status: record.status as 'present' | 'late' | 'absent',
-    }));
-  } catch (error) {
-    console.error('Error fetching daily attendance:', error);
-    return [];
-  }
-};
-
-export const getAttendanceByDateRange = async (
-  startDate: string,
-  endDate: string
-): Promise<Attendance[]> => {
-  try {
-    const { data, error } = await supabase
-      .from('attendance')
-      .select(`
-        id,
-        employee_id,
-        check_in_time,
-        check_out_time,
-        date,
-        status,
-        employees(name)
+        employees (
+          id,
+          first_name,
+          last_name
+        )
       `)
       .gte('date', startDate)
       .lte('date', endDate)
@@ -233,307 +82,398 @@ export const getAttendanceByDateRange = async (
       return [];
     }
     
+    // Transform the data to match our Attendance type
     return data.map(record => ({
       id: record.id,
       employeeId: record.employee_id,
-      employeeName: record.employees?.name || '',
+      employeeName: `${record.employees?.first_name || ''} ${record.employees?.last_name || ''}`.trim(),
       checkInTime: record.check_in_time,
       checkOutTime: record.check_out_time,
-      date: record.date,
-      status: record.status as 'present' | 'late' | 'absent',
+      date: format(new Date(record.date), 'yyyy-MM-dd'),
+      status: record.status
     }));
   } catch (error) {
-    console.error('Error fetching attendance by date range:', error);
+    console.error('Error in getAttendanceByDateRange:', error);
     return [];
   }
 };
 
-export const getAttendanceByDepartment = async (
-  department: string,
-  startDate: string,
-  endDate: string
-): Promise<Attendance[]> => {
+// Get total employee count
+export const getTotalEmployeeCount = async (): Promise<number> => {
   try {
-    // First get the department id
-    const { data: deptData, error: deptError } = await supabase
-      .from('departments')
-      .select('id')
-      .eq('name', department)
-      .single();
-    
-    if (deptError) {
-      console.error('Error finding department:', deptError);
-      return [];
-    }
-    
-    // Get employees in this department
-    const { data: empData, error: empError } = await supabase
+    const { count, error } = await supabase
       .from('employees')
-      .select('id')
-      .eq('department_id', deptData.id);
-    
-    if (empError) {
-      console.error('Error finding employees in department:', empError);
-      return [];
-    }
-    
-    const employeeIds = empData.map(emp => emp.id);
-    
-    if (employeeIds.length === 0) {
-      return [];
-    }
-    
-    // Get attendance records for these employees
-    const { data, error } = await supabase
-      .from('attendance')
-      .select(`
-        id,
-        employee_id,
-        check_in_time,
-        check_out_time,
-        date,
-        status,
-        employees(name)
-      `)
-      .in('employee_id', employeeIds)
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .order('date', { ascending: false });
+      .select('*', { count: 'exact' });
     
     if (error) {
-      console.error('Error fetching department attendance:', error);
-      return [];
+      console.error('Error fetching total employee count:', error);
+      return 0;
     }
     
-    return data.map(record => ({
-      id: record.id,
-      employeeId: record.employee_id,
-      employeeName: record.employees?.name || '',
-      checkInTime: record.check_in_time,
-      checkOutTime: record.check_out_time,
-      date: record.date,
-      status: record.status as 'present' | 'late' | 'absent',
-    }));
+    return count || 0;
   } catch (error) {
-    console.error('Error fetching department attendance:', error);
-    return [];
+    console.error('Error in getTotalEmployeeCount:', error);
+    return 0;
   }
 };
 
-// Generate a formatted summary text for attendance records
-export const generateAttendanceSummaryText = (
-  date: Date,
-  attendanceRecords: Attendance[]
-): string => {
-  const dateStr = new Intl.DateTimeFormat('en-US', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric'
-  }).format(date);
-  
-  let summary = `*Attendance Summary for ${dateStr}*\n\n`;
-  
-  const present = attendanceRecords.length;
-  const late = attendanceRecords.filter(r => r.status === 'late').length;
-  const checkedOut = attendanceRecords.filter(r => r.checkOutTime).length;
-  
-  summary += `Total Present: ${present}\n`;
-  summary += `On Time: ${present - late}\n`;
-  summary += `Late Arrivals: ${late}\n`;
-  summary += `Checked Out: ${checkedOut}\n\n`;
-  
-  summary += `*Employee Details:*\n`;
-  attendanceRecords.forEach((record, index) => {
-    const checkinTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const checkoutTime = record.checkOutTime 
-      ? new Date(record.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : 'Not checked out';
+// Record attendance check-in
+export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
+  try {
+    const now = new Date();
+    const today = format(now, 'yyyy-MM-dd');
+    const checkInTime = format(now, 'HH:mm:ss');
     
-    summary += `${index + 1}. ${record.employeeName} - ${record.status === 'late' ? '⚠️ Late' : '✅ On Time'}\n`;
-    summary += `   In: ${checkinTime} | Out: ${checkoutTime}\n`;
-  });
-  
-  return summary;
+    // Check if already checked in today
+    const { data: existingRecord, error: existingError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .single();
+    
+    if (existingError && existingError.code !== '404') {
+      console.error('Error checking existing attendance:', existingError);
+      return false;
+    }
+    
+    if (existingRecord) {
+      console.log('Employee already checked in today');
+      toast({
+        title: "Already Checked In",
+        description: "You have already checked in today.",
+      });
+      return false;
+    }
+    
+    // Get employee name
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('first_name, last_name')
+      .eq('id', employeeId)
+      .single();
+    
+    if (employeeError) {
+      console.error('Error fetching employee name:', employeeError);
+      return false;
+    }
+    
+    const employeeName = `${employeeData?.first_name || ''} ${employeeData?.last_name || ''}`.trim();
+    
+    // Insert new record
+    const { error } = await supabase
+      .from('attendance')
+      .insert({
+        employee_id: employeeId,
+        employee_name: employeeName,
+        date: today,
+        check_in_time: checkInTime,
+        status: 'present'
+      });
+    
+    if (error) {
+      console.error('Error recording attendance check-in:', error);
+      return false;
+    }
+    
+    toast({
+      title: "Checked In",
+      description: "Your attendance has been recorded.",
+    });
+    return true;
+  } catch (error) {
+    console.error('Error in recordAttendanceCheckIn:', error);
+    return false;
+  }
 };
 
-// Type definition for admin settings
-interface AdminContactInfo {
-  phoneNumber: string;
-  sendMethod: 'whatsapp' | 'sms';
-  isAutoShareEnabled: boolean;
-}
-
-// Get the saved admin contact information
-export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
+// Record attendance check-out
+export const recordAttendanceCheckOut = async (employeeId: string): Promise<boolean> => {
   try {
-    // We need to use raw SQL query here since the admin_settings table
-    // is not in the TypeScript definitions yet
+    const now = new Date();
+    const today = format(now, 'yyyy-MM-dd');
+    const checkOutTime = format(now, 'HH:mm:ss');
+    
+    // Find today's attendance record
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .single();
+    
+    if (error) {
+      console.error('Error fetching attendance record:', error);
+      return false;
+    }
+    
+    if (!data) {
+      console.log('No check-in record found for today');
+      toast({
+        title: "No Check-In Record",
+        description: "No check-in record found for today. Please check in first.",
+        variant: "destructive",
+      });
+      return false;
+    }
+    
+    if (data.check_out_time) {
+      console.log('Employee already checked out today');
+      toast({
+        title: "Already Checked Out",
+        description: "You have already checked out today.",
+      });
+      return false;
+    }
+    
+    // Update record with check-out time
+    const { error: updateError } = await supabase
+      .from('attendance')
+      .update({
+        check_out_time: checkOutTime
+      })
+      .eq('id', data.id);
+    
+    if (updateError) {
+      console.error('Error recording attendance check-out:', updateError);
+      return false;
+    }
+    
+    toast({
+      title: "Checked Out",
+      description: "Your check-out time has been recorded.",
+    });
+    return true;
+  } catch (error) {
+    console.error('Error in recordAttendanceCheckOut:', error);
+    return false;
+  }
+};
+
+// Function to get admin settings with better error handling
+export const getAdminSettings = async (): Promise<AdminSettings | null> => {
+  try {
     const { data, error } = await supabase
       .from('admin_settings')
       .select('*')
-      .eq('setting_type', 'contact_info')
+      .eq('setting_type', 'attendance_report')
       .single();
     
     if (error) {
-      console.error('Error fetching admin contact info:', error);
-      return {
-        phoneNumber: '',
-        sendMethod: 'whatsapp',
-        isAutoShareEnabled: false
-      };
+      console.error('Error fetching admin settings:', error);
+      return null;
     }
     
-    return {
-      phoneNumber: data.phone_number || '',
-      sendMethod: (data.send_method || 'whatsapp') as 'whatsapp' | 'sms',
-      isAutoShareEnabled: !!data.auto_share_enabled
-    };
+    return data as AdminSettings;
   } catch (error) {
-    console.error('Error getting admin contact info:', error);
-    return {
-      phoneNumber: '',
-      sendMethod: 'whatsapp',
-      isAutoShareEnabled: false
-    };
+    console.error('Error in getAdminSettings:', error);
+    return null;
   }
 };
 
-// Save the admin contact information
-export const saveAdminContactInfo = async (
-  phoneNumber: string,
-  sendMethod: 'whatsapp' | 'sms',
-  isAutoShareEnabled: boolean
+// Save admin settings with improved validation
+export const saveAdminSettings = async (
+  settings: {
+    send_method: string;
+    phone_number: string;
+    auto_share_enabled: boolean;
+  }
 ): Promise<boolean> => {
   try {
-    // Use raw SQL operations since the admin_settings table
-    // is not in the TypeScript definitions yet
-    const { error } = await supabase
+    // Validate phone number
+    if (settings.send_method === 'whatsapp' && !isValidPhoneNumber(settings.phone_number)) {
+      toast({
+        title: "Invalid Phone Number",
+        description: "Please enter a valid phone number including country code (e.g., +1234567890)",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    const { data, error } = await supabase
       .from('admin_settings')
       .upsert({
-        setting_type: 'contact_info',
-        phone_number: phoneNumber,
-        send_method: sendMethod,
-        auto_share_enabled: isAutoShareEnabled,
+        setting_type: 'attendance_report',
+        send_method: settings.send_method,
+        phone_number: settings.phone_number,
+        auto_share_enabled: settings.auto_share_enabled,
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'setting_type'
       });
     
     if (error) {
-      console.error('Error saving admin contact info:', error);
+      console.error('Error saving admin settings:', error);
+      toast({
+        title: "Settings Save Failed",
+        description: error.message,
+        variant: "destructive",
+      });
       return false;
     }
     
     return true;
   } catch (error) {
-    console.error('Error saving admin contact info:', error);
+    console.error('Error in saveAdminSettings:', error);
     return false;
   }
 };
 
-// Automatically share attendance summary
+// Validate phone number - basic validation for international format
+function isValidPhoneNumber(phone: string): boolean {
+  // Check if it starts with + and has 8-15 digits
+  return /^\+[0-9]{8,15}$/.test(phone);
+}
+
+// Auto share attendance summary with improved error handling
 export const autoShareAttendanceSummary = async (): Promise<boolean> => {
   try {
-    // Get today's date in YYYY-MM-DD format
+    console.log("Attempting to auto-share attendance summary...");
+    
+    // Get admin settings
+    const settings = await getAdminSettings();
+    
+    if (!settings) {
+      console.log("No admin settings found for attendance report sharing");
+      return false;
+    }
+    
+    if (!settings.auto_share_enabled) {
+      console.log("Auto-share is disabled in settings");
+      return false;
+    }
+    
+    if (!settings.phone_number || !settings.send_method) {
+      console.log("Missing phone number or send method in settings");
+      return false;
+    }
+    
+    // Get today's date
     const today = new Date();
-    const dateStr = today.toISOString().split('T')[0];
     
-    // Get today's attendance records
-    const attendanceRecords = await getDailyAttendance(dateStr);
+    // Format for displaying
+    const formattedDate = format(today, 'MMMM d, yyyy');
     
-    // Get admin contact information
-    const { phoneNumber, sendMethod, isAutoShareEnabled } = await getAdminContactInfo();
+    // Get attendance for today
+    const todayAttendance = await getAttendanceByDateRange(
+      format(today, 'yyyy-MM-dd'),
+      format(today, 'yyyy-MM-dd')
+    );
     
-    // Check if auto-sharing is enabled and we have a phone number
-    if (!isAutoShareEnabled || !phoneNumber) {
-      console.log('Auto-sharing is disabled or no phone number found');
-      return false;
-    }
+    // Create message
+    const totalEmployees = await getTotalEmployeeCount();
+    const presentCount = todayAttendance.filter(a => a.status === 'present').length;
+    const lateCount = todayAttendance.filter(a => a.status === 'late').length;
+    const absentCount = totalEmployees - presentCount - lateCount;
     
-    // Clean the phone number to keep only digits
-    const cleanNumber = phoneNumber.replace(/\D/g, '');
+    const message = `
+*Attendance Summary for ${formattedDate}*
+
+Total Employees: ${totalEmployees}
+Present: ${presentCount}
+Late: ${lateCount}
+Absent: ${absentCount}
+
+Generated automatically by QR Attendance System
+`;
     
-    if (cleanNumber.length < 10) {
-      console.error('Invalid phone number');
-      return false;
-    }
-    
-    // Generate the summary text
-    const summaryText = generateAttendanceSummaryText(today, attendanceRecords);
-    const encodedSummary = encodeURIComponent(summaryText);
-    
-    // Create the sharing URL based on sharing method
-    let sharingUrl = '';
-    if (sendMethod === 'whatsapp') {
-      sharingUrl = `https://wa.me/${cleanNumber}?text=${encodedSummary}`;
-      console.log(`WhatsApp sharing URL created: ${sharingUrl.substring(0, 50)}...`);
+    // Send based on method
+    if (settings.send_method === 'whatsapp') {
+      return await shareViaWhatsApp(message, settings.phone_number);
     } else {
-      sharingUrl = `sms:${cleanNumber}?body=${encodedSummary}`;
-      console.log(`SMS sharing URL created: ${sharingUrl.substring(0, 50)}...`);
-    }
-    
-    // Use window.open to open the sharing URL in a new window/tab
-    if (typeof window !== 'undefined') {
-      // Check browser compatibility for window.open
-      try {
-        const newWindow = window.open(sharingUrl, '_blank');
-        
-        // If window.open failed (e.g., was blocked by popup blocker)
-        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-          console.error('Opening sharing window was blocked or failed');
-          // As a fallback, provide the URL for manual sharing
-          console.log('Manual sharing URL:', sharingUrl);
-          
-          // Show the URL on the page or provide a clickable link
-          const shareLink = document.createElement('a');
-          shareLink.href = sharingUrl;
-          shareLink.target = '_blank';
-          shareLink.textContent = `Share via ${sendMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}`;
-          
-          // Alternatively, copy to clipboard
-          navigator.clipboard.writeText(sharingUrl)
-            .then(() => console.log('Sharing URL copied to clipboard'))
-            .catch(err => console.error('Could not copy URL: ', err));
-            
-          return false;
-        }
-        
-        return true;
-      } catch (windowError) {
-        console.error('Error opening sharing window:', windowError);
-        return false;
-      }
-    } else {
-      console.error('Window object not available - are you running in a browser environment?');
+      console.log("Unsupported sharing method:", settings.send_method);
       return false;
     }
   } catch (error) {
-    console.error('Error auto-sharing attendance summary:', error);
+    console.error('Error in autoShareAttendanceSummary:', error);
     return false;
   }
 };
 
-// Check if it's time to send the daily report (e.g., at 6 PM every day)
-export const shouldSendDailyReport = (): boolean => {
-  const now = new Date();
-  const hour = now.getHours();
-  
-  // Send report at 6 PM (18:00)
-  return hour === 18;
+// Share via WhatsApp with better error handling and user feedback
+export const shareViaWhatsApp = async (message: string, phoneNumber: string): Promise<boolean> => {
+  try {
+    // Validate phone number
+    if (!isValidPhoneNumber(phoneNumber)) {
+      console.error("Invalid phone number format for WhatsApp sharing");
+      toast({
+        title: "Invalid Phone Number",
+        description: "Please enter a valid phone number including country code (e.g., +1234567890)",
+        variant: "destructive",
+      });
+      return false;
+    }
+    
+    // Encode the message for URL
+    const encodedMessage = encodeURIComponent(message);
+    
+    // WhatsApp API URL
+    const whatsappUrl = `https://wa.me/${phoneNumber.replace('+', '')}?text=${encodedMessage}`;
+    
+    console.log("Opening WhatsApp share URL:", whatsappUrl);
+    
+    // Try to open in a new window with specific settings to avoid popup blockers
+    const newWindow = window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    
+    // Check if window was blocked
+    if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+      console.error("WhatsApp share window was blocked");
+      toast({
+        title: "Sharing Failed",
+        description: "Please disable popup blocker for this site and try again.",
+        variant: "destructive",
+      });
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error in shareViaWhatsApp:', error);
+    toast({
+      title: "Sharing Failed",
+      description: "An unexpected error occurred. Please try again later.",
+      variant: "destructive",
+    });
+    return false;
+  }
 };
 
-// Set up automatic report scheduling
-export const setupAutoReportScheduling = (): void => {
-  // Check if we should run the auto-share every 5 minutes
-  setInterval(async () => {
-    if (shouldSendDailyReport()) {
-      // Check if auto-sharing is enabled before attempting to share
-      const { isAutoShareEnabled } = await getAdminContactInfo();
+// Setup auto report scheduling with improved error handling
+export const setupAutoReportScheduling = () => {
+  console.log("Setting up auto report scheduling...");
+  
+  // Check if already running to avoid duplicates
+  if ((window as any).__autoReportScheduled) {
+    console.log("Auto report already scheduled, skipping setup");
+    return;
+  }
+  
+  // Mark as scheduled
+  (window as any).__autoReportScheduled = true;
+  
+  // Function to check if it's time to send report (e.g., 5:00 PM)
+  const checkAndSendReport = async () => {
+    try {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
       
-      if (isAutoShareEnabled) {
-        console.log('Auto-sharing daily attendance report...');
-        await autoShareAttendanceSummary();
+      // Schedule for 5:00 PM (17:00)
+      if (hours === 17 && minutes === 0) {
+        console.log("It's report time (5:00 PM), attempting to send report...");
+        const success = await autoShareAttendanceSummary();
+        console.log("Auto report sharing result:", success ? "Successful" : "Failed");
       }
+    } catch (error) {
+      console.error("Error in checkAndSendReport:", error);
     }
-  }, 5 * 60 * 1000); // Check every 5 minutes
+  };
+  
+  // Check every minute
+  setInterval(checkAndSendReport, 60000);
+  
+  // Also check on startup (after a brief delay)
+  setTimeout(checkAndSendReport, 5000);
+  
+  console.log("Auto report scheduling setup complete");
 };

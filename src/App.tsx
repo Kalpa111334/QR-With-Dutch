@@ -8,6 +8,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import LandingPage from "./components/LandingPage";
+import RosterManagement from "./pages/RosterManagement";
+import GatePass from "./pages/GatePass";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
 
 const queryClient = new QueryClient();
@@ -44,6 +46,8 @@ const App: React.FC = () => {
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route path="/landing" element={<LandingPage onGetStarted={() => setShowApp(true)} />} />
+                <Route path="/roster" element={<RosterManagement />} />
+                <Route path="/gate-pass" element={<GatePass />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
