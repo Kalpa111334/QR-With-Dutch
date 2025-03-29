@@ -81,8 +81,8 @@ const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({ employee }) => {
           <p className="text-sm text-muted-foreground">{employee.position}</p>
         </div>
         
-        <Button onClick={handleDownload} className="w-full">
-          <Download className="mr-2 h-4 w-4" />
+        <Button onClick={handleDownload} className="w-full flex items-center justify-center gap-2">
+          <Download className="h-4 w-4" />
           Download QR Code
         </Button>
       </CardContent>

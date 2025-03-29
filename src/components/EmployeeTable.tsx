@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
-import { QrCode, Edit, Trash2, MoreVertical, Search } from 'lucide-react';
+import { QrCode, Edit, Trash2, MoreVertical, Search, FileArchive, Download } from 'lucide-react';
 import { Employee } from '@/types';
 import { 
   Dialog,
@@ -38,6 +38,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import QRCodeGenerator from './QRCodeGenerator';
+import { useToast } from '@/components/ui/use-toast';
+import { downloadAllQRCodes } from '@/utils/qrCodeUtils';
 
 interface EmployeeTableProps {
   employees: Employee[];
@@ -55,6 +57,8 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const { toast } = useToast();
   
   const filteredEmployees = employees.filter(emp => 
     emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -81,9 +85,38 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
     }
   };
 
+  const handleDownloadAllQRCodes = async () => {
+    if (employees.length === 0) {
+      toast({
+        title: "No employees",
+        description: "There are no employees to generate QR codes for.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsDownloadingAll(true);
+    try {
+      await downloadAllQRCodes(employees);
+      toast({
+        title: "Download Complete",
+        description: "All QR codes have been downloaded as a zip file.",
+      });
+    } catch (error) {
+      console.error("Error downloading QR codes:", error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download QR codes. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsDownloadingAll(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="relative w-full max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -94,6 +127,24 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
+        <Button 
+          variant="outline" 
+          className="w-full sm:w-auto gap-2 border-primary/20 text-primary hover:text-primary/90 hover:bg-primary/5"
+          onClick={handleDownloadAllQRCodes}
+          disabled={isDownloadingAll || employees.length === 0}
+        >
+          {isDownloadingAll ? (
+            <>
+              <div className="animate-spin h-4 w-4 border-2 border-primary border-r-transparent rounded-full"></div>
+              <span>Preparing Download...</span>
+            </>
+          ) : (
+            <>
+              <FileArchive className="h-4 w-4" />
+              <span>Download All QR Codes</span>
+            </>
+          )}
+        </Button>
       </div>
 
       <div className="rounded-md border">
