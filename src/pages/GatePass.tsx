@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { QrCode, Check, X, Clipboard, Users } from 'lucide-react';
+import { QrCode, Check, X, Clipboard, Users, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -16,7 +16,8 @@ import {
   GatePass as GatePassType,
   getGatePasses,
   createGatePass,
-  verifyGatePass
+  verifyGatePass,
+  generateQRCodeForPass
 } from '@/utils/gatePassUtils';
 
 const GatePass: React.FC = () => {
@@ -193,6 +194,42 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
     );
   };
 
+  // Function to download QR code as PNG
+  const downloadQRCode = async (pass: GatePassType) => {
+    try {
+      setLoading(true);
+      const qrBlob = await generateQRCodeForPass(pass);
+      
+      if (qrBlob) {
+        // Create download link
+        const url = URL.createObjectURL(qrBlob);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = url;
+        downloadLink.download = `gate_pass_${pass.passCode}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(url);
+        
+        toast({
+          title: 'QR Code Downloaded',
+          description: 'Gate pass QR code has been downloaded successfully',
+        });
+      } else {
+        throw new Error('Failed to generate QR code');
+      }
+    } catch (error) {
+      console.error('Error downloading QR code:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to download QR code',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="container mx-auto py-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -351,23 +388,50 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                         <p><span className="font-medium">ID:</span> {verificationResult.pass.id}</p>
                         <p><span className="font-medium">Code:</span> {verificationResult.pass.passCode}</p>
                         <p><span className="font-medium">Employee:</span> {verificationResult.pass.employeeName}</p>
-                        <p><span className="font-medium">Type:</span> <Badge variant="outline" className="capitalize">{verificationResult.pass.type}</Badge></p>
+                        <p><span className="font-medium">Type:</span> <Badge variant="outline" className="capitalize">{verificationResult.pass.type}</p>
                         <p><span className="font-medium">Reason:</span> {verificationResult.pass.reason}</p>
                         <p><span className="font-medium">Created:</span> {new Date(verificationResult.pass.createdAt).toLocaleString()}</p>
                         <p><span className="font-medium">Expires:</span> {new Date(verificationResult.pass.expiresAt).toLocaleString()}</p>
                         {verificationResult.pass.usedAt && (
                           <p><span className="font-medium">Used:</span> {new Date(verificationResult.pass.usedAt).toLocaleString()}</p>
                         )}
-                        <p className="pt-4">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => copyPassToClipboard(verificationResult.pass!)}
-                          >
-                            <Clipboard className="h-4 w-4 mr-2" />
-                            Copy Pass Details
-                          </Button>
-                        </p>
+                        
+                        {/* QR Code Display */}
+                        <div className="pt-4 flex flex-col items-center">
+                          <div className="bg-white p-4 rounded-lg shadow-md mb-4" id="qr-container">
+                            {verificationResult.verified && (
+                              <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(JSON.stringify({
+                                  passId: verificationResult.pass.id,
+                                  passCode: verificationResult.pass.passCode
+                                }))}`}
+                                alt="Gate Pass QR Code"
+                                className="w-48 h-48"
+                              />
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => copyPassToClipboard(verificationResult.pass!)}
+                            >
+                              <Clipboard className="h-4 w-4 mr-2" />
+                              Copy Pass Details
+                            </Button>
+                            {verificationResult.verified && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => downloadQRCode(verificationResult.pass!)}
+                                disabled={loading}
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Download QR Code
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

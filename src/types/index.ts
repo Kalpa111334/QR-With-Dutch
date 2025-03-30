@@ -27,3 +27,17 @@ export interface Department {
   id: string;
   name: string;
 }
+
+export interface GatePass {
+  id: string;
+  employeeId: string;
+  employeeName?: string;
+  passCode: string;
+  validity: 'single' | 'day' | 'week' | 'month';
+  type: 'entry' | 'exit' | 'both';
+  reason: string;
+  status: 'active' | 'used' | 'expired';
+  createdAt: string;
+  expiresAt: string;
+  usedAt?: string | null;
+}

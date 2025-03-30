@@ -1,6 +1,6 @@
-
 import { supabase } from '@/integrations/supabase/client';
 import { Employee } from '@/types';
+import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
 
 export interface GatePass {
   id: string;
@@ -308,3 +308,6 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
     };
   }
 };
+
+// Export the QR code generation function
+export { generateQRCode as generateQRCodeForPass };

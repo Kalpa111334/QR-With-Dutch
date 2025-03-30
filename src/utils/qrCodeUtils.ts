@@ -1,18 +1,14 @@
 
 import JSZip from 'jszip';
-import { Employee } from '@/types';
+import { Employee, GatePass } from '@/types';
 
 // Helper function to generate QR code SVG data
-const generateQRSVG = async (employee: Employee): Promise<string> => {
+const generateQRSVG = async (data: string | Record<string, any>): Promise<string> => {
   // We need to dynamically import QRCode library here
   const QRCode = await import('qrcode');
   
-  // Create QR code data that includes employee ID
-  const qrCodeData = JSON.stringify({
-    id: employee.id,
-    name: employee.name,
-    department: employee.department
-  });
+  // Convert object to JSON string if needed
+  const qrCodeData = typeof data === 'string' ? data : JSON.stringify(data);
   
   // Generate SVG string directly using QRCode library
   try {
@@ -32,6 +28,30 @@ const generateQRSVG = async (employee: Employee): Promise<string> => {
     console.error('Error generating QR code:', error);
     throw new Error('Failed to generate QR code');
   }
+};
+
+// Generate QR code for employee
+export const generateEmployeeQRSVG = async (employee: Employee): Promise<string> => {
+  // Create QR code data that includes employee ID
+  const qrCodeData = {
+    id: employee.id,
+    name: employee.name || `${employee.firstName} ${employee.lastName}`,
+    department: employee.department
+  };
+  
+  return generateQRSVG(qrCodeData);
+};
+
+// Generate QR code for gate pass
+export const generateGatePassQRSVG = async (pass: GatePass): Promise<string> => {
+  // Create QR code data that includes pass ID and code
+  const qrCodeData = {
+    passId: pass.id,
+    passCode: pass.passCode,
+    employeeId: pass.employeeId
+  };
+  
+  return generateQRSVG(qrCodeData);
 };
 
 // Generate a PNG from SVG string
@@ -93,16 +113,17 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
       batch.map(async (employee) => {
         try {
           // Generate SVG QR code
-          const svgData = await generateQRSVG(employee);
+          const svgData = await generateEmployeeQRSVG(employee);
           
           // Convert SVG to PNG
           const pngBlob = await svgToPng(svgData);
           
           // Add to ZIP file - use a sanitized name for the file
-          const safeFileName = employee.name.replace(/[^\w\s]/gi, '_').replace(/\s+/g, '_');
+          const safeFileName = (employee.name || `${employee.firstName}_${employee.lastName}`)
+            .replace(/[^\w\s]/gi, '_').replace(/\s+/g, '_');
           zip.file(`${safeFileName}_QRCode.png`, pngBlob);
         } catch (error) {
-          console.error(`Error generating QR code for ${employee.name}:`, error);
+          console.error(`Error generating QR code for ${employee.name || `${employee.firstName} ${employee.lastName}`}:`, error);
           // Continue with other employees even if one fails
         }
       })
@@ -119,4 +140,19 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
   document.body.appendChild(downloadLink);
   downloadLink.click();
   document.body.removeChild(downloadLink);
+};
+
+// Generate and download QR code for a single gate pass
+export const generateQRCodeForPass = async (pass: GatePass): Promise<Blob | null> => {
+  try {
+    // Generate SVG QR code
+    const svgData = await generateGatePassQRSVG(pass);
+    
+    // Convert SVG to PNG
+    const pngBlob = await svgToPng(svgData);
+    return pngBlob;
+  } catch (error) {
+    console.error('Error generating gate pass QR code:', error);
+    return null;
+  }
 };
