@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -9,12 +8,14 @@ import { useToast } from '@/components/ui/use-toast';
 import { getEmployeeById } from '@/utils/employeeUtils';
 import { SwitchCamera } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { verifyGatePass } from '@/utils/gatePassUtils';
 
 interface QRScannerProps {
   onScan?: (result: string) => void; // Making this prop optional
+  mode?: 'attendance' | 'gatepass'; // New prop to determine scanner mode
 }
 
-const QRScanner: React.FC<QRScannerProps> = ({ onScan }) => {
+const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) => {
   const webcamRef = useRef<Webcam>(null);
   const [scanning, setScanning] = useState(true);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -55,47 +56,97 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan }) => {
     };
   }, [toast]);
 
-  const processQRCode = useCallback(async (employeeData: any) => {
+  const processQRCode = useCallback(async (qrData: any) => {
     // If onScan is provided, use it instead of the default attendance processing
-    if (onScan && typeof employeeData === 'string') {
-      onScan(employeeData);
+    if (onScan && typeof qrData === 'string') {
+      onScan(qrData);
       return;
     }
     
     try {
-      // Add attendance record
-      const { data: attendance, error } = await supabase
-        .from('attendance')
-        .insert({
-          employee_id: employeeData.id,
-          date: new Date().toISOString().split('T')[0],
-          check_in_time: new Date().toISOString(),
-        })
-        .select()
-        .single();
-      
-      if (error) {
-        throw error;
+      // Handle different scanner modes
+      if (mode === 'gatepass') {
+        // For gate pass scanning
+        let passIdentifier = typeof qrData === 'string' ? qrData : '';
+        
+        try {
+          // Try to parse as JSON if it's a string
+          if (typeof qrData === 'string') {
+            const parsedData = JSON.parse(qrData);
+            passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
+          } else if (qrData && typeof qrData === 'object') {
+            passIdentifier = qrData.passId || qrData.passCode || qrData.id || '';
+          }
+        } catch (e) {
+          // If parsing fails, use the raw string
+          console.log('Not a JSON QR code, using raw value');
+        }
+        
+        if (!passIdentifier) {
+          throw new Error("Invalid gate pass QR code");
+        }
+        
+        // Verify the gate pass
+        const verification = await verifyGatePass(passIdentifier);
+        
+        if (verification.verified) {
+          // Show success message
+          Swal.fire({
+            title: 'Success!',
+            text: 'Successfully, you can leave now.',
+            icon: 'success',
+            timer: 3000,
+            showConfirmButton: false,
+          });
+        } else {
+          // Show error for invalid pass
+          Swal.fire({
+            title: 'Invalid Pass',
+            text: verification.message,
+            icon: 'error',
+            timer: 3000,
+            showConfirmButton: false,
+          });
+        }
+        
+      } else {
+        // Default attendance processing
+        const employeeData = typeof qrData === 'string' ? JSON.parse(qrData) : qrData;
+        
+        // Add attendance record
+        const { data: attendance, error } = await supabase
+          .from('attendance')
+          .insert({
+            employee_id: employeeData.id,
+            date: new Date().toISOString().split('T')[0],
+            check_in_time: new Date().toISOString(),
+          })
+          .select()
+          .single();
+        
+        if (error) {
+          throw error;
+        }
+        
+        if (!attendance) {
+          throw new Error("Failed to record attendance");
+        }
+        
+        const employee = await getEmployeeById(employeeData.id);
+        
+        if (!employee) {
+          throw new Error("Employee not found");
+        }
+        
+        // Show success message using SweetAlert
+        Swal.fire({
+          title: 'Attendance Recorded!',
+          text: `${employee.firstName} ${employee.lastName} checked in successfully at ${new Date().toLocaleTimeString()}`,
+          icon: 'success',
+          timer: 3000,
+          showConfirmButton: false,
+        });
       }
-      
-      if (!attendance) {
-        throw new Error("Failed to record attendance");
-      }
-      
-      const employee = await getEmployeeById(employeeData.id);
-      
-      if (!employee) {
-        throw new Error("Employee not found");
-      }
-      
-      // Show success message using SweetAlert
-      Swal.fire({
-        title: 'Attendance Recorded!',
-        text: `${employee.firstName} ${employee.lastName} checked in successfully at ${new Date().toLocaleTimeString()}`,
-        icon: 'success',
-        timer: 3000,
-        showConfirmButton: false,
-      });
       
       // Pause scanning briefly
       setScanning(false);
@@ -112,7 +163,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan }) => {
         showConfirmButton: false,
       });
     }
-  }, [onScan]);
+  }, [onScan, mode]);
 
   const scanQRCode = useCallback(() => {
     if (!scanning || !webcamRef.current) {
@@ -160,20 +211,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan }) => {
           // If we have an onScan callback, use the raw QR code data
           onScan(code.data);
         } else {
-          // For attendance scanning, try to parse as JSON
-          try {
-            const employeeData = JSON.parse(code.data);
-            if (employeeData && employeeData.id) {
-              processQRCode(employeeData);
-            }
-          } catch (e) {
-            // If not JSON and we have onScan, pass the raw data
-            if (onScan) {
-              onScan(code.data);
-            } else {
-              console.error("Invalid QR Code format:", e);
-            }
-          }
+          // Otherwise process the QR code data directly
+          processQRCode(code.data);
         }
       } catch (error) {
         console.error("Error processing scan result:", error);

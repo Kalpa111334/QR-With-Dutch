@@ -141,7 +141,7 @@ const GatePass: React.FC = () => {
       let passIdentifier = result;
       try {
         const parsedData = JSON.parse(result);
-        passIdentifier = parsedData.id || parsedData.passCode || result;
+        passIdentifier = parsedData.id || parsedData.passCode || parsedData.passId || result;
       } catch {
         // If not valid JSON, assume it's the pass ID or code directly
       }
@@ -346,7 +346,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
               </CardHeader>
               <CardContent className="flex justify-center">
                 <div className="w-full max-w-md">
-                  <QRScanner onScan={handleScanResult} />
+                  <QRScanner onScan={handleScanResult} mode="gatepass" />
                 </div>
               </CardContent>
               <CardFooter className="flex flex-col items-start">
