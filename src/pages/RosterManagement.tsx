@@ -12,17 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useToast } from '@/components/ui/use-toast';
 import { Employee } from '@/types';
 import { getEmployees } from '@/utils/employeeUtils';
-
-// Define a Roster type for managing employee schedules
-interface Roster {
-  id: string;
-  employeeId: string;
-  employeeName: string;
-  startDate: string;
-  endDate: string;
-  shift: 'morning' | 'evening' | 'night';
-  status: 'active' | 'pending' | 'completed';
-}
+import { getRosters, createRoster, deleteRoster, updateRosterStatus, Roster } from '@/utils/rosterUtils';
 
 const RosterManagement: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -37,60 +27,35 @@ const RosterManagement: React.FC = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Load employees from the database
-    const fetchEmployees = async () => {
+    // Load employees and rosters from the database
+    const fetchData = async () => {
       try {
-        const data = await getEmployees();
-        setEmployees(data);
+        setLoading(true);
+        
+        // Fetch employees
+        const employeesData = await getEmployees();
+        setEmployees(employeesData);
+        
+        // Fetch rosters
+        const rostersData = await getRosters();
+        setRosters(rostersData);
+        
         setLoading(false);
       } catch (error) {
-        console.error('Error fetching employees:', error);
+        console.error('Error fetching data:', error);
         toast({
           title: 'Error',
-          description: 'Failed to load employees',
+          description: 'Failed to load roster data',
           variant: 'destructive',
         });
         setLoading(false);
       }
     };
 
-    fetchEmployees();
-    
-    // For demonstration - mock data for rosters
-    const mockRosters: Roster[] = [
-      {
-        id: '1',
-        employeeId: 'emp-1',
-        employeeName: 'John Doe',
-        startDate: format(new Date(), 'yyyy-MM-dd'),
-        endDate: format(addDays(new Date(), 5), 'yyyy-MM-dd'),
-        shift: 'morning',
-        status: 'active'
-      },
-      {
-        id: '2',
-        employeeId: 'emp-2',
-        employeeName: 'Jane Smith',
-        startDate: format(new Date(), 'yyyy-MM-dd'),
-        endDate: format(addDays(new Date(), 5), 'yyyy-MM-dd'),
-        shift: 'evening',
-        status: 'active'
-      },
-      {
-        id: '3',
-        employeeId: 'emp-3',
-        employeeName: 'Robert Johnson',
-        startDate: format(addDays(new Date(), -10), 'yyyy-MM-dd'),
-        endDate: format(addDays(new Date(), -5), 'yyyy-MM-dd'),
-        shift: 'night',
-        status: 'completed'
-      }
-    ];
-    
-    setRosters(mockRosters);
+    fetchData();
   }, [toast]);
 
-  const handleCreateRoster = () => {
+  const handleCreateRoster = async () => {
     if (!selectedEmployee || !dateRange?.from || !dateRange?.to) {
       toast({
         title: 'Missing Information',
@@ -112,42 +77,123 @@ const RosterManagement: React.FC = () => {
       return;
     }
 
-    // Create a new roster
-    const newRoster: Roster = {
-      id: `roster-${Date.now()}`,
-      employeeId: selectedEmployee,
-      employeeName: `${employee.firstName} ${employee.lastName}`,
-      startDate: format(dateRange.from, 'yyyy-MM-dd'),
-      endDate: format(dateRange.to || dateRange.from, 'yyyy-MM-dd'),
-      shift: selectedShift,
-      status: 'active'
-    };
-
-    // Add to rosters
-    setRosters([...rosters, newRoster]);
-    
-    toast({
-      title: 'Roster Created',
-      description: `Schedule created for ${employee.firstName} ${employee.lastName}`,
-    });
-
-    // Reset form
-    setSelectedEmployee('');
-    setDateRange({
-      from: new Date(),
-      to: addDays(new Date(), 6)
-    });
-    setSelectedShift('morning');
+    try {
+      setLoading(true);
+      
+      // Create a new roster
+      const newRoster = await createRoster({
+        employeeId: selectedEmployee,
+        startDate: format(dateRange.from, 'yyyy-MM-dd'),
+        endDate: format(dateRange.to || dateRange.from, 'yyyy-MM-dd'),
+        shift: selectedShift,
+        status: 'active'
+      });
+      
+      if (newRoster) {
+        // Add to rosters state
+        setRosters(prev => [newRoster, ...prev]);
+        
+        toast({
+          title: 'Roster Created',
+          description: `Schedule created for ${employee.firstName} ${employee.lastName}`,
+        });
+        
+        // Reset form
+        setSelectedEmployee('');
+        setDateRange({
+          from: new Date(),
+          to: addDays(new Date(), 6)
+        });
+        setSelectedShift('morning');
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to create roster',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error creating roster:', error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteRoster = (id: string) => {
-    setRosters(rosters.filter(roster => roster.id !== id));
-    
-    toast({
-      title: 'Roster Deleted',
-      description: 'The schedule has been removed',
-    });
+  const handleDeleteRoster = async (id: string) => {
+    try {
+      setLoading(true);
+      const success = await deleteRoster(id);
+      
+      if (success) {
+        setRosters(rosters.filter(roster => roster.id !== id));
+        
+        toast({
+          title: 'Roster Deleted',
+          description: 'The schedule has been removed',
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to delete roster',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting roster:', error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleUpdateStatus = async (id: string, status: 'active' | 'pending' | 'completed') => {
+    try {
+      setLoading(true);
+      const success = await updateRosterStatus(id, status);
+      
+      if (success) {
+        // Update roster in state
+        setRosters(prev => 
+          prev.map(roster => 
+            roster.id === id ? { ...roster, status } : roster
+          )
+        );
+        
+        toast({
+          title: 'Status Updated',
+          description: `Roster status changed to ${status}`,
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to update roster status',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error updating roster status:', error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter rosters by status
+  const activeRosters = rosters.filter(roster => roster.status !== 'completed');
+  const completedRosters = rosters.filter(roster => roster.status === 'completed');
 
   return (
     <div className="container mx-auto py-6 space-y-8">
@@ -166,6 +212,7 @@ const RosterManagement: React.FC = () => {
                 className="w-full border rounded-md p-2"
                 value={selectedEmployee}
                 onChange={(e) => setSelectedEmployee(e.target.value)}
+                disabled={loading}
               >
                 <option value="">Select an employee</option>
                 {employees.map(employee => (
@@ -185,6 +232,7 @@ const RosterManagement: React.FC = () => {
                     <Button
                       variant="outline"
                       className="w-full justify-start text-left font-normal"
+                      disabled={loading}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {dateRange?.from ? (
@@ -222,6 +270,7 @@ const RosterManagement: React.FC = () => {
                 className="w-full border rounded-md p-2"
                 value={selectedShift}
                 onChange={(e) => setSelectedShift(e.target.value as 'morning' | 'evening' | 'night')}
+                disabled={loading}
               >
                 <option value="morning">Morning Shift (6AM - 2PM)</option>
                 <option value="evening">Evening Shift (2PM - 10PM)</option>
@@ -232,9 +281,9 @@ const RosterManagement: React.FC = () => {
             <Button 
               className="w-full" 
               onClick={handleCreateRoster}
-              disabled={!selectedEmployee || !dateRange?.from}
+              disabled={!selectedEmployee || !dateRange?.from || loading}
             >
-              Create Roster
+              {loading ? 'Creating...' : 'Create Roster'}
             </Button>
           </CardContent>
         </Card>
@@ -249,6 +298,89 @@ const RosterManagement: React.FC = () => {
             <Users className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
+            {loading ? (
+              <div className="py-10 text-center">Loading roster data...</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Period</TableHead>
+                    <TableHead>Shift</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="w-[80px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {activeRosters.length > 0 ? (
+                    activeRosters.map(roster => (
+                      <TableRow key={roster.id}>
+                        <TableCell className="font-medium">{roster.employeeName}</TableCell>
+                        <TableCell>
+                          {format(new Date(roster.startDate), 'MMM d')} - {format(new Date(roster.endDate), 'MMM d, yyyy')}
+                        </TableCell>
+                        <TableCell>
+                          <span className={`capitalize ${
+                            roster.shift === 'morning' ? 'text-blue-600' :
+                            roster.shift === 'evening' ? 'text-orange-600' : 'text-purple-600'
+                          }`}>
+                            {roster.shift}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            roster.status === 'active' ? 'bg-green-100 text-green-800' :
+                            roster.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {roster.status}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Open menu</span>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleUpdateStatus(roster.id, 'completed')}>
+                                <Pencil className="mr-2 h-4 w-4" />
+                                <span>Mark Completed</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleDeleteRoster(roster.id)}>
+                                <Trash className="mr-2 h-4 w-4" />
+                                <span>Delete</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                        No active rosters found
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Historical Rosters */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Roster History</CardTitle>
+          <CardDescription>Past employee schedules</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="py-10 text-center">Loading roster data...</div>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -256,13 +388,11 @@ const RosterManagement: React.FC = () => {
                   <TableHead>Period</TableHead>
                   <TableHead>Shift</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="w-[80px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rosters
-                  .filter(roster => roster.status !== 'completed')
-                  .map(roster => (
+                {completedRosters.length > 0 ? (
+                  completedRosters.map(roster => (
                     <TableRow key={roster.id}>
                       <TableCell className="font-medium">{roster.employeeName}</TableCell>
                       <TableCell>
@@ -277,97 +407,22 @@ const RosterManagement: React.FC = () => {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          roster.status === 'active' ? 'bg-green-100 text-green-800' :
-                          roster.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
-                        }`}>
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
                           {roster.status}
                         </span>
                       </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
-                              <span className="sr-only">Open menu</span>
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
-                              <Pencil className="mr-2 h-4 w-4" />
-                              <span>Edit</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDeleteRoster(roster.id)}>
-                              <Trash className="mr-2 h-4 w-4" />
-                              <span>Delete</span>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
                     </TableRow>
-                  ))}
-                {rosters.filter(roster => roster.status !== 'completed').length === 0 && (
+                  ))
+                ) : (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
-                      No active rosters found
+                    <TableCell colSpan={4} className="text-center py-4 text-muted-foreground">
+                      No historical rosters found
                     </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      </div>
-      
-      {/* Historical Rosters */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Roster History</CardTitle>
-          <CardDescription>Past employee schedules</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Period</TableHead>
-                <TableHead>Shift</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rosters
-                .filter(roster => roster.status === 'completed')
-                .map(roster => (
-                  <TableRow key={roster.id}>
-                    <TableCell className="font-medium">{roster.employeeName}</TableCell>
-                    <TableCell>
-                      {format(new Date(roster.startDate), 'MMM d')} - {format(new Date(roster.endDate), 'MMM d, yyyy')}
-                    </TableCell>
-                    <TableCell>
-                      <span className={`capitalize ${
-                        roster.shift === 'morning' ? 'text-blue-600' :
-                        roster.shift === 'evening' ? 'text-orange-600' : 'text-purple-600'
-                      }`}>
-                        {roster.shift}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                        {roster.status}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              {rosters.filter(roster => roster.status === 'completed').length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center py-4 text-muted-foreground">
-                    No historical rosters found
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -155,6 +155,108 @@ export type Database = {
           },
         ]
       }
+      gate_passes: {
+        Row: {
+          created_at: string
+          employee_id: string
+          expires_at: string
+          id: string
+          pass_code: string
+          reason: string
+          status: string
+          type: string
+          used_at: string | null
+          validity: string
+        }
+        Insert: {
+          created_at?: string
+          employee_id: string
+          expires_at: string
+          id?: string
+          pass_code: string
+          reason: string
+          status: string
+          type: string
+          used_at?: string | null
+          validity: string
+        }
+        Update: {
+          created_at?: string
+          employee_id?: string
+          expires_at?: string
+          id?: string
+          pass_code?: string
+          reason?: string
+          status?: string
+          type?: string
+          used_at?: string | null
+          validity?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gate_passes_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gate_passes_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rosters: {
+        Row: {
+          created_at: string
+          employee_id: string
+          end_date: string
+          id: string
+          shift: string
+          start_date: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          employee_id: string
+          end_date: string
+          id?: string
+          shift: string
+          start_date: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          employee_id?: string
+          end_date?: string
+          id?: string
+          shift?: string
+          start_date?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rosters_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rosters_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees_view"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       employees_view: {

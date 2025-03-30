@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -5,9 +6,9 @@ import Swal from 'sweetalert2';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { addAttendanceRecord } from '@/utils/attendanceUtils';
 import { getEmployeeById } from '@/utils/employeeUtils';
 import { SwitchCamera } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface QRScannerProps {
   onScan?: (result: string) => void; // Making this prop optional
@@ -63,7 +64,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan }) => {
     
     try {
       // Add attendance record
-      const attendance = await addAttendanceRecord(employeeData.id);
+      const { data: attendance, error } = await supabase
+        .from('attendance')
+        .insert({
+          employee_id: employeeData.id,
+          date: new Date().toISOString().split('T')[0],
+          check_in_time: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        throw error;
+      }
       
       if (!attendance) {
         throw new Error("Failed to record attendance");
@@ -78,7 +91,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan }) => {
       // Show success message using SweetAlert
       Swal.fire({
         title: 'Attendance Recorded!',
-        text: `${employee.name} ${attendance.checkOutTime ? 'checked out' : 'checked in'} successfully at ${new Date().toLocaleTimeString()}`,
+        text: `${employee.firstName} ${employee.lastName} checked in successfully at ${new Date().toLocaleTimeString()}`,
         icon: 'success',
         timer: 3000,
         showConfirmButton: false,
