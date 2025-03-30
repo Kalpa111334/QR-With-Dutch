@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { QrCode, Check, X, Clipboard, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -104,8 +103,15 @@ const GatePass: React.FC = () => {
         setPassType('both');
         setPassValidity('single');
         
-        // Switch to passes tab to show the new pass
-        setActiveTab('passes');
+        // Set verification result to show the new pass automatically
+        setVerificationResult({
+          verified: true,
+          message: 'Valid gate pass. Employee may proceed.',
+          pass: newPass
+        });
+        
+        // Switch to verify tab to show the new pass
+        setActiveTab('verify');
       } else {
         toast({
           title: 'Error',
@@ -189,7 +195,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
 
   return (
     <div className="container mx-auto py-6">
-      <Tabs defaultValue={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold tracking-tight mb-2">Gate Pass System</h1>
@@ -352,6 +358,16 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                         {verificationResult.pass.usedAt && (
                           <p><span className="font-medium">Used:</span> {new Date(verificationResult.pass.usedAt).toLocaleString()}</p>
                         )}
+                        <p className="pt-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyPassToClipboard(verificationResult.pass!)}
+                          >
+                            <Clipboard className="h-4 w-4 mr-2" />
+                            Copy Pass Details
+                          </Button>
+                        </p>
                       </div>
                     )}
                   </div>
