@@ -85,10 +85,10 @@ export const createGatePass = async (
         `${employee.first_name || ''} ${employee.last_name || ''}`.trim() : 
         'Unknown Employee',
       passCode: data.pass_code,
-      validity: data.validity,
-      type: data.type,
+      validity: data.validity as 'single' | 'day' | 'week' | 'month',
+      type: data.type as 'entry' | 'exit' | 'both',
       reason: data.reason,
-      status: data.status,
+      status: data.status as 'active' | 'used' | 'expired',
       createdAt: data.created_at,
       expiresAt: data.expires_at,
       usedAt: data.used_at
@@ -145,10 +145,10 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
         `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
         'Unknown Employee',
       passCode: pass.pass_code,
-      validity: pass.validity,
-      type: pass.type,
+      validity: pass.validity as 'single' | 'day' | 'week' | 'month',
+      type: pass.type as 'entry' | 'exit' | 'both',
       reason: pass.reason,
-      status: pass.status,
+      status: pass.status as 'active' | 'used' | 'expired',
       createdAt: pass.created_at,
       expiresAt: pass.expires_at,
       usedAt: pass.used_at
@@ -213,8 +213,8 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
             `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
             'Unknown Employee',
           passCode: pass.pass_code,
-          validity: pass.validity,
-          type: pass.type,
+          validity: pass.validity as 'single' | 'day' | 'week' | 'month',
+          type: pass.type as 'entry' | 'exit' | 'both',
           reason: pass.reason,
           status: 'expired',
           createdAt: pass.created_at,
@@ -236,10 +236,10 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
             `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
             'Unknown Employee',
           passCode: pass.pass_code,
-          validity: pass.validity,
-          type: pass.type,
+          validity: pass.validity as 'single' | 'day' | 'week' | 'month',
+          type: pass.type as 'entry' | 'exit' | 'both',
           reason: pass.reason,
-          status: pass.status,
+          status: pass.status as 'active' | 'used' | 'expired',
           createdAt: pass.created_at,
           expiresAt: pass.expires_at,
           usedAt: pass.used_at
@@ -259,10 +259,10 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
             `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
             'Unknown Employee',
           passCode: pass.pass_code,
-          validity: pass.validity,
-          type: pass.type,
+          validity: pass.validity as 'single' | 'day' | 'week' | 'month',
+          type: pass.type as 'entry' | 'exit' | 'both',
           reason: pass.reason,
-          status: pass.status,
+          status: pass.status as 'active' | 'used' | 'expired',
           createdAt: pass.created_at,
           expiresAt: pass.expires_at,
           usedAt: pass.used_at
@@ -291,10 +291,10 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
           `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
           'Unknown Employee',
         passCode: pass.pass_code,
-        validity: pass.validity,
-        type: pass.type,
+        validity: pass.validity as 'single' | 'day' | 'week' | 'month',
+        type: pass.type as 'entry' | 'exit' | 'both',
         reason: pass.reason,
-        status: pass.validity === 'single' ? 'used' : pass.status,
+        status: pass.validity === 'single' ? 'used' : pass.status as 'active' | 'used' | 'expired',
         createdAt: pass.created_at,
         expiresAt: pass.expires_at,
         usedAt: pass.validity === 'single' ? new Date().toISOString() : pass.used_at

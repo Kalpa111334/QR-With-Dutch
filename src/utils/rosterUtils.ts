@@ -85,8 +85,8 @@ export const createRoster = async (roster: Omit<Roster, 'id' | 'createdAt' | 'up
         'Unknown Employee',
       startDate: data.start_date,
       endDate: data.end_date,
-      shift: data.shift,
-      status: data.status,
+      shift: data.shift as 'morning' | 'evening' | 'night',
+      status: data.status as 'active' | 'pending' | 'completed',
       createdAt: data.created_at,
       updatedAt: data.updated_at
     };
