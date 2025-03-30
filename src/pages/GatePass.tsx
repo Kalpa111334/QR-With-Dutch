@@ -229,7 +229,7 @@ const GatePass: React.FC = () => {
           if (p.id === passId) {
             return {
               ...p,
-              status: 'used',
+              status: 'used' as const, // Use a const assertion to fix the type
               usedAt: new Date().toISOString(),
             };
           }

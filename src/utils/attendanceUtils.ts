@@ -14,7 +14,14 @@ interface AdminSettings {
   auto_share_enabled: boolean;
 }
 
-// Get all attendance records
+// Admin contact info type for better type safety
+interface AdminContactInfo {
+  phoneNumber: string;
+  sendMethod: 'whatsapp' | 'sms';
+  isAutoShareEnabled: boolean;
+}
+
+// Get all attendance records - using the old function name for backward compatibility
 export const getAttendance = async (): Promise<Attendance[]> => {
   try {
     const { data, error } = await supabase
@@ -39,7 +46,7 @@ export const getAttendance = async (): Promise<Attendance[]> => {
       return [];
     }
     
-    // Transform the data to match our Attendance type
+    // Transform the data to match our Attendance type with proper type casting
     return data.map(record => ({
       id: record.id,
       employeeId: record.employee_id,
@@ -47,7 +54,7 @@ export const getAttendance = async (): Promise<Attendance[]> => {
       checkInTime: record.check_in_time,
       checkOutTime: record.check_out_time,
       date: format(new Date(record.date), 'yyyy-MM-dd'),
-      status: record.status
+      status: (record.status as 'present' | 'late' | 'absent') || 'present'
     }));
   } catch (error) {
     console.error('Error in getAttendance:', error);
@@ -55,7 +62,10 @@ export const getAttendance = async (): Promise<Attendance[]> => {
   }
 };
 
-// Get attendance records by date range
+// New function name - adding as an alias to maintain compatibility
+export const getAttendanceRecords = getAttendance;
+
+// Get attendance records by date range with proper type casting
 export const getAttendanceByDateRange = async (startDate: string, endDate: string): Promise<Attendance[]> => {
   try {
     const { data, error } = await supabase
@@ -82,7 +92,7 @@ export const getAttendanceByDateRange = async (startDate: string, endDate: strin
       return [];
     }
     
-    // Transform the data to match our Attendance type
+    // Transform with proper type casting
     return data.map(record => ({
       id: record.id,
       employeeId: record.employee_id,
@@ -90,7 +100,7 @@ export const getAttendanceByDateRange = async (startDate: string, endDate: strin
       checkInTime: record.check_in_time,
       checkOutTime: record.check_out_time,
       date: format(new Date(record.date), 'yyyy-MM-dd'),
-      status: record.status
+      status: (record.status as 'present' | 'late' | 'absent') || 'present'
     }));
   } catch (error) {
     console.error('Error in getAttendanceByDateRange:', error);
@@ -250,6 +260,91 @@ export const recordAttendanceCheckOut = async (employeeId: string): Promise<bool
   }
 };
 
+// Implementation of addAttendanceRecord
+export const addAttendanceRecord = async (employeeId: string): Promise<Attendance | null> => {
+  try {
+    const now = new Date();
+    const today = format(now, 'yyyy-MM-dd');
+    
+    // Check if employee already has an attendance record for today
+    const { data: existingRecord } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .single();
+    
+    if (existingRecord) {
+      // If record exists but no check-out time, update with check-out
+      if (!existingRecord.check_out_time) {
+        const checkOutTime = now.toISOString();
+        const { data, error } = await supabase
+          .from('attendance')
+          .update({ check_out_time: checkOutTime })
+          .eq('id', existingRecord.id)
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('Error updating attendance record:', error);
+          return null;
+        }
+        
+        return {
+          id: data.id,
+          employeeId: data.employee_id,
+          employeeName: '',  // This will be populated by the calling function
+          checkInTime: data.check_in_time,
+          checkOutTime: data.check_out_time,
+          date: format(new Date(data.date), 'yyyy-MM-dd'),
+          status: (data.status as 'present' | 'late' | 'absent')
+        };
+      }
+      
+      return {
+        id: existingRecord.id,
+        employeeId: existingRecord.employee_id,
+        employeeName: '',  // Will be populated by the calling function
+        checkInTime: existingRecord.check_in_time,
+        checkOutTime: existingRecord.check_out_time,
+        date: format(new Date(existingRecord.date), 'yyyy-MM-dd'),
+        status: (existingRecord.status as 'present' | 'late' | 'absent')
+      };
+    }
+    
+    // If no record exists, create new check-in
+    const checkInTime = now.toISOString();
+    const { data, error } = await supabase
+      .from('attendance')
+      .insert({
+        employee_id: employeeId,
+        check_in_time: checkInTime,
+        date: today,
+        status: 'present'
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error creating attendance record:', error);
+      return null;
+    }
+    
+    return {
+      id: data.id,
+      employeeId: data.employee_id,
+      employeeName: '',  // Will be populated by the calling function
+      checkInTime: data.check_in_time,
+      checkOutTime: data.check_out_time,
+      date: format(new Date(data.date), 'yyyy-MM-dd'),
+      status: (data.status as 'present' | 'late' | 'absent')
+    };
+  } catch (error) {
+    console.error('Error in addAttendanceRecord:', error);
+    return null;
+  }
+};
+
 // Function to get admin settings with better error handling
 export const getAdminSettings = async (): Promise<AdminSettings | null> => {
   try {
@@ -260,6 +355,11 @@ export const getAdminSettings = async (): Promise<AdminSettings | null> => {
       .single();
     
     if (error) {
+      if (error.code === 'PGRST116') {
+        // No settings found (no rows returned)
+        console.log('No admin settings found, will return defaults');
+        return null;
+      }
       console.error('Error fetching admin settings:', error);
       return null;
     }
@@ -271,22 +371,44 @@ export const getAdminSettings = async (): Promise<AdminSettings | null> => {
   }
 };
 
-// Save admin settings with improved validation
-export const saveAdminSettings = async (
-  settings: {
-    send_method: string;
-    phone_number: string;
-    auto_share_enabled: boolean;
+// Get admin contact info with proper defaults
+export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
+  try {
+    const settings = await getAdminSettings();
+    
+    if (!settings) {
+      return {
+        phoneNumber: '',
+        sendMethod: 'whatsapp',
+        isAutoShareEnabled: false
+      };
+    }
+    
+    return {
+      phoneNumber: settings.phone_number || '',
+      sendMethod: (settings.send_method as 'whatsapp' | 'sms') || 'whatsapp',
+      isAutoShareEnabled: settings.auto_share_enabled || false
+    };
+  } catch (error) {
+    console.error('Error in getAdminContactInfo:', error);
+    return {
+      phoneNumber: '',
+      sendMethod: 'whatsapp',
+      isAutoShareEnabled: false
+    };
   }
+};
+
+// Save admin contact info
+export const saveAdminContactInfo = async (
+  phoneNumber: string,
+  sendMethod: 'whatsapp' | 'sms',
+  autoShareEnabled: boolean
 ): Promise<boolean> => {
   try {
     // Validate phone number
-    if (settings.send_method === 'whatsapp' && !isValidPhoneNumber(settings.phone_number)) {
-      toast({
-        title: "Invalid Phone Number",
-        description: "Please enter a valid phone number including country code (e.g., +1234567890)",
-        variant: "destructive",
-      });
+    if (!phoneNumber) {
+      console.error('Phone number is required');
       return false;
     }
 
@@ -294,9 +416,9 @@ export const saveAdminSettings = async (
       .from('admin_settings')
       .upsert({
         setting_type: 'attendance_report',
-        send_method: settings.send_method,
-        phone_number: settings.phone_number,
-        auto_share_enabled: settings.auto_share_enabled,
+        send_method: sendMethod,
+        phone_number: phoneNumber,
+        auto_share_enabled: autoShareEnabled,
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'setting_type'
@@ -304,11 +426,6 @@ export const saveAdminSettings = async (
     
     if (error) {
       console.error('Error saving admin settings:', error);
-      toast({
-        title: "Settings Save Failed",
-        description: error.message,
-        variant: "destructive",
-      });
       return false;
     }
     
@@ -319,11 +436,32 @@ export const saveAdminSettings = async (
   }
 };
 
-// Validate phone number - basic validation for international format
-function isValidPhoneNumber(phone: string): boolean {
-  // Check if it starts with + and has 8-15 digits
-  return /^\+[0-9]{8,15}$/.test(phone);
-}
+// Generate summary text for sharing
+export const generateAttendanceSummaryText = (date: Date, records: Attendance[]): string => {
+  const formattedDate = format(date, 'MMMM d, yyyy');
+  const presentCount = records.filter(r => r.status === 'present').length;
+  const lateCount = records.filter(r => r.status === 'late').length;
+  
+  let summaryText = `*Attendance Summary for ${formattedDate}*\n\n`;
+  summaryText += `Total Records: ${records.length}\n`;
+  summaryText += `Present: ${presentCount}\n`;
+  summaryText += `Late: ${lateCount}\n\n`;
+  
+  if (records.length > 0) {
+    summaryText += "Employee Details:\n";
+    records.forEach(record => {
+      const checkInTime = new Date(record.checkInTime).toLocaleTimeString();
+      const checkOutTime = record.checkOutTime 
+        ? new Date(record.checkOutTime).toLocaleTimeString() 
+        : 'Not checked out';
+      summaryText += `- ${record.employeeName}: ${record.status}, Check-in: ${checkInTime}, Check-out: ${checkOutTime}\n`;
+    });
+  } else {
+    summaryText += "No attendance records for this date.";
+  }
+  
+  return summaryText;
+};
 
 // Auto share attendance summary with improved error handling
 export const autoShareAttendanceSummary = async (): Promise<boolean> => {
@@ -331,28 +469,20 @@ export const autoShareAttendanceSummary = async (): Promise<boolean> => {
     console.log("Attempting to auto-share attendance summary...");
     
     // Get admin settings
-    const settings = await getAdminSettings();
+    const contactInfo = await getAdminContactInfo();
     
-    if (!settings) {
-      console.log("No admin settings found for attendance report sharing");
+    if (!contactInfo.phoneNumber) {
+      console.log("No phone number found for attendance report sharing");
       return false;
     }
     
-    if (!settings.auto_share_enabled) {
+    if (!contactInfo.isAutoShareEnabled) {
       console.log("Auto-share is disabled in settings");
-      return false;
-    }
-    
-    if (!settings.phone_number || !settings.send_method) {
-      console.log("Missing phone number or send method in settings");
       return false;
     }
     
     // Get today's date
     const today = new Date();
-    
-    // Format for displaying
-    const formattedDate = format(today, 'MMMM d, yyyy');
     
     // Get attendance for today
     const todayAttendance = await getAttendanceByDateRange(
@@ -360,28 +490,16 @@ export const autoShareAttendanceSummary = async (): Promise<boolean> => {
       format(today, 'yyyy-MM-dd')
     );
     
-    // Create message
-    const totalEmployees = await getTotalEmployeeCount();
-    const presentCount = todayAttendance.filter(a => a.status === 'present').length;
-    const lateCount = todayAttendance.filter(a => a.status === 'late').length;
-    const absentCount = totalEmployees - presentCount - lateCount;
-    
-    const message = `
-*Attendance Summary for ${formattedDate}*
-
-Total Employees: ${totalEmployees}
-Present: ${presentCount}
-Late: ${lateCount}
-Absent: ${absentCount}
-
-Generated automatically by QR Attendance System
-`;
+    // Create and share the message
+    const summaryText = generateAttendanceSummaryText(today, todayAttendance);
     
     // Send based on method
-    if (settings.send_method === 'whatsapp') {
-      return await shareViaWhatsApp(message, settings.phone_number);
+    if (contactInfo.sendMethod === 'whatsapp') {
+      return await shareViaWhatsApp(summaryText, contactInfo.phoneNumber);
+    } else if (contactInfo.sendMethod === 'sms') {
+      return await shareViaSMS(summaryText, contactInfo.phoneNumber);
     } else {
-      console.log("Unsupported sharing method:", settings.send_method);
+      console.log("Unsupported sharing method:", contactInfo.sendMethod);
       return false;
     }
   } catch (error) {
@@ -390,50 +508,68 @@ Generated automatically by QR Attendance System
   }
 };
 
-// Share via WhatsApp with better error handling and user feedback
+// Share via WhatsApp with better error handling
 export const shareViaWhatsApp = async (message: string, phoneNumber: string): Promise<boolean> => {
   try {
     // Validate phone number
-    if (!isValidPhoneNumber(phoneNumber)) {
-      console.error("Invalid phone number format for WhatsApp sharing");
-      toast({
-        title: "Invalid Phone Number",
-        description: "Please enter a valid phone number including country code (e.g., +1234567890)",
-        variant: "destructive",
-      });
+    if (!phoneNumber) {
+      console.error("No phone number provided for WhatsApp sharing");
       return false;
+    }
+    
+    // Clean the phone number to ensure it starts with +
+    let cleanPhone = phoneNumber.trim();
+    if (!cleanPhone.startsWith('+')) {
+      cleanPhone = '+' + cleanPhone;
     }
     
     // Encode the message for URL
     const encodedMessage = encodeURIComponent(message);
     
     // WhatsApp API URL
-    const whatsappUrl = `https://wa.me/${phoneNumber.replace('+', '')}?text=${encodedMessage}`;
+    const whatsappUrl = `https://wa.me/${cleanPhone.replace(/\D/g, '')}?text=${encodedMessage}`;
     
-    console.log("Opening WhatsApp share URL:", whatsappUrl);
+    console.log("Opening WhatsApp share URL");
     
-    // Try to open in a new window with specific settings to avoid popup blockers
-    const newWindow = window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-    
-    // Check if window was blocked
-    if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-      console.error("WhatsApp share window was blocked");
-      toast({
-        title: "Sharing Failed",
-        description: "Please disable popup blocker for this site and try again.",
-        variant: "destructive",
-      });
-      return false;
-    }
+    // Open in a new window
+    window.open(whatsappUrl, '_blank');
     
     return true;
   } catch (error) {
     console.error('Error in shareViaWhatsApp:', error);
-    toast({
-      title: "Sharing Failed",
-      description: "An unexpected error occurred. Please try again later.",
-      variant: "destructive",
-    });
+    return false;
+  }
+};
+
+// Share via SMS
+export const shareViaSMS = async (message: string, phoneNumber: string): Promise<boolean> => {
+  try {
+    // Validate phone number
+    if (!phoneNumber) {
+      console.error("No phone number provided for SMS sharing");
+      return false;
+    }
+    
+    // Clean the phone number
+    let cleanPhone = phoneNumber.trim();
+    if (!cleanPhone.startsWith('+')) {
+      cleanPhone = '+' + cleanPhone;
+    }
+    
+    // Encode the message
+    const encodedMessage = encodeURIComponent(message);
+    
+    // SMS URL scheme
+    const smsUrl = `sms:${cleanPhone}?body=${encodedMessage}`;
+    
+    console.log("Opening SMS app");
+    
+    // Open SMS app
+    window.open(smsUrl, '_blank');
+    
+    return true;
+  } catch (error) {
+    console.error('Error in shareViaSMS:', error);
     return false;
   }
 };

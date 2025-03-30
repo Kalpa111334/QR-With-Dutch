@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -10,7 +9,11 @@ import { addAttendanceRecord } from '@/utils/attendanceUtils';
 import { getEmployeeById } from '@/utils/employeeUtils';
 import { SwitchCamera } from 'lucide-react';
 
-const QRScanner: React.FC = () => {
+interface QRScannerProps {
+  onScan?: (result: string) => void; // Making this prop optional
+}
+
+const QRScanner: React.FC<QRScannerProps> = ({ onScan }) => {
   const webcamRef = useRef<Webcam>(null);
   const [scanning, setScanning] = useState(true);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -52,6 +55,12 @@ const QRScanner: React.FC = () => {
   }, [toast]);
 
   const processQRCode = useCallback(async (employeeData: any) => {
+    // If onScan is provided, use it instead of the default attendance processing
+    if (onScan && typeof employeeData === 'string') {
+      onScan(employeeData);
+      return;
+    }
+    
     try {
       // Add attendance record
       const attendance = await addAttendanceRecord(employeeData.id);
@@ -90,7 +99,7 @@ const QRScanner: React.FC = () => {
         showConfirmButton: false,
       });
     }
-  }, []);
+  }, [onScan]);
 
   const scanQRCode = useCallback(() => {
     if (!scanning || !webcamRef.current) {
@@ -133,18 +142,33 @@ const QRScanner: React.FC = () => {
     if (code) {
       try {
         lastScanTime.current = now;
-        const employeeData = JSON.parse(code.data);
         
-        if (employeeData && employeeData.id) {
-          processQRCode(employeeData);
+        if (onScan) {
+          // If we have an onScan callback, use the raw QR code data
+          onScan(code.data);
+        } else {
+          // For attendance scanning, try to parse as JSON
+          try {
+            const employeeData = JSON.parse(code.data);
+            if (employeeData && employeeData.id) {
+              processQRCode(employeeData);
+            }
+          } catch (e) {
+            // If not JSON and we have onScan, pass the raw data
+            if (onScan) {
+              onScan(code.data);
+            } else {
+              console.error("Invalid QR Code format:", e);
+            }
+          }
         }
       } catch (error) {
-        console.error("Invalid QR Code format:", error);
+        console.error("Error processing scan result:", error);
       }
     }
     
     rafId.current = requestAnimationFrame(scanQRCode);
-  }, [scanning, processQRCode]);
+  }, [scanning, processQRCode, onScan, scanCooldown]);
 
   useEffect(() => {
     rafId.current = requestAnimationFrame(scanQRCode);
