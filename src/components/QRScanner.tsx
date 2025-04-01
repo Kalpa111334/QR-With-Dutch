@@ -57,7 +57,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
   }, [toast]);
 
   const processQRCode = useCallback(async (qrData: any) => {
-    // If onScan is provided, use it instead of the default attendance processing
+    // If onScan is provided, use it instead of the default processing
     if (onScan && typeof qrData === 'string') {
       onScan(qrData);
       return;
@@ -72,14 +72,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         try {
           // Try to parse as JSON if it's a string
           if (typeof qrData === 'string') {
-            const parsedData = JSON.parse(qrData);
-            passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
+            try {
+              const parsedData = JSON.parse(qrData);
+              passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
+            } catch (e) {
+              // If parsing fails, use the raw string
+              console.log('Not a JSON QR code, using raw value');
+            }
           } else if (qrData && typeof qrData === 'object') {
             passIdentifier = qrData.passId || qrData.passCode || qrData.id || '';
           }
         } catch (e) {
-          // If parsing fails, use the raw string
-          console.log('Not a JSON QR code, using raw value');
+          // If any error occurs, use the raw string
+          console.log('Error processing QR code data, using raw value');
         }
         
         if (!passIdentifier) {
@@ -111,7 +116,28 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         
       } else {
         // Default attendance processing
-        const employeeData = typeof qrData === 'string' ? JSON.parse(qrData) : qrData;
+        let employeeData;
+        
+        try {
+          // Attempt to parse JSON
+          if (typeof qrData === 'string') {
+            try {
+              employeeData = JSON.parse(qrData);
+            } catch (e) {
+              console.error("Error parsing QR data:", e);
+              throw new Error("Invalid QR code format");
+            }
+          } else {
+            employeeData = qrData;
+          }
+          
+          // Check if employeeData has the required id field
+          if (!employeeData || !employeeData.id) {
+            throw new Error("Invalid employee QR code");
+          }
+        } catch (error) {
+          throw new Error("Invalid QR code format");
+        }
         
         // Add attendance record
         const { data: attendance, error } = await supabase
@@ -206,21 +232,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
     if (code) {
       try {
         lastScanTime.current = now;
-        
-        if (onScan) {
-          // If we have an onScan callback, use the raw QR code data
-          onScan(code.data);
-        } else {
-          // Otherwise process the QR code data directly
-          processQRCode(code.data);
-        }
+        processQRCode(code.data);
       } catch (error) {
         console.error("Error processing scan result:", error);
       }
     }
     
     rafId.current = requestAnimationFrame(scanQRCode);
-  }, [scanning, processQRCode, onScan, scanCooldown]);
+  }, [scanning, processQRCode, scanCooldown]);
 
   useEffect(() => {
     rafId.current = requestAnimationFrame(scanQRCode);
