@@ -86,20 +86,24 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           
           try {
             // Try to parse as JSON if it's a string
-            if (typeof qrData === 'string') {
+            if (typeof qrData === 'string' && qrData.trim() !== '') {
               try {
                 const parsedData = JSON.parse(qrData);
                 passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
               } catch (e) {
                 // If parsing fails, use the raw string
-                console.log('Not a JSON QR code, using raw value');
+                console.log('Not a JSON QR code, using raw value:', qrData);
+                passIdentifier = qrData;
               }
             } else if (qrData && typeof qrData === 'object') {
               passIdentifier = qrData.passId || qrData.passCode || qrData.id || '';
             }
           } catch (e) {
-            // If any error occurs, use the raw string
-            console.log('Error processing QR code data, using raw value');
+            // If any error occurs, use the raw string if it's a string
+            console.log('Error processing QR code data, using raw value:', qrData);
+            if (typeof qrData === 'string') {
+              passIdentifier = qrData;
+            }
           }
           
           if (!passIdentifier) {
@@ -131,27 +135,41 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           
         } else {
           // Attendance processing - auto determine check-in or check-out
-          let employeeData;
+          let employeeData: any = null;
+          let employeeId: string | null = null;
           
           try {
-            // Attempt to parse JSON
-            if (typeof qrData === 'string') {
+            // Handle both string and object QR codes
+            if (typeof qrData === 'string' && qrData.trim() !== '') {
+              // First try to parse as JSON
               try {
                 employeeData = JSON.parse(qrData);
+                employeeId = employeeData.id;
               } catch (e) {
-                console.error("Error parsing QR data:", e);
-                throw new Error("Invalid QR code format");
+                console.log("Not a JSON format, checking if it's a valid employee ID:", qrData);
+                // If not JSON, check if the string itself might be a valid UUID
+                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(qrData)) {
+                  employeeId = qrData;
+                } else {
+                  // Last resort: check if the string contains any employee info
+                  const employee = await getEmployeeById(qrData);
+                  if (employee) {
+                    employeeId = employee.id;
+                  } else {
+                    throw new Error("Invalid employee QR code");
+                  }
+                }
               }
-            } else {
-              employeeData = qrData;
+            } else if (qrData && typeof qrData === 'object') {
+              employeeId = qrData.id;
             }
             
-            // Check if employeeData has the required id field
-            if (!employeeData || !employeeData.id) {
+            if (!employeeId) {
               throw new Error("Invalid employee QR code");
             }
           } catch (error) {
-            throw new Error("Invalid QR code format");
+            console.error("Error processing QR data:", error);
+            throw new Error("Invalid QR code format or employee not found");
           }
           
           // Check if employee has already checked in today
@@ -159,7 +177,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           const { data: existingRecord, error } = await supabase
             .from('attendance')
             .select('check_in_time, check_out_time')
-            .eq('employee_id', employeeData.id)
+            .eq('employee_id', employeeId)
             .eq('date', today)
             .maybeSingle();
           
@@ -169,11 +187,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           // Determine action based on existing records
           if (!existingRecord) {
             // No record today - do check in
-            success = await recordAttendanceCheckIn(employeeData.id);
+            success = await recordAttendanceCheckIn(employeeId);
             actionMessage = 'checked in';
           } else if (existingRecord && !existingRecord.check_out_time) {
             // Record exists but no check-out time - do check out
-            success = await recordAttendanceCheckOut(employeeData.id);
+            success = await recordAttendanceCheckOut(employeeId);
             actionMessage = 'checked out';
           } else if (existingRecord && existingRecord.check_out_time) {
             // Already checked in and out
@@ -192,7 +210,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             return;
           }
           
-          const employee = await getEmployeeById(employeeData.id);
+          const employee = await getEmployeeById(employeeId);
           
           if (!employee) {
             throw new Error("Employee not found");
