@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -25,7 +26,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
   const { toast } = useToast();
   const rafId = useRef<number | null>(null);
   const lastScanTime = useRef<number>(0);
-  const scanCooldown = 3000; // 3 seconds between scans
+  const scanCooldown = 1500; // Reduced from 3000ms to 1500ms for faster response
+  const [isProcessing, setIsProcessing] = useState(false); // Added to prevent multiple scans being processed simultaneously
 
   useEffect(() => {
     // Get available cameras
@@ -50,143 +52,168 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
 
     getCameras();
 
+    // Start scanning as soon as component mounts
+    if (scanning && !rafId.current) {
+      rafId.current = requestAnimationFrame(scanQRCode);
+    }
+
     return () => {
       if (rafId.current) {
         cancelAnimationFrame(rafId.current);
+        rafId.current = null;
       }
     };
-  }, [toast]);
+  }, []);
 
   const processQRCode = useCallback(async (qrData: any) => {
-    // If onScan is provided, use it instead of the default processing
-    if (onScan && typeof qrData === 'string') {
-      onScan(qrData);
-      return;
-    }
+    // If already processing a scan, don't start another
+    if (isProcessing) return;
+    
+    setIsProcessing(true);
     
     try {
-      // Handle different scanner modes
-      if (mode === 'gatepass') {
-        // For gate pass scanning
-        let passIdentifier = typeof qrData === 'string' ? qrData : '';
-        
-        try {
-          // Try to parse as JSON if it's a string
-          if (typeof qrData === 'string') {
-            try {
-              const parsedData = JSON.parse(qrData);
-              passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
-            } catch (e) {
-              // If parsing fails, use the raw string
-              console.log('Not a JSON QR code, using raw value');
+      // If onScan is provided, use it instead of the default processing
+      if (onScan && typeof qrData === 'string') {
+        onScan(qrData);
+        return;
+      }
+      
+      try {
+        // Handle different scanner modes
+        if (mode === 'gatepass') {
+          // For gate pass scanning
+          let passIdentifier = typeof qrData === 'string' ? qrData : '';
+          
+          try {
+            // Try to parse as JSON if it's a string
+            if (typeof qrData === 'string') {
+              try {
+                const parsedData = JSON.parse(qrData);
+                passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
+              } catch (e) {
+                // If parsing fails, use the raw string
+                console.log('Not a JSON QR code, using raw value');
+              }
+            } else if (qrData && typeof qrData === 'object') {
+              passIdentifier = qrData.passId || qrData.passCode || qrData.id || '';
             }
-          } else if (qrData && typeof qrData === 'object') {
-            passIdentifier = qrData.passId || qrData.passCode || qrData.id || '';
+          } catch (e) {
+            // If any error occurs, use the raw string
+            console.log('Error processing QR code data, using raw value');
           }
-        } catch (e) {
-          // If any error occurs, use the raw string
-          console.log('Error processing QR code data, using raw value');
-        }
-        
-        if (!passIdentifier) {
-          throw new Error("Invalid gate pass QR code");
-        }
-        
-        // Verify the gate pass
-        const verification = await verifyGatePass(passIdentifier);
-        
-        if (verification.verified) {
-          // Show success message
+          
+          if (!passIdentifier) {
+            throw new Error("Invalid gate pass QR code");
+          }
+          
+          // Verify the gate pass
+          const verification = await verifyGatePass(passIdentifier);
+          
+          if (verification.verified) {
+            // Show success message
+            Swal.fire({
+              title: 'Success!',
+              text: 'Successfully, you can leave now.',
+              icon: 'success',
+              timer: 3000,
+              showConfirmButton: false,
+            });
+          } else {
+            // Show error for invalid pass
+            Swal.fire({
+              title: 'Invalid Pass',
+              text: verification.message,
+              icon: 'error',
+              timer: 3000,
+              showConfirmButton: false,
+            });
+          }
+          
+        } else {
+          // Attendance processing - auto determine check-in or check-out
+          let employeeData;
+          
+          try {
+            // Attempt to parse JSON
+            if (typeof qrData === 'string') {
+              try {
+                employeeData = JSON.parse(qrData);
+              } catch (e) {
+                console.error("Error parsing QR data:", e);
+                throw new Error("Invalid QR code format");
+              }
+            } else {
+              employeeData = qrData;
+            }
+            
+            // Check if employeeData has the required id field
+            if (!employeeData || !employeeData.id) {
+              throw new Error("Invalid employee QR code");
+            }
+          } catch (error) {
+            throw new Error("Invalid QR code format");
+          }
+          
+          // Check if employee has already checked in today
+          const today = new Date().toISOString().split('T')[0];
+          const { data: existingRecord, error } = await supabase
+            .from('attendance')
+            .select('check_in_time, check_out_time')
+            .eq('employee_id', employeeData.id)
+            .eq('date', today)
+            .maybeSingle();
+          
+          let success = false;
+          let actionMessage = '';
+          
+          // Determine action based on existing records
+          if (!existingRecord) {
+            // No record today - do check in
+            success = await recordAttendanceCheckIn(employeeData.id);
+            actionMessage = 'checked in';
+          } else if (existingRecord && !existingRecord.check_out_time) {
+            // Record exists but no check-out time - do check out
+            success = await recordAttendanceCheckOut(employeeData.id);
+            actionMessage = 'checked out';
+          } else if (existingRecord && existingRecord.check_out_time) {
+            // Already checked in and out
+            toast({
+              title: "Already Completed",
+              description: "You have already checked in and out today.",
+              variant: "destructive",
+            });
+            setIsProcessing(false);
+            return;
+          }
+          
+          if (!success) {
+            // The recordAttendance functions handle their own toast notifications
+            setIsProcessing(false);
+            return;
+          }
+          
+          const employee = await getEmployeeById(employeeData.id);
+          
+          if (!employee) {
+            throw new Error("Employee not found");
+          }
+          
+          // Show success message using SweetAlert
           Swal.fire({
-            title: 'Success!',
-            text: 'Successfully, you can leave now.',
+            title: `${actionMessage === 'checked in' ? 'Check-in' : 'Check-out'} Successful!`,
+            text: `${employee.firstName} ${employee.lastName} ${actionMessage} successfully at ${new Date().toLocaleTimeString()}`,
             icon: 'success',
             timer: 3000,
             showConfirmButton: false,
           });
-        } else {
-          // Show error for invalid pass
-          Swal.fire({
-            title: 'Invalid Pass',
-            text: verification.message,
-            icon: 'error',
-            timer: 3000,
-            showConfirmButton: false,
-          });
         }
+      } catch (error) {
+        console.error("Error processing QR code:", error);
         
-      } else {
-        // Attendance processing - auto determine check-in or check-out
-        let employeeData;
-        
-        try {
-          // Attempt to parse JSON
-          if (typeof qrData === 'string') {
-            try {
-              employeeData = JSON.parse(qrData);
-            } catch (e) {
-              console.error("Error parsing QR data:", e);
-              throw new Error("Invalid QR code format");
-            }
-          } else {
-            employeeData = qrData;
-          }
-          
-          // Check if employeeData has the required id field
-          if (!employeeData || !employeeData.id) {
-            throw new Error("Invalid employee QR code");
-          }
-        } catch (error) {
-          throw new Error("Invalid QR code format");
-        }
-        
-        // Check if employee has already checked in today
-        const today = new Date().toISOString().split('T')[0];
-        const { data: existingRecord, error } = await supabase
-          .from('attendance')
-          .select('check_in_time, check_out_time')
-          .eq('employee_id', employeeData.id)
-          .eq('date', today)
-          .maybeSingle();
-        
-        let success = false;
-        let actionMessage = '';
-        
-        // Determine action based on existing records
-        if (!existingRecord) {
-          // No record today - do check in
-          success = await recordAttendanceCheckIn(employeeData.id);
-          actionMessage = 'checked in';
-        } else if (existingRecord && !existingRecord.check_out_time) {
-          // Record exists but no check-out time - do check out
-          success = await recordAttendanceCheckOut(employeeData.id);
-          actionMessage = 'checked out';
-        } else if (existingRecord && existingRecord.check_out_time) {
-          // Already checked in and out
-          toast({
-            title: "Already Completed",
-            description: "You have already checked in and out today.",
-            variant: "destructive",
-          });
-          return;
-        }
-        
-        if (!success) {
-          // The recordAttendance functions handle their own toast notifications
-          return;
-        }
-        
-        const employee = await getEmployeeById(employeeData.id);
-        
-        if (!employee) {
-          throw new Error("Employee not found");
-        }
-        
-        // Show success message using SweetAlert
         Swal.fire({
-          title: `${actionMessage === 'checked in' ? 'Check-in' : 'Check-out'} Successful!`,
-          text: `${employee.firstName} ${employee.lastName} ${actionMessage} successfully at ${new Date().toLocaleTimeString()}`,
-          icon: 'success',
+          title: 'Error!',
+          text: error instanceof Error ? error.message : 'Failed to process QR code',
+          icon: 'error',
           timer: 3000,
           showConfirmButton: false,
         });
@@ -194,23 +221,18 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
       
       // Pause scanning briefly
       setScanning(false);
-      setTimeout(() => setScanning(true), 3000);
-      
+      setTimeout(() => {
+        setScanning(true);
+        setIsProcessing(false);
+      }, 2000);
     } catch (error) {
-      console.error("Error processing QR code:", error);
-      
-      Swal.fire({
-        title: 'Error!',
-        text: error instanceof Error ? error.message : 'Failed to process QR code',
-        icon: 'error',
-        timer: 3000,
-        showConfirmButton: false,
-      });
+      console.error("Unexpected error processing QR code:", error);
+      setIsProcessing(false);
     }
-  }, [onScan, mode, toast]);
+  }, [onScan, mode, toast, isProcessing]);
 
   const scanQRCode = useCallback(() => {
-    if (!scanning || !webcamRef.current) {
+    if (!scanning || !webcamRef.current || isProcessing) {
       rafId.current = requestAnimationFrame(scanQRCode);
       return;
     }
@@ -221,53 +243,79 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
       return;
     }
     
-    const webcam = webcamRef.current;
-    const video = webcam.video;
-    
-    if (!video || video.readyState !== 4) {
-      rafId.current = requestAnimationFrame(scanQRCode);
-      return;
-    }
-    
-    // Create a virtual canvas to process the video frame
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    
-    if (!context) {
-      rafId.current = requestAnimationFrame(scanQRCode);
-      return;
-    }
-    
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    
-    // Process frame with jsQR
-    const code = jsQR(imageData.data, imageData.width, imageData.height);
-    
-    if (code) {
-      try {
+    try {
+      const webcam = webcamRef.current;
+      const video = webcam.video;
+      
+      if (!video || video.readyState !== 4) {
+        rafId.current = requestAnimationFrame(scanQRCode);
+        return;
+      }
+      
+      // Make sure video dimensions are valid before proceeding
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+      
+      if (!videoWidth || !videoHeight) {
+        console.log("Video dimensions not ready yet");
+        rafId.current = requestAnimationFrame(scanQRCode);
+        return;
+      }
+      
+      // Create a virtual canvas to process the video frame
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      
+      if (!context) {
+        rafId.current = requestAnimationFrame(scanQRCode);
+        return;
+      }
+      
+      // Set canvas dimensions to match video
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+      
+      // Draw the current video frame onto the canvas
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Get the image data from the canvas
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      
+      // Process frame with jsQR
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      
+      if (code) {
+        console.log("QR Code detected:", code.data);
         lastScanTime.current = now;
         processQRCode(code.data);
-      } catch (error) {
-        console.error("Error processing scan result:", error);
       }
+    } catch (error) {
+      console.error("Error in scanQRCode:", error);
     }
     
     rafId.current = requestAnimationFrame(scanQRCode);
-  }, [scanning, processQRCode, scanCooldown]);
+  }, [scanning, processQRCode, scanCooldown, isProcessing]);
 
+  // Make sure to update the scanQRCode dependency when related states change
   useEffect(() => {
-    rafId.current = requestAnimationFrame(scanQRCode);
+    // Cancel existing animation frame before setting a new one
+    if (rafId.current) {
+      cancelAnimationFrame(rafId.current);
+      rafId.current = null;
+    }
+    
+    // Start scanning animation frame
+    if (scanning) {
+      rafId.current = requestAnimationFrame(scanQRCode);
+    }
     
     return () => {
       if (rafId.current) {
         cancelAnimationFrame(rafId.current);
+        rafId.current = null;
       }
     };
-  }, [scanQRCode]);
+  }, [scanQRCode, scanning]);
 
   const handleToggleScanning = () => {
     setScanning(prev => !prev);
@@ -331,6 +379,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               audio={false}
               videoConstraints={videoConstraints}
               className="w-full h-full object-cover"
+              onUserMediaError={(err) => {
+                console.error("Webcam error:", err);
+                toast({
+                  title: "Camera Error",
+                  description: "Unable to access camera. Please check permissions.",
+                  variant: "destructive",
+                });
+              }}
             />
             
             {scanning && (
@@ -345,6 +401,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
                 <p className="text-white text-xl font-bold">Scanner Paused</p>
               </div>
             )}
+            
+            {isProcessing && (
+              <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center">
+                <div className="bg-white dark:bg-slate-800 p-3 rounded-lg shadow-lg">
+                  <div className="h-6 w-6 border-2 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
+                  <p className="mt-2 text-sm">Processing...</p>
+                </div>
+              </div>
+            )}
           </div>
           
           <p className="text-center text-sm text-muted-foreground">
@@ -354,6 +419,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             <p className="text-center font-medium">
               <span className="font-bold text-primary">Automatic Check-In/Out</span> - Scan your QR code to record attendance
             </p>
+          )}
+          
+          {/* Debug information - hidden in production */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-4 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs">
+              <p>Camera: {selectedCamera || 'None selected'}</p>
+              <p>Facing mode: {facingMode}</p>
+              <p>Status: {scanning ? 'Scanning' : 'Paused'}</p>
+            </div>
           )}
         </div>
       </CardContent>
