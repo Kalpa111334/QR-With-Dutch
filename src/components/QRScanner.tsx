@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -23,7 +22,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>('');
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment'); 
-  const [scanAction, setScanAction] = useState<'check-in' | 'check-out'>('check-in');
   const { toast } = useToast();
   const rafId = useRef<number | null>(null);
   const lastScanTime = useRef<number>(0);
@@ -118,7 +116,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         }
         
       } else {
-        // Attendance processing
+        // Attendance processing - auto determine check-in or check-out
         let employeeData;
         
         try {
@@ -142,21 +140,39 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           throw new Error("Invalid QR code format");
         }
         
-        // Handle check-in or check-out based on the selected action
+        // Check if employee has already checked in today
+        const today = new Date().toISOString().split('T')[0];
+        const { data: existingRecord, error } = await supabase
+          .from('attendance')
+          .select('check_in_time, check_out_time')
+          .eq('employee_id', employeeData.id)
+          .eq('date', today)
+          .maybeSingle();
+        
         let success = false;
         let actionMessage = '';
         
-        if (scanAction === 'check-in') {
+        // Determine action based on existing records
+        if (!existingRecord) {
+          // No record today - do check in
           success = await recordAttendanceCheckIn(employeeData.id);
           actionMessage = 'checked in';
-        } else {
+        } else if (existingRecord && !existingRecord.check_out_time) {
+          // Record exists but no check-out time - do check out
           success = await recordAttendanceCheckOut(employeeData.id);
           actionMessage = 'checked out';
+        } else if (existingRecord && existingRecord.check_out_time) {
+          // Already checked in and out
+          toast({
+            title: "Already Completed",
+            description: "You have already checked in and out today.",
+            variant: "destructive",
+          });
+          return;
         }
         
         if (!success) {
           // The recordAttendance functions handle their own toast notifications
-          // So we don't need to throw an error here
           return;
         }
         
@@ -168,7 +184,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         
         // Show success message using SweetAlert
         Swal.fire({
-          title: `${scanAction === 'check-in' ? 'Check-in' : 'Check-out'} Successful!`,
+          title: `${actionMessage === 'checked in' ? 'Check-in' : 'Check-out'} Successful!`,
           text: `${employee.firstName} ${employee.lastName} ${actionMessage} successfully at ${new Date().toLocaleTimeString()}`,
           icon: 'success',
           timer: 3000,
@@ -191,7 +207,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         showConfirmButton: false,
       });
     }
-  }, [onScan, mode, scanAction]);
+  }, [onScan, mode, toast]);
 
   const scanQRCode = useCallback(() => {
     if (!scanning || !webcamRef.current) {
@@ -260,10 +276,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
   const handleFlipCamera = () => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
   };
-  
-  const toggleScanAction = () => {
-    setScanAction(prev => prev === 'check-in' ? 'check-out' : 'check-in');
-  };
 
   const videoConstraints = {
     deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
@@ -313,24 +325,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             </select>
           )}
           
-          {mode === 'attendance' && (
-            <div className="flex justify-center mb-4">
-              <Button
-                variant={scanAction === 'check-in' ? "default" : "outline"}
-                className="mr-2"
-                onClick={() => setScanAction('check-in')}
-              >
-                Check In
-              </Button>
-              <Button
-                variant={scanAction === 'check-out' ? "default" : "outline"}
-                onClick={() => setScanAction('check-out')}
-              >
-                Check Out
-              </Button>
-            </div>
-          )}
-          
           <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden shadow-xl">
             <Webcam
               ref={webcamRef}
@@ -358,7 +352,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           </p>
           {mode === 'attendance' && (
             <p className="text-center font-medium">
-              Selected mode: <span className="font-bold text-primary">{scanAction === 'check-in' ? 'Check In' : 'Check Out'}</span>
+              <span className="font-bold text-primary">Automatic Check-In/Out</span> - Scan your QR code to record attendance
             </p>
           )}
         </div>
