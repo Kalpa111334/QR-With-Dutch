@@ -20,8 +20,7 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
       color: {
         dark: '#000000',
         light: '#ffffff'
-      },
-      errorCorrectionLevel: 'H' // Higher error correction for better scanning
+      }
     });
     
     return svgString;
