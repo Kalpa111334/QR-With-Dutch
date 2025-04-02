@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -25,8 +26,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
   const { toast } = useToast();
   const rafId = useRef<number | null>(null);
   const lastScanTime = useRef<number>(0);
-  const scanCooldown = 1500; // Reduced from 3000ms to 1500ms for faster response
-  const [isProcessing, setIsProcessing] = useState(false); // We'll keep this state but remove the visual indicator
+  const scanCooldown = 1000; // Reduced to 1000ms for faster response
+  const [isProcessing, setIsProcessing] = useState(false);
+  const processingTimeout = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Get available cameras
@@ -61,6 +63,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         cancelAnimationFrame(rafId.current);
         rafId.current = null;
       }
+      if (processingTimeout.current) {
+        clearTimeout(processingTimeout.current);
+        processingTimeout.current = null;
+      }
     };
   }, []);
 
@@ -70,10 +76,20 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
     
     setIsProcessing(true);
     
+    // Setup a timeout to reset processing state after 5 seconds as a failsafe
+    processingTimeout.current = setTimeout(() => {
+      setIsProcessing(false);
+    }, 5000);
+    
     try {
       // If onScan is provided, use it instead of the default processing
       if (onScan && typeof qrData === 'string') {
         onScan(qrData);
+        setScanning(false);
+        setTimeout(() => {
+          setScanning(true);
+          setIsProcessing(false);
+        }, 2000);
         return;
       }
       
@@ -90,7 +106,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
                 const parsedData = JSON.parse(qrData);
                 passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
               } catch (e) {
-                // If parsing fails, use the raw string
                 console.log('Not a JSON QR code, using raw value:', qrData);
                 passIdentifier = qrData;
               }
@@ -98,7 +113,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               passIdentifier = qrData.passId || qrData.passCode || qrData.id || '';
             }
           } catch (e) {
-            // If any error occurs, use the raw string if it's a string
             console.log('Error processing QR code data, using raw value:', qrData);
             if (typeof qrData === 'string') {
               passIdentifier = qrData;
@@ -171,6 +185,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             throw new Error("Invalid QR code format or employee not found");
           }
           
+          // Check if employee exists before proceeding
+          const employee = await getEmployeeById(employeeId);
+          if (!employee) {
+            throw new Error("Employee not found");
+          }
+          
           // Check if employee has already checked in today
           const today = new Date().toISOString().split('T')[0];
           const { data: existingRecord, error } = await supabase
@@ -178,7 +198,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             .select('check_in_time, check_out_time')
             .eq('employee_id', employeeId)
             .eq('date', today)
-            .maybeSingle();
+            .maybeSingle(); // Use maybeSingle() instead of single() to avoid error when no record is found
           
           let success = false;
           let actionMessage = '';
@@ -200,19 +220,21 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               variant: "destructive",
             });
             setIsProcessing(false);
+            if (processingTimeout.current) {
+              clearTimeout(processingTimeout.current);
+              processingTimeout.current = null;
+            }
             return;
           }
           
           if (!success) {
             // The recordAttendance functions handle their own toast notifications
             setIsProcessing(false);
+            if (processingTimeout.current) {
+              clearTimeout(processingTimeout.current);
+              processingTimeout.current = null;
+            }
             return;
-          }
-          
-          const employee = await getEmployeeById(employeeId);
-          
-          if (!employee) {
-            throw new Error("Employee not found");
           }
           
           // Show success message using SweetAlert
@@ -241,10 +263,18 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
       setTimeout(() => {
         setScanning(true);
         setIsProcessing(false);
+        if (processingTimeout.current) {
+          clearTimeout(processingTimeout.current);
+          processingTimeout.current = null;
+        }
       }, 2000);
     } catch (error) {
       console.error("Unexpected error processing QR code:", error);
       setIsProcessing(false);
+      if (processingTimeout.current) {
+        clearTimeout(processingTimeout.current);
+        processingTimeout.current = null;
+      }
     }
   }, [onScan, mode, toast, isProcessing]);
 
@@ -274,7 +304,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
       const videoHeight = video.videoHeight;
       
       if (!videoWidth || !videoHeight) {
-        console.log("Video dimensions not ready yet");
         rafId.current = requestAnimationFrame(scanQRCode);
         return;
       }
@@ -418,8 +447,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
                 <p className="text-white text-xl font-bold">Scanner Paused</p>
               </div>
             )}
-            
-            {/* Removed the isProcessing overlay/indicator here */}
           </div>
           
           <p className="text-center text-sm text-muted-foreground">
