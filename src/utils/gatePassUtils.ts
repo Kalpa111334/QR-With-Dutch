@@ -78,11 +78,15 @@ export const createGatePass = async (
         p_validity: validity,
         p_type: type,
         p_reason: reason,
-        p_created_by: null, // This will be null as we don't have auth set up yet
+        p_created_by: null as any, // Cast to any to fix the 'never' type error
         p_expires_at: expirationDate.toISOString()
       });
       
     if (error) throw error;
+    
+    if (!data) {
+      throw new Error('Failed to create gate pass');
+    }
     
     return {
       id: data.id,
