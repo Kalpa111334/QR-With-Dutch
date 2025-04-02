@@ -1,4 +1,3 @@
-
 import { supabase } from '@/integrations/supabase/client';
 import { Employee } from '@/types';
 import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
@@ -73,20 +72,27 @@ export const createGatePass = async (
     // This is a temporary solution until authentication is implemented
     const systemUserId = '00000000-0000-0000-0000-000000000000'; // Default system user ID
     
-    // Use the Supabase RPC function that has SECURITY DEFINER permissions
+    // Insert directly into the gate_passes table instead of using RPC function
     const { data, error } = await supabase
-      .rpc('create_gate_pass', {
-        p_employee_id: employeeId,
-        p_pass_code: passCode,
-        p_employee_name: employeeName,
-        p_validity: validity,
-        p_type: type,
-        p_reason: reason,
-        p_created_by: systemUserId, // Use the system user ID instead of null
-        p_expires_at: expirationDate.toISOString()
-      });
+      .from('gate_passes')
+      .insert({
+        employee_id: employeeId,
+        pass_code: passCode,
+        employee_name: employeeName,
+        validity: validity,
+        type: type,
+        reason: reason,
+        created_by: systemUserId, // Use the system user ID
+        expires_at: expirationDate.toISOString(),
+        status: 'active'
+      })
+      .select('*')
+      .single();
       
-    if (error) throw error;
+    if (error) {
+      console.error('Error creating gate pass:', error);
+      throw error;
+    }
     
     if (!data) {
       throw new Error('Failed to create gate pass');
@@ -97,10 +103,10 @@ export const createGatePass = async (
       employeeId: data.employee_id,
       employeeName: employeeName,
       passCode: data.pass_code,
-      validity: data.validity as 'single' | 'day' | 'week' | 'month',
-      type: data.type as 'entry' | 'exit' | 'both',
+      validity: data.validity,
+      type: data.type,
       reason: data.reason,
-      status: data.status as 'active' | 'used' | 'expired',
+      status: data.status,
       createdAt: data.created_at,
       expiresAt: data.expires_at,
       usedAt: data.used_at
@@ -178,8 +184,20 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
   pass?: GatePass;
 }> => {
   try {
-    // Try to find the pass by ID first, then by pass code
-    const { data: pass, error } = await supabase
+    console.log('Verifying gate pass with identifier:', passIdentifier);
+    
+    if (!passIdentifier || passIdentifier.trim() === '') {
+      return {
+        verified: false,
+        message: 'Invalid gate pass identifier. No pass ID or code provided.'
+      };
+    }
+    
+    // Determine if the passIdentifier is a UUID or a pass code
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(passIdentifier);
+    
+    // Build the query based on the identifier type
+    let query = supabase
       .from('gate_passes')
       .select(`
         id,
@@ -193,11 +211,28 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
         expires_at,
         used_at,
         employees (id, first_name, last_name)
-      `)
-      .or(`id.eq.${passIdentifier},pass_code.eq.${passIdentifier}`)
-      .single();
+      `);
+    
+    if (isUUID) {
+      query = query.eq('id', passIdentifier);
+    } else {
+      query = query.eq('pass_code', passIdentifier);
+    }
+    
+    // Execute the query
+    const { data: pass, error } = await query.maybeSingle();
+    
+    console.log('Gate pass query result:', { pass, error });
       
-    if (error || !pass) {
+    if (error) {
+      console.error('Error querying gate pass:', error);
+      return {
+        verified: false,
+        message: 'Error verifying gate pass. Please try again.'
+      };
+    }
+    
+    if (!pass) {
       return {
         verified: false,
         message: 'Invalid gate pass. This pass does not exist.'
@@ -225,8 +260,8 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
             `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
             'Unknown Employee',
           passCode: pass.pass_code,
-          validity: pass.validity as 'single' | 'day' | 'week' | 'month',
-          type: pass.type as 'entry' | 'exit' | 'both',
+          validity: pass.validity,
+          type: pass.type,
           reason: pass.reason,
           status: 'expired',
           createdAt: pass.created_at,
@@ -248,10 +283,10 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
             `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
             'Unknown Employee',
           passCode: pass.pass_code,
-          validity: pass.validity as 'single' | 'day' | 'week' | 'month',
-          type: pass.type as 'entry' | 'exit' | 'both',
+          validity: pass.validity,
+          type: pass.type,
           reason: pass.reason,
-          status: pass.status as 'active' | 'used' | 'expired',
+          status: pass.status,
           createdAt: pass.created_at,
           expiresAt: pass.expires_at,
           usedAt: pass.used_at
@@ -271,10 +306,10 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
             `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
             'Unknown Employee',
           passCode: pass.pass_code,
-          validity: pass.validity as 'single' | 'day' | 'week' | 'month',
-          type: pass.type as 'entry' | 'exit' | 'both',
+          validity: pass.validity,
+          type: pass.type,
           reason: pass.reason,
-          status: pass.status as 'active' | 'used' | 'expired',
+          status: pass.status,
           createdAt: pass.created_at,
           expiresAt: pass.expires_at,
           usedAt: pass.used_at
@@ -303,10 +338,10 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
           `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
           'Unknown Employee',
         passCode: pass.pass_code,
-        validity: pass.validity as 'single' | 'day' | 'week' | 'month',
-        type: pass.type as 'entry' | 'exit' | 'both',
+        validity: pass.validity,
+        type: pass.type,
         reason: pass.reason,
-        status: pass.validity === 'single' ? 'used' : pass.status as 'active' | 'used' | 'expired',
+        status: pass.validity === 'single' ? 'used' : pass.status,
         createdAt: pass.created_at,
         expiresAt: pass.expires_at,
         usedAt: pass.validity === 'single' ? new Date().toISOString() : pass.used_at

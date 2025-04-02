@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -12,30 +11,19 @@ import {
   saveAdminContactInfo,
   autoShareAttendanceSummary
 } from '@/utils/attendanceUtils';
-import { CalendarIcon, Send, Phone, MessageSquare, Clock, Save } from 'lucide-react';
+import { CalendarIcon, Send, MessageSquare, Clock, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Label } from "@/components/ui/label";
-import { 
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage 
-} from "@/components/ui/form";
-import { useForm } from "react-hook-form";
 
 const AttendanceSummaryShare: React.FC = () => {
   const [date, setDate] = useState<Date>(new Date());
   const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
   const [loading, setLoading] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [sendingMethod, setSendingMethod] = useState<'whatsapp' | 'sms'>('whatsapp');
   const [autoShareEnabled, setAutoShareEnabled] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const { toast } = useToast();
@@ -69,7 +57,6 @@ const AttendanceSummaryShare: React.FC = () => {
     const loadAdminContactInfo = async () => {
       const contactInfo = await getAdminContactInfo();
       setPhoneNumber(contactInfo.phoneNumber);
-      setSendingMethod(contactInfo.sendMethod);
       setAutoShareEnabled(contactInfo.isAutoShareEnabled);
     };
 
@@ -92,7 +79,7 @@ const AttendanceSummaryShare: React.FC = () => {
               if (success) {
                 toast({
                   title: 'Auto-Share Success',
-                  description: `Attendance summary automatically shared via ${sendingMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}`,
+                  description: 'Attendance summary automatically shared via WhatsApp',
                 });
               }
             })
@@ -104,7 +91,7 @@ const AttendanceSummaryShare: React.FC = () => {
     }, 5 * 60 * 1000); // Check every 5 minutes
 
     return () => clearInterval(intervalId);
-  }, [autoShareEnabled, phoneNumber, sendingMethod, toast]);
+  }, [autoShareEnabled, phoneNumber, toast]);
 
   const handleShare = () => {
     if (!phoneNumber) {
@@ -130,17 +117,12 @@ const AttendanceSummaryShare: React.FC = () => {
 
     const summaryText = encodeURIComponent(generateAttendanceSummaryText(date, attendanceRecords));
     
-    if (sendingMethod === 'whatsapp') {
-      // WhatsApp URL scheme
-      window.open(`https://wa.me/${cleanNumber}?text=${summaryText}`, '_blank');
-    } else {
-      // SMS URL scheme - works on most mobile browsers
-      window.open(`sms:${cleanNumber}?body=${summaryText}`, '_blank');
-    }
-
+    // WhatsApp URL scheme
+    window.open(`https://wa.me/${cleanNumber}?text=${summaryText}`, '_blank');
+    
     toast({
       title: 'Sharing Summary',
-      description: `Opening ${sendingMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'} with the attendance summary`,
+      description: 'Opening WhatsApp with the attendance summary',
     });
   };
 
@@ -149,7 +131,7 @@ const AttendanceSummaryShare: React.FC = () => {
     try {
       const success = await saveAdminContactInfo(
         phoneNumber,
-        sendingMethod,
+        'whatsapp', // Always use WhatsApp
         autoShareEnabled
       );
       
@@ -182,14 +164,14 @@ const AttendanceSummaryShare: React.FC = () => {
   };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/40 dark:to-purple-900/40 shadow-lg">
+    <Card className="w-full max-w-2xl mx-auto bg-gradient-to-br from-green-50 to-blue-50 dark:from-green-900/40 dark:to-blue-900/40 shadow-lg">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Send className="h-5 w-5" />
-          Share Attendance Summary
+          <MessageSquare className="h-5 w-5 text-green-600" />
+          WhatsApp Attendance Summary
         </CardTitle>
         <CardDescription>
-          Set up automatic daily attendance summary sharing to supervisors
+          Set up automatic daily attendance summary sharing via WhatsApp
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -271,35 +253,11 @@ const AttendanceSummaryShare: React.FC = () => {
         <div className="space-y-6 pt-2 border-t">
           <h3 className="text-lg font-medium flex items-center gap-2 mt-4">
             <Clock className="h-5 w-5" />
-            Automatic Sharing Settings
+            WhatsApp Sharing Settings
           </h3>
           
           <div className="space-y-2">
-            <label className="text-sm font-medium">Send Method</label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={sendingMethod === 'whatsapp' ? 'default' : 'outline'}
-                className={cn("flex-1", sendingMethod === 'whatsapp' && "bg-green-600 hover:bg-green-700")}
-                onClick={() => setSendingMethod('whatsapp')}
-              >
-                <MessageSquare className="mr-2 h-4 w-4" />
-                WhatsApp
-              </Button>
-              <Button
-                type="button"
-                variant={sendingMethod === 'sms' ? 'default' : 'outline'}
-                className={cn("flex-1", sendingMethod === 'sms' && "bg-blue-600 hover:bg-blue-700")}
-                onClick={() => setSendingMethod('sms')}
-              >
-                <Phone className="mr-2 h-4 w-4" />
-                SMS
-              </Button>
-            </div>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Admin Phone Number</label>
+            <label className="text-sm font-medium">Admin WhatsApp Number</label>
             <Input 
               value={phoneNumber} 
               onChange={(e) => setPhoneNumber(e.target.value)}
@@ -322,7 +280,7 @@ const AttendanceSummaryShare: React.FC = () => {
             <Button 
               onClick={saveSettings} 
               disabled={loading} 
-              className="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+              className="flex-1 bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white"
             >
               <Save className="mr-2 h-4 w-4" />
               Save Settings
@@ -332,7 +290,7 @@ const AttendanceSummaryShare: React.FC = () => {
             <Button 
               onClick={handleShare} 
               disabled={loading || attendanceRecords.length === 0} 
-              className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700"
+              className="flex-1 bg-gradient-to-r from-teal-500 to-green-600 hover:from-teal-600 hover:to-green-700 text-white"
             >
               <Send className="mr-2 h-4 w-4" />
               Send Now

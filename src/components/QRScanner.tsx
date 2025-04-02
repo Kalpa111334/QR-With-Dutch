@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { getEmployeeById } from '@/utils/employeeUtils';
-import { SwitchCamera } from 'lucide-react';
+import { SwitchCamera, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { verifyGatePass } from '@/utils/gatePassUtils';
 import { recordAttendanceCheckIn, recordAttendanceCheckOut } from '@/utils/attendanceUtils';
@@ -26,7 +26,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
   const { toast } = useToast();
   const rafId = useRef<number | null>(null);
   const lastScanTime = useRef<number>(0);
-  const scanCooldown = 1000; // Reduced to 1000ms for faster response
+  const scanCooldown = 500; // Further reduced for faster response
   const [isProcessing, setIsProcessing] = useState(false);
   const processingTimeout = useRef<NodeJS.Timeout | null>(null);
 
@@ -39,7 +39,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         setCameras(videoDevices);
         
         if (videoDevices.length > 0) {
-          setSelectedCamera(videoDevices[0].deviceId);
+          // Try to find a back camera first
+          const backCamera = videoDevices.find(device => 
+            device.label.toLowerCase().includes('back') || 
+            device.label.toLowerCase().includes('rear')
+          );
+          
+          setSelectedCamera(backCamera?.deviceId || videoDevices[0].deviceId);
         }
       } catch (error) {
         console.error("Error accessing cameras:", error);
@@ -75,9 +81,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
     if (isProcessing) return;
     
     setIsProcessing(true);
+    console.log("Processing QR code data:", qrData);
     
     // Setup a timeout to reset processing state after 5 seconds as a failsafe
     processingTimeout.current = setTimeout(() => {
+      console.log("Processing timeout reached, resetting state");
       setIsProcessing(false);
     }, 5000);
     
@@ -89,7 +97,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
         setTimeout(() => {
           setScanning(true);
           setIsProcessing(false);
-        }, 2000);
+        }, 1500);
         return;
       }
       
@@ -104,13 +112,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             if (typeof qrData === 'string' && qrData.trim() !== '') {
               try {
                 const parsedData = JSON.parse(qrData);
-                passIdentifier = parsedData.passId || parsedData.passCode || parsedData.id || qrData;
+                passIdentifier = parsedData.passId || parsedData.id || parsedData.passCode || qrData;
               } catch (e) {
                 console.log('Not a JSON QR code, using raw value:', qrData);
                 passIdentifier = qrData;
               }
             } else if (qrData && typeof qrData === 'object') {
-              passIdentifier = qrData.passId || qrData.passCode || qrData.id || '';
+              passIdentifier = qrData.passId || qrData.id || qrData.passCode || '';
             }
           } catch (e) {
             console.log('Error processing QR code data, using raw value:', qrData);
@@ -123,14 +131,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             throw new Error("Invalid gate pass QR code");
           }
           
+          console.log("Verifying gate pass with identifier:", passIdentifier);
+          
           // Verify the gate pass
           const verification = await verifyGatePass(passIdentifier);
+          console.log("Gate pass verification result:", verification);
           
           if (verification.verified) {
             // Show success message
             Swal.fire({
               title: 'Success!',
-              text: 'Successfully, you can leave now.',
+              text: verification.message || 'Successfully, you can leave now.',
               icon: 'success',
               timer: 3000,
               showConfirmButton: false,
@@ -139,7 +150,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             // Show error for invalid pass
             Swal.fire({
               title: 'Invalid Pass',
-              text: verification.message,
+              text: verification.message || 'Pass verification failed',
               icon: 'error',
               timer: 3000,
               showConfirmButton: false,
@@ -158,16 +169,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               try {
                 employeeData = JSON.parse(qrData);
                 employeeId = employeeData.id;
+                console.log("Parsed employee data from QR:", employeeData);
               } catch (e) {
                 console.log("Not a JSON format, checking if it's a valid employee ID:", qrData);
                 // If not JSON, check if the string itself might be a valid UUID
                 if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(qrData)) {
                   employeeId = qrData;
+                  console.log("Found valid UUID in QR code:", employeeId);
                 } else {
                   // Last resort: check if the string contains any employee info
                   const employee = await getEmployeeById(qrData);
                   if (employee) {
                     employeeId = employee.id;
+                    console.log("Found employee by ID lookup:", employeeId);
                   } else {
                     throw new Error("Invalid employee QR code");
                   }
@@ -175,6 +189,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               }
             } else if (qrData && typeof qrData === 'object') {
               employeeId = qrData.id;
+              console.log("Extracted employee ID from object:", employeeId);
             }
             
             if (!employeeId) {
@@ -190,6 +205,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           if (!employee) {
             throw new Error("Employee not found");
           }
+          console.log("Found employee:", employee);
           
           // Check if employee has already checked in today
           const today = new Date().toISOString().split('T')[0];
@@ -198,7 +214,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             .select('check_in_time, check_out_time')
             .eq('employee_id', employeeId)
             .eq('date', today)
-            .maybeSingle(); // Use maybeSingle() instead of single() to avoid error when no record is found
+            .maybeSingle();
+          
+          console.log("Existing attendance record:", existingRecord);
           
           let success = false;
           let actionMessage = '';
@@ -214,10 +232,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             actionMessage = 'checked out';
           } else if (existingRecord && existingRecord.check_out_time) {
             // Already checked in and out
-            toast({
+            Swal.fire({
               title: "Already Completed",
-              description: "You have already checked in and out today.",
-              variant: "destructive",
+              text: "You have already checked in and out today.",
+              icon: "info",
+              timer: 3000,
+              showConfirmButton: false,
             });
             setIsProcessing(false);
             if (processingTimeout.current) {
@@ -228,7 +248,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           }
           
           if (!success) {
-            // The recordAttendance functions handle their own toast notifications
+            // Failed to record attendance
+            Swal.fire({
+              title: "Error",
+              text: `Failed to ${actionMessage === 'checked in' ? 'check in' : 'check out'}. Please try again.`,
+              icon: "error",
+              timer: 3000,
+              showConfirmButton: false,
+            });
             setIsProcessing(false);
             if (processingTimeout.current) {
               clearTimeout(processingTimeout.current);
@@ -267,7 +294,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           clearTimeout(processingTimeout.current);
           processingTimeout.current = null;
         }
-      }, 2000);
+      }, 1500);
     } catch (error) {
       console.error("Unexpected error processing QR code:", error);
       setIsProcessing(false);
@@ -447,6 +474,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
                 <p className="text-white text-xl font-bold">Scanner Paused</p>
               </div>
             )}
+            
+            {isProcessing && (
+              <div className="absolute bottom-4 right-4 p-2 bg-black/60 rounded-md text-white flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Processing...</span>
+              </div>
+            )}
           </div>
           
           <p className="text-center text-sm text-muted-foreground">
@@ -464,6 +498,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               <p>Camera: {selectedCamera || 'None selected'}</p>
               <p>Facing mode: {facingMode}</p>
               <p>Status: {scanning ? 'Scanning' : 'Paused'}</p>
+              <p>Processing: {isProcessing ? 'Yes' : 'No'}</p>
             </div>
           )}
         </div>

@@ -1,15 +1,15 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getAttendanceRecords, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary } from '@/utils/attendanceUtils';
 import { getEmployees } from '@/utils/employeeUtils';
-import { User, Users, Clock, CheckCircle, UploadCloud, Share2, AlertTriangle } from 'lucide-react';
+import { User, Users, Clock, CheckCircle, UploadCloud, Share2, AlertTriangle, MessageSquare } from 'lucide-react';
 import { Attendance, Employee } from '@/types';
 import { Button } from '@/components/ui/button';
 import BulkEmployeeUpload from './BulkEmployeeUpload';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
@@ -22,7 +22,6 @@ const Dashboard: React.FC = () => {
   
   // Admin contact settings
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [sendMethod, setSendMethod] = useState<'whatsapp' | 'sms'>('whatsapp');
   const [isAutoShareEnabled, setIsAutoShareEnabled] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [sharingError, setSharingError] = useState<string | null>(null);
@@ -44,7 +43,6 @@ const Dashboard: React.FC = () => {
         
         // Set admin settings
         setPhoneNumber(adminSettings.phoneNumber);
-        setSendMethod(adminSettings.sendMethod);
         setIsAutoShareEnabled(adminSettings.isAutoShareEnabled);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -85,16 +83,17 @@ const Dashboard: React.FC = () => {
         return;
       }
       
+      // Always use WhatsApp as the send method
       const success = await saveAdminContactInfo(
         phoneNumber,
-        sendMethod,
+        'whatsapp', // Force WhatsApp as requested
         isAutoShareEnabled
       );
       
       if (success) {
         toast({
           title: 'Settings saved',
-          description: 'Automatic sharing settings have been updated',
+          description: 'Automatic WhatsApp sharing settings have been updated',
         });
       } else {
         toast({
@@ -136,7 +135,7 @@ const Dashboard: React.FC = () => {
       } else {
         toast({
           title: 'Sharing initiated',
-          description: `Report is being shared via ${sendMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}`,
+          description: 'Report is being shared via WhatsApp',
         });
       }
     } catch (error) {
@@ -170,7 +169,7 @@ const Dashboard: React.FC = () => {
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-semibold">Automatic Sharing Settings</h2>
+          <h2 className="text-2xl font-semibold">WhatsApp Sharing Settings</h2>
           <Button 
             variant="outline" 
             onClick={() => setShowSettings(false)}
@@ -187,13 +186,16 @@ const Dashboard: React.FC = () => {
           </Alert>
         )}
         
-        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-800/30 border-none shadow-md">
+        <Card className="bg-gradient-to-br from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-800/30 border-none shadow-md">
           <CardHeader>
-            <CardTitle>Configure Automatic Attendance Reports</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-green-600" />
+              Configure WhatsApp Attendance Reports
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
-              <Label htmlFor="phone-number">Admin Phone Number</Label>
+              <Label htmlFor="phone-number">Admin WhatsApp Number</Label>
               <Input 
                 id="phone-number" 
                 placeholder="e.g. +1234567890" 
@@ -203,20 +205,6 @@ const Dashboard: React.FC = () => {
               <p className="text-sm text-muted-foreground">
                 Enter the phone number including country code (e.g., +1 for US)
               </p>
-            </div>
-            
-            <div className="space-y-3">
-              <Label>Sharing Method</Label>
-              <RadioGroup value={sendMethod} onValueChange={(value) => setSendMethod(value as 'whatsapp' | 'sms')}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="whatsapp" id="whatsapp" />
-                  <Label htmlFor="whatsapp">WhatsApp</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="sms" id="sms" />
-                  <Label htmlFor="sms">SMS</Label>
-                </div>
-              </RadioGroup>
             </div>
             
             <div className="flex items-center space-x-2 pt-4">
@@ -230,7 +218,7 @@ const Dashboard: React.FC = () => {
             
             <div className="flex space-x-2 pt-4">
               <Button
-                className="flex-1"
+                className="flex-1 bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white"
                 onClick={handleSaveSettings}
                 disabled={savingSettings}
               >
@@ -238,7 +226,7 @@ const Dashboard: React.FC = () => {
               </Button>
               <Button
                 variant="outline"
-                className="flex-1"
+                className="flex-1 border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
                 onClick={handleShareNow}
                 disabled={!phoneNumber || phoneNumber.length < 10}
               >
@@ -247,12 +235,12 @@ const Dashboard: React.FC = () => {
             </div>
             
             <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-medium mb-2">Troubleshooting</h3>
+              <h3 className="text-sm font-medium mb-2">About WhatsApp Sharing</h3>
               <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                <li>Make sure your phone number includes the country code</li>
-                <li>Check if your browser blocks popups</li>
+                <li>Daily attendance summary will be automatically sent at 6:00 PM</li>
+                <li>The summary includes late arrivals, check-ins, and check-outs</li>
                 <li>WhatsApp Web needs to be authenticated on your browser</li>
-                <li>SMS sharing works best on mobile devices</li>
+                <li>Make sure your phone number includes the country code</li>
               </ul>
             </div>
           </CardContent>
@@ -268,10 +256,10 @@ const Dashboard: React.FC = () => {
         <div className="flex gap-2">
           <Button 
             onClick={() => setShowSettings(true)}
-            className="flex items-center gap-2 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white shadow-md transition-all duration-300"
+            className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white shadow-md transition-all duration-300"
           >
-            <Share2 size={18} />
-            <span>Auto-Share Settings</span>
+            <MessageSquare size={18} />
+            <span>WhatsApp Settings</span>
           </Button>
           <Button 
             onClick={() => setShowBulkUpload(true)}
