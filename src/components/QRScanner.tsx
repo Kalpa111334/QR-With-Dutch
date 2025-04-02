@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -27,7 +26,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
   const rafId = useRef<number | null>(null);
   const lastScanTime = useRef<number>(0);
   const scanCooldown = 1500; // Reduced from 3000ms to 1500ms for faster response
-  const [isProcessing, setIsProcessing] = useState(false); // Added to prevent multiple scans being processed simultaneously
+  const [isProcessing, setIsProcessing] = useState(false); // We'll keep this state but remove the visual indicator
 
   useEffect(() => {
     // Get available cameras
@@ -420,14 +419,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               </div>
             )}
             
-            {isProcessing && (
-              <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center">
-                <div className="bg-white dark:bg-slate-800 p-3 rounded-lg shadow-lg">
-                  <div className="h-6 w-6 border-2 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
-                  <p className="mt-2 text-sm">Processing...</p>
-                </div>
-              </div>
-            )}
+            {/* Removed the isProcessing overlay/indicator here */}
           </div>
           
           <p className="text-center text-sm text-muted-foreground">
