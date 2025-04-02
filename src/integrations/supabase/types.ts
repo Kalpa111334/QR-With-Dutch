@@ -155,42 +155,102 @@ export type Database = {
           },
         ]
       }
+      gate_pass_logs: {
+        Row: {
+          action: string
+          gate_pass_id: string
+          id: string
+          new_status: Database["public"]["Enums"]["pass_status"] | null
+          notes: string | null
+          old_status: Database["public"]["Enums"]["pass_status"] | null
+          performed_at: string
+          performed_by: string
+        }
+        Insert: {
+          action: string
+          gate_pass_id: string
+          id?: string
+          new_status?: Database["public"]["Enums"]["pass_status"] | null
+          notes?: string | null
+          old_status?: Database["public"]["Enums"]["pass_status"] | null
+          performed_at?: string
+          performed_by: string
+        }
+        Update: {
+          action?: string
+          gate_pass_id?: string
+          id?: string
+          new_status?: Database["public"]["Enums"]["pass_status"] | null
+          notes?: string | null
+          old_status?: Database["public"]["Enums"]["pass_status"] | null
+          performed_at?: string
+          performed_by?: string
+        }
+        Relationships: []
+      }
       gate_passes: {
         Row: {
           created_at: string
+          created_by: string
           employee_id: string
+          employee_name: string
           expires_at: string
           id: string
+          last_used_at: string | null
           pass_code: string
           reason: string
-          status: string
-          type: string
+          revocation_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          status: Database["public"]["Enums"]["pass_status"]
+          type: Database["public"]["Enums"]["pass_type"]
+          updated_at: string | null
+          use_count: number | null
           used_at: string | null
-          validity: string
+          used_by: string | null
+          validity: Database["public"]["Enums"]["pass_validity"]
         }
         Insert: {
           created_at?: string
+          created_by: string
           employee_id: string
+          employee_name: string
           expires_at: string
           id?: string
+          last_used_at?: string | null
           pass_code: string
           reason: string
-          status: string
-          type: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          status?: Database["public"]["Enums"]["pass_status"]
+          type: Database["public"]["Enums"]["pass_type"]
+          updated_at?: string | null
+          use_count?: number | null
           used_at?: string | null
-          validity: string
+          used_by?: string | null
+          validity: Database["public"]["Enums"]["pass_validity"]
         }
         Update: {
           created_at?: string
+          created_by?: string
           employee_id?: string
+          employee_name?: string
           expires_at?: string
           id?: string
+          last_used_at?: string | null
           pass_code?: string
           reason?: string
-          status?: string
-          type?: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          status?: Database["public"]["Enums"]["pass_status"]
+          type?: Database["public"]["Enums"]["pass_type"]
+          updated_at?: string | null
+          use_count?: number | null
           used_at?: string | null
-          validity?: string
+          used_by?: string | null
+          validity?: Database["public"]["Enums"]["pass_validity"]
         }
         Relationships: [
           {
@@ -286,10 +346,103 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      auto_expire_passes: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      create_gate_pass: {
+        Args: {
+          p_employee_id: string
+          p_pass_code: string
+          p_employee_name: string
+          p_validity: Database["public"]["Enums"]["pass_validity"]
+          p_type: Database["public"]["Enums"]["pass_type"]
+          p_reason: string
+          p_created_by: string
+          p_expires_at: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string
+          employee_id: string
+          employee_name: string
+          expires_at: string
+          id: string
+          last_used_at: string | null
+          pass_code: string
+          reason: string
+          revocation_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          status: Database["public"]["Enums"]["pass_status"]
+          type: Database["public"]["Enums"]["pass_type"]
+          updated_at: string | null
+          use_count: number | null
+          used_at: string | null
+          used_by: string | null
+          validity: Database["public"]["Enums"]["pass_validity"]
+        }
+      }
+      revoke_gate_pass: {
+        Args: {
+          p_pass_id: string
+          p_revoked_by: string
+          p_reason: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string
+          employee_id: string
+          employee_name: string
+          expires_at: string
+          id: string
+          last_used_at: string | null
+          pass_code: string
+          reason: string
+          revocation_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          status: Database["public"]["Enums"]["pass_status"]
+          type: Database["public"]["Enums"]["pass_type"]
+          updated_at: string | null
+          use_count: number | null
+          used_at: string | null
+          used_by: string | null
+          validity: Database["public"]["Enums"]["pass_validity"]
+        }
+      }
+      use_gate_pass: {
+        Args: {
+          p_pass_id: string
+          p_used_by: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string
+          employee_id: string
+          employee_name: string
+          expires_at: string
+          id: string
+          last_used_at: string | null
+          pass_code: string
+          reason: string
+          revocation_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          status: Database["public"]["Enums"]["pass_status"]
+          type: Database["public"]["Enums"]["pass_type"]
+          updated_at: string | null
+          use_count: number | null
+          used_at: string | null
+          used_by: string | null
+          validity: Database["public"]["Enums"]["pass_validity"]
+        }
+      }
     }
     Enums: {
-      [_ in never]: never
+      pass_status: "active" | "used" | "expired" | "revoked"
+      pass_type: "entry" | "exit" | "both"
+      pass_validity: "single" | "day" | "week" | "month"
     }
     CompositeTypes: {
       [_ in never]: never

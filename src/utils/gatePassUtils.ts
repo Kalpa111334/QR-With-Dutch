@@ -1,3 +1,4 @@
+
 import { supabase } from '@/integrations/supabase/client';
 import { Employee } from '@/types';
 import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
@@ -55,35 +56,38 @@ export const createGatePass = async (
     const passCode = generatePassCode();
     const expirationDate = calculateExpirationDate(validity);
     
-    const { data, error } = await supabase
-      .from('gate_passes')
-      .insert({
-        employee_id: employeeId,
-        pass_code: passCode,
-        validity,
-        type,
-        reason,
-        status: 'active',
-        expires_at: expirationDate.toISOString()
-      })
-      .select()
-      .single();
-      
-    if (error) throw error;
-    
-    // Get employee name
+    // First get the employee's name
     const { data: employee } = await supabase
       .from('employees')
       .select('first_name, last_name')
       .eq('id', employeeId)
       .single();
+    
+    if (!employee) {
+      throw new Error('Employee not found');
+    }
+    
+    const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
+    
+    // Use the Supabase RPC function that has SECURITY DEFINER permissions
+    const { data, error } = await supabase
+      .rpc('create_gate_pass', {
+        p_employee_id: employeeId,
+        p_pass_code: passCode,
+        p_employee_name: employeeName,
+        p_validity: validity,
+        p_type: type,
+        p_reason: reason,
+        p_created_by: null, // This will be null as we don't have auth set up yet
+        p_expires_at: expirationDate.toISOString()
+      });
       
+    if (error) throw error;
+    
     return {
       id: data.id,
       employeeId: data.employee_id,
-      employeeName: employee ? 
-        `${employee.first_name || ''} ${employee.last_name || ''}`.trim() : 
-        'Unknown Employee',
+      employeeName: employeeName,
       passCode: data.pass_code,
       validity: data.validity as 'single' | 'day' | 'week' | 'month',
       type: data.type as 'entry' | 'exit' | 'both',
