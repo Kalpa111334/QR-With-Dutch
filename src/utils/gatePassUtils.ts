@@ -10,7 +10,7 @@ export interface GatePass {
   validity: 'single' | 'day' | 'week' | 'month';
   type: 'entry' | 'exit' | 'both';
   reason: string;
-  status: 'active' | 'used' | 'expired';
+  status: 'active' | 'used' | 'expired' | 'revoked';
   createdAt: string;
   expiresAt: string;
   usedAt?: string | null;
@@ -166,7 +166,7 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
       validity: pass.validity as 'single' | 'day' | 'week' | 'month',
       type: pass.type as 'entry' | 'exit' | 'both',
       reason: pass.reason,
-      status: pass.status as 'active' | 'used' | 'expired',
+      status: pass.status as 'active' | 'used' | 'expired' | 'revoked',
       createdAt: pass.created_at,
       expiresAt: pass.expires_at,
       usedAt: pass.used_at
@@ -299,6 +299,29 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
       return {
         verified: false,
         message: 'Expired gate pass. This pass is no longer valid.',
+        pass: {
+          id: pass.id,
+          employeeId: pass.employee_id,
+          employeeName: pass.employees ? 
+            `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
+            'Unknown Employee',
+          passCode: pass.pass_code,
+          validity: pass.validity,
+          type: pass.type,
+          reason: pass.reason,
+          status: pass.status,
+          createdAt: pass.created_at,
+          expiresAt: pass.expires_at,
+          usedAt: pass.used_at
+        }
+      };
+    }
+    
+    // Check if revoked
+    if (pass.status === 'revoked') {
+      return {
+        verified: false,
+        message: 'Revoked gate pass. This pass has been revoked by security.',
         pass: {
           id: pass.id,
           employeeId: pass.employee_id,
