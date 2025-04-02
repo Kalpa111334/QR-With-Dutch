@@ -69,6 +69,10 @@ export const createGatePass = async (
     
     const employeeName = `${employee.first_name || ''} ${employee.last_name || ''}`.trim();
     
+    // Use a default system UUID for created_by since we don't have authentication yet
+    // This is a temporary solution until authentication is implemented
+    const systemUserId = '00000000-0000-0000-0000-000000000000'; // Default system user ID
+    
     // Use the Supabase RPC function that has SECURITY DEFINER permissions
     const { data, error } = await supabase
       .rpc('create_gate_pass', {
@@ -78,7 +82,7 @@ export const createGatePass = async (
         p_validity: validity,
         p_type: type,
         p_reason: reason,
-        p_created_by: null as any, // Cast to any to fix the 'never' type error
+        p_created_by: systemUserId, // Use the system user ID instead of null
         p_expires_at: expirationDate.toISOString()
       });
       
