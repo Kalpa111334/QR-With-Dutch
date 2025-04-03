@@ -36,7 +36,7 @@ export interface GatePass {
   validity: 'single' | 'day' | 'week' | 'month';
   type: 'entry' | 'exit' | 'both';
   reason: string;
-  status: 'active' | 'used' | 'expired';
+  status: 'active' | 'used' | 'expired' | 'revoked';
   createdAt: string;
   expiresAt: string;
   usedAt?: string | null;
