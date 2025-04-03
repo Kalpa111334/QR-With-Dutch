@@ -12,10 +12,21 @@ import RosterManagement from "./pages/RosterManagement";
 import GatePass from "./pages/GatePass";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
 
-const queryClient = new QueryClient();
+// Create a new QueryClient with better configuration
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1, // Try failed requests only once
+      staleTime: 30000, // 30 seconds
+      refetchOnWindowFocus: false, // Don't refetch when window gets focus
+      refetchOnReconnect: true, // Do refetch when reconnecting
+    },
+  },
+});
 
 const App: React.FC = () => {
   const [showApp, setShowApp] = React.useState<boolean>(false);
+  const [isInitialized, setIsInitialized] = React.useState<boolean>(false);
   
   // Check local storage to see if user has already entered the app
   React.useEffect(() => {
@@ -26,6 +37,7 @@ const App: React.FC = () => {
     
     // Set up automatic report scheduling when the app loads
     setupAutoReportScheduling();
+    setIsInitialized(true);
   }, []);
 
   const handleGetStarted = () => {
@@ -33,12 +45,32 @@ const App: React.FC = () => {
     setShowApp(true);
   };
 
+  // Add the more responsive meta tag for viewport
+  React.useEffect(() => {
+    const meta = document.createElement('meta');
+    meta.name = 'viewport';
+    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+    document.getElementsByTagName('head')[0].appendChild(meta);
+    
+    return () => {
+      document.getElementsByTagName('head')[0].removeChild(meta);
+    };
+  }, []);
+
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950">
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950 overflow-x-hidden">
           <Toaster />
-          <Sonner />
+          <Sonner position="top-center" />
           <BrowserRouter>
             {!showApp ? (
               <LandingPage onGetStarted={handleGetStarted} />

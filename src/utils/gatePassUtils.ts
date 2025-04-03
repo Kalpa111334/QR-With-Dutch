@@ -3,12 +3,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { Employee, GatePass } from '@/types';
 import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
 
-// Generate a unique pass code
+// Generate a unique pass code with better uniqueness guarantee
 export const generatePassCode = (): string => {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const timestampPart = Date.now().toString(36).substring(-4).toUpperCase();
+  return `${randomPart}-${timestampPart}`;
 };
 
-// Calculate expiration date based on validity
+// Calculate expiration date based on validity with more precise timing
 export const calculateExpirationDate = (validity: 'single' | 'day' | 'week' | 'month'): Date => {
   const expirationDate = new Date();
   
@@ -18,20 +20,25 @@ export const calculateExpirationDate = (validity: 'single' | 'day' | 'week' | 'm
       expirationDate.setHours(expirationDate.getHours() + 24);
       break;
     case 'day':
+      // Set to end of current day (23:59:59.999)
       expirationDate.setHours(23, 59, 59, 999);
       break;
     case 'week':
+      // Add 7 days and set to end of that day
       expirationDate.setDate(expirationDate.getDate() + 7);
+      expirationDate.setHours(23, 59, 59, 999);
       break;
     case 'month':
+      // Add 1 month and set to end of that day
       expirationDate.setMonth(expirationDate.getMonth() + 1);
+      expirationDate.setHours(23, 59, 59, 999);
       break;
   }
   
   return expirationDate;
 };
 
-// Create a new gate pass
+// Create a new gate pass with improved error handling
 export const createGatePass = async (
   employeeId: string,
   validity: 'single' | 'day' | 'week' | 'month',
@@ -42,12 +49,17 @@ export const createGatePass = async (
     const passCode = generatePassCode();
     const expirationDate = calculateExpirationDate(validity);
     
-    // First get the employee's name
-    const { data: employee } = await supabase
+    // First get the employee's name with better error handling
+    const { data: employee, error: employeeError } = await supabase
       .from('employees')
       .select('first_name, last_name')
       .eq('id', employeeId)
-      .single();
+      .maybeSingle();
+    
+    if (employeeError) {
+      console.error('Error fetching employee:', employeeError);
+      throw new Error('Error fetching employee data');
+    }
     
     if (!employee) {
       throw new Error('Employee not found');
@@ -59,8 +71,18 @@ export const createGatePass = async (
     // This is a temporary solution until authentication is implemented
     const systemUserId = '00000000-0000-0000-0000-000000000000'; // Default system user ID
     
+    console.log('Creating gate pass with data:', {
+      employeeId,
+      passCode,
+      employeeName,
+      validity,
+      type,
+      reason,
+      systemUserId,
+      expirationDate
+    });
+    
     // Insert directly using RPC function to bypass RLS temporarily
-    // Instead of inserting directly to the gate_passes table
     const { data, error } = await supabase.rpc('create_gate_pass', {
       p_employee_id: employeeId,
       p_pass_code: passCode,
@@ -81,6 +103,8 @@ export const createGatePass = async (
       throw new Error('Failed to create gate pass');
     }
     
+    console.log('Gate pass created successfully:', data);
+    
     return {
       id: data.id,
       employeeId: data.employee_id,
@@ -100,9 +124,10 @@ export const createGatePass = async (
   }
 };
 
-// Fetch all gate passes
+// Fetch all gate passes with improved performance
 export const getGatePasses = async (): Promise<GatePass[]> => {
   try {
+    console.log('Fetching gate passes');
     const { data: passes, error } = await supabase
       .from('gate_passes')
       .select(`
@@ -120,24 +145,38 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
       `)
       .order('created_at', { ascending: false });
       
-    if (error) throw error;
+    if (error) {
+      console.error('Error fetching gate passes:', error);
+      throw error;
+    }
+    
+    console.log(`Retrieved ${passes.length} gate passes`);
     
     // Check for expired passes and update them in the database
     const now = new Date();
+    const passesToUpdate = [];
     const passesWithStatus = passes.map(pass => {
       const expirationDate = new Date(pass.expires_at);
       if (pass.status === 'active' && expirationDate < now) {
-        // Mark as expired in the database
-        supabase
-          .from('gate_passes')
-          .update({ status: 'expired' })
-          .eq('id', pass.id)
-          .then(() => console.log(`Pass ${pass.id} marked as expired`));
-          
+        // Mark for update
+        passesToUpdate.push(pass.id);
         return { ...pass, status: 'expired' };
       }
       return pass;
     });
+    
+    // Batch update expired passes
+    if (passesToUpdate.length > 0) {
+      console.log(`Updating ${passesToUpdate.length} expired passes`);
+      const { error: updateError } = await supabase
+        .from('gate_passes')
+        .update({ status: 'expired' })
+        .in('id', passesToUpdate);
+      
+      if (updateError) {
+        console.error('Error updating expired passes:', updateError);
+      }
+    }
     
     return passesWithStatus.map(pass => ({
       id: pass.id,
@@ -160,7 +199,7 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
   }
 };
 
-// Verify a gate pass by ID or code
+// Verify a gate pass by ID or code with enhanced parsing and error handling
 export const verifyGatePass = async (passIdentifier: string): Promise<{
   verified: boolean;
   message: string;
@@ -181,24 +220,46 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
     let passCode: string | null = null;
     
     try {
-      // Try to parse as JSON if it looks like a JSON object
-      if (passIdentifier.startsWith('{') && passIdentifier.endsWith('}')) {
+      // Try to parse as JSON if it looks like a JSON object or if it's a string that might be JSON
+      if (
+        (passIdentifier.startsWith('{') && passIdentifier.endsWith('}')) ||
+        passIdentifier.includes('"passId"') ||
+        passIdentifier.includes('"id"')
+      ) {
         const parsed = JSON.parse(passIdentifier);
         id = parsed.passId || parsed.id || null;
         passCode = parsed.passCode || null;
         console.log('Parsed from JSON:', { id, passCode });
       }
     } catch (e) {
-      // If parsing fails, continue with original identifier
-      console.log('Not valid JSON, using as raw identifier');
+      // If parsing fails, try to extract UUID pattern from the string
+      console.log('Parsing as JSON failed, checking for UUID pattern');
+      const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+      const match = passIdentifier.match(uuidRegex);
+      if (match) {
+        id = match[0];
+        console.log('Found UUID in string:', id);
+      } else {
+        // Try to find pass code pattern (alphanumeric with possible hyphen)
+        const codeRegex = /([A-Z0-9]{6,}-[A-Z0-9]{2,})/;
+        const codeMatch = passIdentifier.match(codeRegex);
+        if (codeMatch) {
+          passCode = codeMatch[0];
+          console.log('Found pass code in string:', passCode);
+        } else {
+          console.log('Using full string as raw identifier');
+        }
+      }
     }
     
     // If we couldn't extract from JSON, check if it's a UUID
     if (!id && !passCode) {
       if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(passIdentifier)) {
         id = passIdentifier;
+        console.log('Input is a valid UUID:', id);
       } else {
         passCode = passIdentifier;
+        console.log('Using input as pass code:', passCode);
       }
     }
     

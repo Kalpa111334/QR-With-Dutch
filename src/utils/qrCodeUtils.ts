@@ -2,7 +2,7 @@
 import JSZip from 'jszip';
 import { Employee, GatePass } from '@/types';
 
-// Helper function to generate QR code SVG data
+// Helper function to generate QR code SVG data with improved error handling
 const generateQRSVG = async (data: string | Record<string, any>): Promise<string> => {
   // We need to dynamically import QRCode library here
   const QRCode = await import('qrcode');
@@ -10,12 +10,12 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
   // Convert object to JSON string if needed
   const qrCodeData = typeof data === 'string' ? data : JSON.stringify(data);
   
-  // Generate SVG string directly using QRCode library
+  // Generate SVG string directly using QRCode library with better settings
   try {
-    // Use QRCode.toString to generate SVG string
+    // Use QRCode.toString to generate SVG string with improved settings
     const svgString = await QRCode.toString(qrCodeData, {
       type: 'svg',
-      width: 200,
+      width: 300, // Increased size for better scanning
       margin: 1,
       color: {
         dark: '#000000',
@@ -31,11 +31,12 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
   }
 };
 
-// Generate QR code for employee
+// Generate QR code for employee with improved data
 export const generateEmployeeQRSVG = async (employee: Employee): Promise<string> => {
-  // Create QR code data that includes employee ID
+  // Create QR code data that includes employee ID and more reliable data
   const qrCodeData = {
     id: employee.id,
+    type: 'employee',
     name: employee.name || `${employee.firstName} ${employee.lastName}`,
     department: employee.department
   };
@@ -43,19 +44,21 @@ export const generateEmployeeQRSVG = async (employee: Employee): Promise<string>
   return generateQRSVG(qrCodeData);
 };
 
-// Generate QR code for gate pass
+// Generate QR code for gate pass with improved data
 export const generateGatePassQRSVG = async (pass: GatePass): Promise<string> => {
-  // Create QR code data that includes pass ID and code
+  // Create QR code data that includes pass ID and code with clear type identification
   const qrCodeData = {
     passId: pass.id,
+    type: 'gatepass',
     passCode: pass.passCode,
-    employeeId: pass.employeeId
+    employeeId: pass.employeeId,
+    validity: pass.validity
   };
   
   return generateQRSVG(qrCodeData);
 };
 
-// Generate a PNG from SVG string
+// Generate a PNG from SVG string with improved quality
 const svgToPng = async (svgString: string): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -69,10 +72,13 @@ const svgToPng = async (svgString: string): Promise<Blob> => {
     
     // When the image is loaded, draw it on the canvas
     img.onload = () => {
-      canvas.width = img.width;
-      canvas.height = img.height;
+      // Set higher resolution for better quality
+      const scale = 2;
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
       ctx.drawImage(img, 0, 0);
       
       // Convert the canvas to a blob and resolve
@@ -82,7 +88,7 @@ const svgToPng = async (svgString: string): Promise<Blob> => {
         } else {
           reject(new Error('Could not convert canvas to blob'));
         }
-      }, 'image/png');
+      }, 'image/png', 1.0); // Use highest quality
     };
     
     // Handle load errors
@@ -106,6 +112,20 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
   const batchSize = 10;
   const totalEmployees = employees.length;
   
+  // Show progress to user
+  let processedCount = 0;
+  const progressElement = document.createElement('div');
+  progressElement.style.position = 'fixed';
+  progressElement.style.top = '50%';
+  progressElement.style.left = '50%';
+  progressElement.style.transform = 'translate(-50%, -50%)';
+  progressElement.style.padding = '20px';
+  progressElement.style.background = 'rgba(0,0,0,0.7)';
+  progressElement.style.color = 'white';
+  progressElement.style.borderRadius = '5px';
+  progressElement.style.zIndex = '9999';
+  document.body.appendChild(progressElement);
+  
   for (let i = 0; i < totalEmployees; i += batchSize) {
     const batch = employees.slice(i, i + batchSize);
     
@@ -123,6 +143,8 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
           const safeFileName = (employee.name || `${employee.firstName}_${employee.lastName}`)
             .replace(/[^\w\s]/gi, '_').replace(/\s+/g, '_');
           zip.file(`${safeFileName}_QRCode.png`, pngBlob);
+          processedCount++;
+          progressElement.textContent = `Processing QR Codes: ${processedCount}/${totalEmployees}`;
         } catch (error) {
           console.error(`Error generating QR code for ${employee.name || `${employee.firstName} ${employee.lastName}`}:`, error);
           // Continue with other employees even if one fails
@@ -132,7 +154,11 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
   }
   
   // Generate the ZIP file
-  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  progressElement.textContent = 'Creating ZIP file...';
+  const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  
+  // Remove progress indicator
+  document.body.removeChild(progressElement);
   
   // Create a download link and trigger download
   const downloadLink = document.createElement('a');
@@ -143,7 +169,7 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
   document.body.removeChild(downloadLink);
 };
 
-// Generate and download QR code for a single gate pass
+// Generate and download QR code for a single gate pass with improved output
 export const generateQRCodeForPass = async (pass: GatePass): Promise<Blob | null> => {
   try {
     // Generate SVG QR code
