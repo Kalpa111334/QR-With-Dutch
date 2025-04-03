@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
@@ -220,7 +219,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             .select('check_in_time, check_out_time')
             .eq('employee_id', employeeId)
             .eq('date', today)
-            .maybeSingle();
+            .maybeSingle();  // Changed from .single() to .maybeSingle()
           
           console.log("Existing attendance record:", existingRecord);
           

@@ -1,4 +1,3 @@
-
 import { supabase } from '../integrations/supabase/client';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Attendance } from '../types';
@@ -135,15 +134,15 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     const today = format(now, 'yyyy-MM-dd');
     const checkInTime = format(now, 'HH:mm:ss');
     
-    // Check if already checked in today
+    // Check if already checked in today - use maybeSingle() instead of single()
     const { data: existingRecord, error: existingError } = await supabase
       .from('attendance')
       .select('*')
       .eq('employee_id', employeeId)
       .eq('date', today)
-      .single();
+      .maybeSingle();
     
-    if (existingError && existingError.code !== '404') {
+    if (existingError) {
       console.error('Error checking existing attendance:', existingError);
       return false;
     }
@@ -205,13 +204,13 @@ export const recordAttendanceCheckOut = async (employeeId: string): Promise<bool
     const today = format(now, 'yyyy-MM-dd');
     const checkOutTime = format(now, 'HH:mm:ss');
     
-    // Find today's attendance record
+    // Find today's attendance record - use maybeSingle() instead of single()
     const { data, error } = await supabase
       .from('attendance')
       .select('*')
       .eq('employee_id', employeeId)
       .eq('date', today)
-      .single();
+      .maybeSingle();
     
     if (error) {
       console.error('Error fetching attendance record:', error);
