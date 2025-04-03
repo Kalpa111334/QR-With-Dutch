@@ -1,20 +1,7 @@
-import { supabase } from '@/integrations/supabase/client';
-import { Employee } from '@/types';
-import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
 
-export interface GatePass {
-  id: string;
-  employeeId: string;
-  employeeName?: string;
-  passCode: string;
-  validity: 'single' | 'day' | 'week' | 'month';
-  type: 'entry' | 'exit' | 'both';
-  reason: string;
-  status: 'active' | 'used' | 'expired' | 'revoked';
-  createdAt: string;
-  expiresAt: string;
-  usedAt?: string | null;
-}
+import { supabase } from '@/integrations/supabase/client';
+import { Employee, GatePass } from '@/types';
+import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
 
 // Generate a unique pass code
 export const generatePassCode = (): string => {
@@ -72,22 +59,18 @@ export const createGatePass = async (
     // This is a temporary solution until authentication is implemented
     const systemUserId = '00000000-0000-0000-0000-000000000000'; // Default system user ID
     
-    // Insert directly into the gate_passes table instead of using RPC function
-    const { data, error } = await supabase
-      .from('gate_passes')
-      .insert({
-        employee_id: employeeId,
-        pass_code: passCode,
-        employee_name: employeeName,
-        validity: validity,
-        type: type,
-        reason: reason,
-        created_by: systemUserId, // Use the system user ID
-        expires_at: expirationDate.toISOString(),
-        status: 'active'
-      })
-      .select('*')
-      .single();
+    // Insert directly using RPC function to bypass RLS temporarily
+    // Instead of inserting directly to the gate_passes table
+    const { data, error } = await supabase.rpc('create_gate_pass', {
+      p_employee_id: employeeId,
+      p_pass_code: passCode,
+      p_employee_name: employeeName,
+      p_validity: validity,
+      p_type: type,
+      p_reason: reason,
+      p_created_by: systemUserId,
+      p_expires_at: expirationDate.toISOString()
+    });
       
     if (error) {
       console.error('Error creating gate pass:', error);

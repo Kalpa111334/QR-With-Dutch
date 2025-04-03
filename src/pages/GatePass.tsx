@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { QrCode, Check, X, Clipboard, Users, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,6 @@ import { Employee } from '@/types';
 import { getEmployees } from '@/utils/employeeUtils';
 import QRScanner from '@/components/QRScanner';
 import { 
-  GatePass as GatePassType,
   getGatePasses,
   createGatePass,
   verifyGatePass,
@@ -22,7 +22,7 @@ import {
 
 const GatePass: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [gatePasses, setGatePasses] = useState<GatePassType[]>([]);
+  const [gatePasses, setGatePasses] = useState<any[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<string>('');
   const [passType, setPassType] = useState<'entry' | 'exit' | 'both'>('both');
   const [passValidity, setPassValidity] = useState<'single' | 'day' | 'week' | 'month'>('single');
@@ -32,9 +32,11 @@ const GatePass: React.FC = () => {
   const [verificationResult, setVerificationResult] = useState<{
     verified: boolean;
     message: string;
-    pass?: GatePassType;
+    pass?: any;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   
   const { toast } = useToast();
 
@@ -79,7 +81,7 @@ const GatePass: React.FC = () => {
     }
 
     try {
-      setLoading(true);
+      setIsCreating(true);
       
       // Create new pass in database
       const newPass = await createGatePass(
@@ -116,7 +118,7 @@ const GatePass: React.FC = () => {
       } else {
         toast({
           title: 'Error',
-          description: 'Failed to create gate pass',
+          description: 'Failed to create gate pass. Please try again.',
           variant: 'destructive',
         });
       }
@@ -124,17 +126,18 @@ const GatePass: React.FC = () => {
       console.error('Error creating gate pass:', error);
       toast({
         title: 'Error',
-        description: 'An unexpected error occurred',
+        description: 'An unexpected error occurred. Please try again.',
         variant: 'destructive',
       });
     } finally {
-      setLoading(false);
+      setIsCreating(false);
     }
   };
 
   // Handle QR code scan result
   const handleScanResult = async (result: string) => {
     setScanResult(result);
+    setIsVerifying(true);
     
     try {
       // Try to parse the QR code data (could be JSON or just the pass ID/code)
@@ -164,11 +167,13 @@ const GatePass: React.FC = () => {
         verified: false,
         message: 'Invalid QR code format. Please try again.',
       });
+    } finally {
+      setIsVerifying(false);
     }
   };
 
   // Copy pass details to clipboard
-  const copyPassToClipboard = (pass: GatePassType) => {
+  const copyPassToClipboard = (pass: any) => {
     const passText = `Gate Pass: ${pass.passCode}
 Employee: ${pass.employeeName}
 Type: ${pass.type}
@@ -195,7 +200,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
   };
 
   // Function to download QR code as PNG
-  const downloadQRCode = async (pass: GatePassType) => {
+  const downloadQRCode = async (pass: any) => {
     try {
       setLoading(true);
       const qrBlob = await generateQRCodeForPass(pass);
@@ -227,6 +232,22 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Function to get appropriate badge color based on status
+  const getStatusBadgeClass = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'bg-green-100 text-green-800';
+      case 'used':
+        return 'bg-blue-100 text-blue-800';
+      case 'expired':
+        return 'bg-orange-100 text-orange-800';
+      case 'revoked':
+        return 'bg-red-100 text-red-800';
+      default:
+        return '';
     }
   };
 
@@ -265,7 +286,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   className="w-full border rounded-md p-2"
                   value={selectedEmployee}
                   onChange={(e) => setSelectedEmployee(e.target.value)}
-                  disabled={loading}
+                  disabled={loading || isCreating}
                 >
                   <option value="">Select an employee</option>
                   {employees.map(employee => (
@@ -284,7 +305,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   className="w-full border rounded-md p-2"
                   value={passType}
                   onChange={(e) => setPassType(e.target.value as 'entry' | 'exit' | 'both')}
-                  disabled={loading}
+                  disabled={loading || isCreating}
                 >
                   <option value="entry">Entry Only</option>
                   <option value="exit">Exit Only</option>
@@ -300,7 +321,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   className="w-full border rounded-md p-2"
                   value={passValidity}
                   onChange={(e) => setPassValidity(e.target.value as 'single' | 'day' | 'week' | 'month')}
-                  disabled={loading}
+                  disabled={loading || isCreating}
                 >
                   <option value="single">Single Use (24 hours)</option>
                   <option value="day">One Day (until midnight)</option>
@@ -317,7 +338,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   placeholder="Reason for gate pass"
                   value={passReason}
                   onChange={(e) => setPassReason(e.target.value)}
-                  disabled={loading}
+                  disabled={loading || isCreating}
                 />
               </div>
             </CardContent>
@@ -325,10 +346,10 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
               <Button 
                 className="w-full" 
                 onClick={handleCreateGatePass}
-                disabled={!selectedEmployee || !passReason || loading}
+                disabled={!selectedEmployee || !passReason || loading || isCreating}
               >
                 <QrCode className="mr-2 h-4 w-4" />
-                {loading ? 'Creating...' : 'Generate Gate Pass'}
+                {isCreating ? 'Creating...' : 'Generate Gate Pass'}
               </Button>
             </CardFooter>
           </Card>
@@ -347,6 +368,11 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
               <CardContent className="flex justify-center">
                 <div className="w-full max-w-md">
                   <QRScanner onScan={handleScanResult} mode="gatepass" />
+                  {isVerifying && (
+                    <div className="mt-4 text-center text-sm text-muted-foreground">
+                      Processing scan...
+                    </div>
+                  )}
                 </div>
               </CardContent>
               <CardFooter className="flex flex-col items-start">
@@ -364,7 +390,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {loading ? (
+                {loading || isVerifying ? (
                   <div className="py-10 text-center">Verifying pass...</div>
                 ) : verificationResult ? (
                   <div className="space-y-4">
@@ -487,10 +513,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                           <TableCell className="capitalize">{pass.validity}</TableCell>
                           <TableCell>
                             <Badge 
-                              className={
-                                pass.status === 'active' ? 'bg-green-100 text-green-800' :
-                                pass.status === 'used' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'
-                              }
+                              className={getStatusBadgeClass(pass.status)}
                             >
                               {pass.status}
                             </Badge>
