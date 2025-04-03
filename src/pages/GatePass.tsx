@@ -414,7 +414,9 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                         <p><span className="font-medium">ID:</span> {verificationResult.pass.id}</p>
                         <p><span className="font-medium">Code:</span> {verificationResult.pass.passCode}</p>
                         <p><span className="font-medium">Employee:</span> {verificationResult.pass.employeeName}</p>
-                        <p><span className="font-medium">Type:</span> <Badge variant="outline" className="capitalize">{verificationResult.pass.type}</Badge></p>
+                        <p><span className="font-medium">Type:</span> {/* Fix Badge nesting issue */}
+                          <span className="capitalize">{verificationResult.pass.type}</span>
+                        </p>
                         <p><span className="font-medium">Reason:</span> {verificationResult.pass.reason}</p>
                         <p><span className="font-medium">Created:</span> {new Date(verificationResult.pass.createdAt).toLocaleString()}</p>
                         <p><span className="font-medium">Expires:</span> {new Date(verificationResult.pass.expiresAt).toLocaleString()}</p>
@@ -508,13 +510,11 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                           <TableCell className="font-medium">{pass.passCode}</TableCell>
                           <TableCell>{pass.employeeName}</TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="capitalize">{pass.type}</Badge>
+                            <span className="capitalize">{pass.type}</span>
                           </TableCell>
                           <TableCell className="capitalize">{pass.validity}</TableCell>
                           <TableCell>
-                            <Badge 
-                              className={getStatusBadgeClass(pass.status)}
-                            >
+                            <Badge variant="outline" className={getStatusBadgeClass(pass.status)}>
                               {pass.status}
                             </Badge>
                           </TableCell>
