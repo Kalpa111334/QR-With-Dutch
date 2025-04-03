@@ -176,8 +176,33 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
       };
     }
     
-    // Determine if the passIdentifier is a UUID or a pass code
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(passIdentifier);
+    // First try to parse if this is a JSON string containing pass information
+    let id: string | null = null;
+    let passCode: string | null = null;
+    
+    try {
+      // Try to parse as JSON if it looks like a JSON object
+      if (passIdentifier.startsWith('{') && passIdentifier.endsWith('}')) {
+        const parsed = JSON.parse(passIdentifier);
+        id = parsed.passId || parsed.id || null;
+        passCode = parsed.passCode || null;
+        console.log('Parsed from JSON:', { id, passCode });
+      }
+    } catch (e) {
+      // If parsing fails, continue with original identifier
+      console.log('Not valid JSON, using as raw identifier');
+    }
+    
+    // If we couldn't extract from JSON, check if it's a UUID
+    if (!id && !passCode) {
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(passIdentifier)) {
+        id = passIdentifier;
+      } else {
+        passCode = passIdentifier;
+      }
+    }
+    
+    console.log('After processing, searching by:', { id, passCode });
     
     // Build the query based on the identifier type
     let query = supabase
@@ -196,10 +221,10 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
         employees (id, first_name, last_name)
       `);
     
-    if (isUUID) {
-      query = query.eq('id', passIdentifier);
-    } else {
-      query = query.eq('pass_code', passIdentifier);
+    if (id) {
+      query = query.eq('id', id);
+    } else if (passCode) {
+      query = query.eq('pass_code', passCode);
     }
     
     // Execute the query

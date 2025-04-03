@@ -107,23 +107,29 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           // For gate pass scanning
           let passIdentifier = typeof qrData === 'string' ? qrData : '';
           
-          try {
-            // Try to parse as JSON if it's a string
-            if (typeof qrData === 'string' && qrData.trim() !== '') {
-              try {
+          // The QR code might contain a JSON object with passId or passCode
+          if (typeof qrData === 'string') {
+            try {
+              // Check if it's a valid JSON string
+              if (qrData.trim().startsWith('{') && qrData.trim().endsWith('}')) {
                 const parsedData = JSON.parse(qrData);
-                passIdentifier = parsedData.passId || parsedData.id || parsedData.passCode || qrData;
-              } catch (e) {
+                // Use either passId or passCode, whichever is available
+                if (parsedData.passId) {
+                  passIdentifier = parsedData.passId;
+                  console.log("Using passId from QR data:", passIdentifier);
+                } else if (parsedData.id) {
+                  passIdentifier = parsedData.id;
+                  console.log("Using id from QR data:", passIdentifier);
+                } else if (parsedData.passCode) {
+                  passIdentifier = parsedData.passCode;
+                  console.log("Using passCode from QR data:", passIdentifier);
+                }
+              } else {
                 console.log('Not a JSON QR code, using raw value:', qrData);
-                passIdentifier = qrData;
               }
-            } else if (qrData && typeof qrData === 'object') {
-              passIdentifier = qrData.passId || qrData.id || qrData.passCode || '';
-            }
-          } catch (e) {
-            console.log('Error processing QR code data, using raw value:', qrData);
-            if (typeof qrData === 'string') {
-              passIdentifier = qrData;
+            } catch (e) {
+              console.log('Error parsing QR code JSON:', e);
+              // If JSON parsing fails, use the raw string
             }
           }
           
