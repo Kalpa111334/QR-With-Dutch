@@ -31,31 +31,90 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
   }
 };
 
-// Generate QR code for employee with improved data
+// Generate QR code for employee with improved data format
 export const generateEmployeeQRSVG = async (employee: Employee): Promise<string> => {
   // Create QR code data that includes employee ID and more reliable data
-  const qrCodeData = {
-    id: employee.id,
-    type: 'employee',
-    name: employee.name || `${employee.firstName} ${employee.lastName}`,
-    department: employee.department
-  };
+  // Using a specific format that's easier to parse when scanning
+  const qrCodeData = `EMP:${employee.id}:${employee.name || `${employee.firstName} ${employee.lastName}`}`;
   
   return generateQRSVG(qrCodeData);
 };
 
-// Generate QR code for gate pass with improved data
+// Generate QR code for gate pass with improved data format
 export const generateGatePassQRSVG = async (pass: GatePass): Promise<string> => {
   // Create QR code data that includes pass ID and code with clear type identification
-  const qrCodeData = {
-    passId: pass.id,
-    type: 'gatepass',
-    passCode: pass.passCode,
-    employeeId: pass.employeeId,
-    validity: pass.validity
-  };
+  // Using a specific format that's easier to parse when scanning
+  const qrCodeData = `PASS:${pass.id}:${pass.passCode}:${pass.employeeId}`;
   
   return generateQRSVG(qrCodeData);
+};
+
+// Parse QR code data into a structured format
+export const parseQRCodeData = (data: string): {
+  type: 'employee' | 'gatepass' | 'unknown',
+  id: string,
+  additionalInfo?: string,
+  employeeId?: string
+} => {
+  try {
+    // First try to parse as JSON (for backward compatibility)
+    try {
+      const jsonData = JSON.parse(data);
+      if (jsonData.id && jsonData.type === 'employee') {
+        return {
+          type: 'employee',
+          id: jsonData.id,
+          additionalInfo: jsonData.name
+        };
+      } else if (jsonData.passId && jsonData.type === 'gatepass') {
+        return {
+          type: 'gatepass',
+          id: jsonData.passId,
+          additionalInfo: jsonData.passCode,
+          employeeId: jsonData.employeeId
+        };
+      }
+    } catch (e) {
+      // Not JSON, continue to string format parsing
+    }
+
+    // Try to parse our optimized string format
+    if (data.startsWith('EMP:')) {
+      const parts = data.split(':');
+      if (parts.length >= 2) {
+        return {
+          type: 'employee',
+          id: parts[1],
+          additionalInfo: parts[2] || undefined
+        };
+      }
+    } else if (data.startsWith('PASS:')) {
+      const parts = data.split(':');
+      if (parts.length >= 3) {
+        return {
+          type: 'gatepass',
+          id: parts[1],
+          additionalInfo: parts[2] || undefined,
+          employeeId: parts[3] || undefined
+        };
+      }
+    }
+    
+    // Last attempt: check if it's a UUID by itself (for employee ID)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(data)) {
+      return {
+        type: 'employee',
+        id: data
+      };
+    }
+
+    // Can't determine the format
+    return { type: 'unknown', id: '' };
+  } catch (error) {
+    console.error('Error parsing QR code data:', error);
+    return { type: 'unknown', id: '' };
+  }
 };
 
 // Generate a PNG from SVG string with improved quality

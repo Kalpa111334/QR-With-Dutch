@@ -12,7 +12,9 @@ const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     persistSession: true,
-    autoRefreshToken: true
+    autoRefreshToken: true,
+    storageKey: 'qr-attendance-storage-key',
+    debug: true // This helps with debugging authentication issues
   },
   global: {
     headers: {
@@ -23,3 +25,23 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     schema: 'public'
   }
 });
+
+// Error handling utility for Supabase operations
+export const handleSupabaseError = (error: unknown, fallbackMessage: string = "Operation failed"): string => {
+  console.error("Supabase error:", error);
+  
+  if (error instanceof Error) {
+    // Return a user-friendly error message
+    if (error.message.includes("network")) {
+      return "Network error. Please check your connection.";
+    } else if (error.message.includes("not found") || error.message.includes("404")) {
+      return "The requested resource was not found.";
+    } else if (error.message.includes("permission") || error.message.includes("403")) {
+      return "You don't have permission for this operation.";
+    } else if (error.message.length < 100) { // Only return original message if it's short/readable
+      return error.message;
+    }
+  }
+  
+  return fallbackMessage;
+};

@@ -12,6 +12,9 @@ import QRScanner from '@/components/QRScanner';
 import AttendanceTable from '@/components/AttendanceTable';
 import Dashboard from '@/components/Dashboard';
 import { useToast } from '@/components/ui/use-toast';
+import { toast as sonnerToast } from "sonner";
+import QRScanDialog from '@/components/QRScanDialog';
+import { supabase } from '@/integrations/supabase/client';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -19,6 +22,7 @@ const Index = () => {
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const [showQRScanDialog, setShowQRScanDialog] = useState(false);
   const { toast } = useToast();
   
   useEffect(() => {
@@ -41,6 +45,21 @@ const Index = () => {
     };
     
     fetchEmployees();
+    
+    // Set up subscription for live employee data updates
+    const employeesChannel = supabase
+      .channel('public:employees')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'employees' }, 
+        () => {
+          fetchEmployees();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(employeesChannel);
+    };
   }, [toast]);
   
   const refreshEmployees = async () => {
@@ -65,13 +84,20 @@ const Index = () => {
   };
   
   const handleDeleteEmployee = async (id: string) => {
-    const success = await deleteEmployee(id);
-    if (success) {
-      toast({
-        title: 'Employee Deleted',
-        description: 'Employee has been removed successfully',
+    try {
+      const success = await deleteEmployee(id);
+      if (success) {
+        toast({
+          title: 'Employee Deleted',
+          description: 'Employee has been removed successfully',
+        });
+        await refreshEmployees();
+      }
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+      sonnerToast.error('Delete Failed', {
+        description: 'Could not delete the employee. Please try again.'
       });
-      await refreshEmployees();
     }
   };
   
@@ -79,6 +105,24 @@ const Index = () => {
     setShowEmployeeForm(false);
     setSelectedEmployee(undefined);
     refreshEmployees();
+  };
+  
+  const handleQuickScan = () => {
+    setShowQRScanDialog(true);
+  };
+  
+  const handleScanComplete = (data: { type: string, id: string }) => {
+    if (data.type === 'employee') {
+      sonnerToast.success('Employee QR Scanned', {
+        description: 'Employee ID: ' + data.id
+      });
+      // You could add more functionality here based on the scan
+    } else if (data.type === 'gatepass') {
+      sonnerToast.info('Gate Pass QR Scanned', {
+        description: 'Pass ID: ' + data.id
+      });
+      // You could redirect to gate pass page or perform an action
+    }
   };
 
   return (
@@ -94,6 +138,10 @@ const Index = () => {
         </div>
         
         <div className="flex flex-col sm:flex-row gap-2">
+          <Button onClick={handleQuickScan} variant="secondary" className="flex items-center gap-2">
+            <QrCode className="h-4 w-4" />
+            Quick Scan
+          </Button>
           <Button onClick={handleAddEmployee}>
             <PlusCircle className="mr-2 h-4 w-4" />
             Add Employee
@@ -103,13 +151,13 @@ const Index = () => {
       
       {/* Quick Access Menu for New Features */}
       <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Link to="/roster">
+        <Link to="/roster" className="block">
           <Button variant="outline" className="w-full h-20 flex flex-col items-center justify-center gap-2">
             <Calendar className="h-6 w-6" />
             <span>Roster Management</span>
           </Button>
         </Link>
-        <Link to="/gate-pass">
+        <Link to="/gate-pass" className="block">
           <Button variant="outline" className="w-full h-20 flex flex-col items-center justify-center gap-2">
             <BarChartHorizontal className="h-6 w-6" />
             <span>Gate Pass System</span>
@@ -165,6 +213,13 @@ const Index = () => {
           <AttendanceTable />
         </TabsContent>
       </Tabs>
+      
+      {/* Quick scan dialog */}
+      <QRScanDialog 
+        isOpen={showQRScanDialog}
+        onClose={() => setShowQRScanDialog(false)}
+        onScanComplete={handleScanComplete}
+      />
     </div>
   );
 };

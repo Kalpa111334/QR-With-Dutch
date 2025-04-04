@@ -4,13 +4,14 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import LandingPage from "./components/LandingPage";
 import RosterManagement from "./pages/RosterManagement";
 import GatePass from "./pages/GatePass";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
+import { toast } from "@/components/ui/use-toast";
 
 // Create a new QueryClient with better configuration
 const queryClient = new QueryClient({
@@ -20,6 +21,13 @@ const queryClient = new QueryClient({
       staleTime: 30000, // 30 seconds
       refetchOnWindowFocus: false, // Don't refetch when window gets focus
       refetchOnReconnect: true, // Do refetch when reconnecting
+      onError: (error) => {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "An unexpected error occurred",
+          variant: "destructive",
+        });
+      }
     },
   },
 });
@@ -27,6 +35,7 @@ const queryClient = new QueryClient({
 const App: React.FC = () => {
   const [showApp, setShowApp] = React.useState<boolean>(false);
   const [isInitialized, setIsInitialized] = React.useState<boolean>(false);
+  const [initError, setInitError] = React.useState<string | null>(null);
   
   // Check local storage to see if user has already entered the app
   React.useEffect(() => {
@@ -36,8 +45,14 @@ const App: React.FC = () => {
     }
     
     // Set up automatic report scheduling when the app loads
-    setupAutoReportScheduling();
-    setIsInitialized(true);
+    try {
+      setupAutoReportScheduling();
+      setIsInitialized(true);
+    } catch (error) {
+      console.error("Error initializing app:", error);
+      setInitError(error instanceof Error ? error.message : "Failed to initialize application");
+      setIsInitialized(true); // We still want to show the app even if there's an initialization error
+    }
   }, []);
 
   const handleGetStarted = () => {
@@ -65,12 +80,21 @@ const App: React.FC = () => {
     );
   }
 
+  // If there was an initialization error, show it but still let users access the app
+  if (initError) {
+    toast({
+      title: "Warning",
+      description: `There was an issue initializing some features: ${initError}`,
+      variant: "destructive",
+    });
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950 overflow-x-hidden">
           <Toaster />
-          <Sonner position="top-center" />
+          <Sonner position="top-center" closeButton={true} richColors />
           <BrowserRouter>
             {!showApp ? (
               <LandingPage onGetStarted={handleGetStarted} />
@@ -80,6 +104,7 @@ const App: React.FC = () => {
                 <Route path="/landing" element={<LandingPage onGetStarted={() => setShowApp(true)} />} />
                 <Route path="/roster" element={<RosterManagement />} />
                 <Route path="/gate-pass" element={<GatePass />} />
+                <Route path="/home" element={<Navigate to="/" replace />} />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
