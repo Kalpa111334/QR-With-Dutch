@@ -21,13 +21,15 @@ const queryClient = new QueryClient({
       staleTime: 30000, // 30 seconds
       refetchOnWindowFocus: false, // Don't refetch when window gets focus
       refetchOnReconnect: true, // Do refetch when reconnecting
-      onError: (error) => {
-        toast({
-          title: "Error",
-          description: error instanceof Error ? error.message : "An unexpected error occurred",
-          variant: "destructive",
-        });
-      }
+      meta: {
+        onError: (error) => {
+          toast({
+            title: "Error",
+            description: error instanceof Error ? error.message : "An unexpected error occurred",
+            variant: "destructive",
+          });
+        }
+      },
     },
   },
 });

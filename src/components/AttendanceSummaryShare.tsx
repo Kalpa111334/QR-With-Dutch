@@ -12,7 +12,7 @@ import {
   saveAdminContactInfo,
   autoShareAttendanceSummary
 } from '@/utils/attendanceUtils';
-import { CalendarIcon, Send, MessageSquare, Clock, Save, Check } from 'lucide-react';
+import { CalendarIcon, Send, MessageSquare, Clock, Save, Check, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -328,7 +328,8 @@ const AttendanceSummaryShare: React.FC = () => {
           </div>
           
           {autoShareEnabled && !phoneNumber && (
-            <Alert variant="warning" className="bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300">
+            <Alert variant="default" className="bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300">
+              <AlertTriangle className="h-4 w-4 mr-2" />
               <AlertDescription>
                 Please enter a phone number to enable automatic sharing
               </AlertDescription>
