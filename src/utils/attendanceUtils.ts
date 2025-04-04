@@ -156,26 +156,11 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
       return false;
     }
     
-    // Get employee name
-    const { data: employeeData, error: employeeError } = await supabase
-      .from('employees')
-      .select('first_name, last_name')
-      .eq('id', employeeId)
-      .single();
-    
-    if (employeeError) {
-      console.error('Error fetching employee name:', employeeError);
-      return false;
-    }
-    
-    const employeeName = `${employeeData?.first_name || ''} ${employeeData?.last_name || ''}`.trim();
-    
-    // Insert new record
+    // Insert new record - FIXED: Removed the employee_name field which doesn't exist in the table
     const { error } = await supabase
       .from('attendance')
       .insert({
         employee_id: employeeId,
-        employee_name: employeeName,
         date: today,
         check_in_time: checkInTime,
         status: 'present'
