@@ -1,3 +1,4 @@
+
 import { supabase } from '../integrations/supabase/client';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Attendance } from '../types';
@@ -132,7 +133,10 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
   try {
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
-    const checkInTime = format(now, 'HH:mm:ss');
+    
+    // Format the check-in time as an ISO string instead of just time
+    // This ensures Postgres can properly parse it as a timestamp with timezone
+    const checkInTime = now.toISOString();
     
     // Check if already checked in today - use maybeSingle() instead of single()
     const { data: existingRecord, error: existingError } = await supabase
@@ -156,7 +160,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
       return false;
     }
     
-    // Insert new record - FIXED: Removed the employee_name field which doesn't exist in the table
+    // Insert new record
     const { error } = await supabase
       .from('attendance')
       .insert({
@@ -187,7 +191,9 @@ export const recordAttendanceCheckOut = async (employeeId: string): Promise<bool
   try {
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
-    const checkOutTime = format(now, 'HH:mm:ss');
+    
+    // Format check-out time as ISO string for proper timestamp with timezone
+    const checkOutTime = now.toISOString();
     
     // Find today's attendance record - use maybeSingle() instead of single()
     const { data, error } = await supabase
