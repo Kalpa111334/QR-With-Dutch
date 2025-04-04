@@ -7,7 +7,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-import LandingPage from "./components/LandingPage";
 import RosterManagement from "./pages/RosterManagement";
 import GatePass from "./pages/GatePass";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
@@ -35,18 +34,11 @@ const queryClient = new QueryClient({
 });
 
 const App: React.FC = () => {
-  const [showApp, setShowApp] = React.useState<boolean>(false);
   const [isInitialized, setIsInitialized] = React.useState<boolean>(false);
   const [initError, setInitError] = React.useState<string | null>(null);
   
-  // Check local storage to see if user has already entered the app
+  // Set up automatic report scheduling when the app loads
   React.useEffect(() => {
-    const hasEntered = localStorage.getItem('hasEnteredApp');
-    if (hasEntered === 'true') {
-      setShowApp(true);
-    }
-    
-    // Set up automatic report scheduling when the app loads
     try {
       setupAutoReportScheduling();
       setIsInitialized(true);
@@ -56,11 +48,6 @@ const App: React.FC = () => {
       setIsInitialized(true); // We still want to show the app even if there's an initialization error
     }
   }, []);
-
-  const handleGetStarted = () => {
-    localStorage.setItem('hasEnteredApp', 'true');
-    setShowApp(true);
-  };
 
   // Add the more responsive meta tag for viewport
   React.useEffect(() => {
@@ -98,19 +85,14 @@ const App: React.FC = () => {
           <Toaster />
           <Sonner position="top-center" closeButton={true} richColors />
           <BrowserRouter>
-            {!showApp ? (
-              <LandingPage onGetStarted={handleGetStarted} />
-            ) : (
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/landing" element={<LandingPage onGetStarted={() => setShowApp(true)} />} />
-                <Route path="/roster" element={<RosterManagement />} />
-                <Route path="/gate-pass" element={<GatePass />} />
-                <Route path="/home" element={<Navigate to="/" replace />} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            )}
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/roster" element={<RosterManagement />} />
+              <Route path="/gate-pass" element={<GatePass />} />
+              <Route path="/home" element={<Navigate to="/" replace />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
           </BrowserRouter>
         </div>
       </TooltipProvider>
