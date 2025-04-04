@@ -11,6 +11,7 @@ import RosterManagement from "./pages/RosterManagement";
 import GatePass from "./pages/GatePass";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
 import { toast } from "@/components/ui/use-toast";
+import SplashScreen from "./components/SplashScreen";
 
 // Create a new QueryClient with better configuration
 const queryClient = new QueryClient({
@@ -34,6 +35,7 @@ const queryClient = new QueryClient({
 });
 
 const App: React.FC = () => {
+  const [showSplash, setShowSplash] = React.useState<boolean>(true);
   const [isInitialized, setIsInitialized] = React.useState<boolean>(false);
   const [initError, setInitError] = React.useState<string | null>(null);
   
@@ -78,23 +80,31 @@ const App: React.FC = () => {
     });
   }
 
+  const handleSplashFinished = () => {
+    setShowSplash(false);
+  };
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950 overflow-x-hidden">
-          <Toaster />
-          <Sonner position="top-center" closeButton={true} richColors />
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="/roster" element={<RosterManagement />} />
-              <Route path="/gate-pass" element={<GatePass />} />
-              <Route path="/home" element={<Navigate to="/" replace />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </BrowserRouter>
-        </div>
+        {showSplash ? (
+          <SplashScreen onFinished={handleSplashFinished} />
+        ) : (
+          <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950 overflow-x-hidden">
+            <Toaster />
+            <Sonner position="top-center" closeButton={true} richColors />
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="/roster" element={<RosterManagement />} />
+                <Route path="/gate-pass" element={<GatePass />} />
+                <Route path="/home" element={<Navigate to="/" replace />} />
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </div>
+        )}
       </TooltipProvider>
     </QueryClientProvider>
   );

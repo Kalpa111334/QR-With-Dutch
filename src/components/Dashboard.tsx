@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { getAttendanceRecords, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary } from '@/utils/attendanceUtils';
 import { getEmployees } from '@/utils/employeeUtils';
-import { User, Users, Clock, CheckCircle, UploadCloud, Share2, AlertTriangle, MessageSquare, Smartphone, Calendar, TestTube } from 'lucide-react';
+import { User, Users, Clock, CheckCircle, UploadCloud, Share2, AlertTriangle, MessageSquare, Smartphone, Calendar, TestTube, Mail } from 'lucide-react';
 import { Attendance, Employee } from '@/types';
 import { Button } from '@/components/ui/button';
 import BulkEmployeeUpload from './BulkEmployeeUpload';
@@ -54,6 +53,11 @@ const Dashboard: React.FC = () => {
     };
     
     fetchData();
+
+    // Set up polling to refresh data every 2 minutes
+    const intervalId = setInterval(fetchData, 2 * 60 * 1000);
+    
+    return () => clearInterval(intervalId);
   }, []);
   
   const stats = React.useMemo(() => {
@@ -249,6 +253,25 @@ const Dashboard: React.FC = () => {
                   {stats.checkedOut > 0 && stats.present > 0
                     ? `${Math.round((stats.checkedOut / stats.present) * 100)}% of present employees`
                     : 'No check-outs today'}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="mt-6">
+            <Card className="border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2 text-red-700 dark:text-red-300">
+                  <AlertTriangle size={16} className="text-red-500" />
+                  Absent Employees
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-xl font-bold text-red-700 dark:text-red-300">{stats.absent}</div>
+                <p className="text-xs text-red-600/80 dark:text-red-400/80">
+                  {stats.absent > 0 && stats.activeEmployees > 0
+                    ? `${Math.round((stats.absent / stats.activeEmployees) * 100)}% absence rate today`
+                    : 'All employees present today!'}
                 </p>
               </CardContent>
             </Card>

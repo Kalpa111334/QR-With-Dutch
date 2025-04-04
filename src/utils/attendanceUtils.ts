@@ -1,4 +1,3 @@
-
 import { supabase } from '../integrations/supabase/client';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Attendance } from '../types';
@@ -10,9 +9,11 @@ interface AdminSettings {
   setting_type: string;
   send_method: string;
   phone_number: string;
+  email: string;
   created_at: string;
   updated_at: string;
   auto_share_enabled: boolean;
+  email_share_enabled: boolean;
 }
 
 // Admin contact info type for better type safety
@@ -20,6 +21,8 @@ interface AdminContactInfo {
   phoneNumber: string;
   sendMethod: 'whatsapp' | 'sms';
   isAutoShareEnabled: boolean;
+  email: string;
+  isEmailShareEnabled: boolean;
 }
 
 // Get all attendance records - using the old function name for backward compatibility
@@ -371,21 +374,27 @@ export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
       return {
         phoneNumber: '',
         sendMethod: 'whatsapp', // Default to WhatsApp
-        isAutoShareEnabled: false
+        isAutoShareEnabled: false,
+        email: '',
+        isEmailShareEnabled: false
       };
     }
     
     return {
       phoneNumber: settings.phone_number || '',
       sendMethod: 'whatsapp', // Always use WhatsApp as requested
-      isAutoShareEnabled: settings.auto_share_enabled || false
+      isAutoShareEnabled: settings.auto_share_enabled || false,
+      email: settings.email || '',
+      isEmailShareEnabled: settings.email_share_enabled || false
     };
   } catch (error) {
     console.error('Error in getAdminContactInfo:', error);
     return {
       phoneNumber: '',
       sendMethod: 'whatsapp',
-      isAutoShareEnabled: false
+      isAutoShareEnabled: false,
+      email: '',
+      isEmailShareEnabled: false
     };
   }
 };
@@ -394,12 +403,20 @@ export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
 export const saveAdminContactInfo = async (
   phoneNumber: string,
   sendMethod: 'whatsapp' | 'sms',
-  autoShareEnabled: boolean
+  autoShareEnabled: boolean,
+  email: string = '',
+  emailShareEnabled: boolean = false
 ): Promise<boolean> => {
   try {
-    // Validate phone number
-    if (!phoneNumber) {
-      console.error('Phone number is required');
+    // Validation for phone number if WhatsApp is enabled
+    if (autoShareEnabled && !phoneNumber) {
+      console.error('Phone number is required for WhatsApp sharing');
+      return false;
+    }
+    
+    // Validation for email if email sharing is enabled
+    if (emailShareEnabled && !email) {
+      console.error('Email is required for email sharing');
       return false;
     }
     
@@ -413,6 +430,8 @@ export const saveAdminContactInfo = async (
         send_method: actualSendMethod,
         phone_number: phoneNumber,
         auto_share_enabled: autoShareEnabled,
+        email: email,
+        email_share_enabled: emailShareEnabled,
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'setting_type'
@@ -507,15 +526,7 @@ export const autoShareAttendanceSummary = async (): Promise<boolean> => {
     // Get admin settings
     const contactInfo = await getAdminContactInfo();
     
-    if (!contactInfo.phoneNumber) {
-      console.log("No phone number found for attendance report sharing");
-      return false;
-    }
-    
-    if (!contactInfo.isAutoShareEnabled) {
-      console.log("Auto-share is disabled in settings");
-      return false;
-    }
+    let successCount = 0;
     
     // Get today's date
     const today = new Date();
@@ -526,12 +537,23 @@ export const autoShareAttendanceSummary = async (): Promise<boolean> => {
       format(today, 'yyyy-MM-dd')
     );
     
-    // Create and share the message
+    // Create the summary text
     const summaryText = generateAttendanceSummaryText(today, todayAttendance);
     
-    // Only use WhatsApp as requested
-    return await shareViaWhatsApp(summaryText, contactInfo.phoneNumber);
+    // Share via WhatsApp if enabled
+    if (contactInfo.isAutoShareEnabled && contactInfo.phoneNumber) {
+      const whatsappSuccess = await shareViaWhatsApp(summaryText, contactInfo.phoneNumber);
+      if (whatsappSuccess) successCount++;
+    }
     
+    // Share via Email if enabled
+    if (contactInfo.isEmailShareEnabled && contactInfo.email) {
+      const subject = `Attendance Summary for ${format(today, 'MMMM d, yyyy')}`;
+      const emailSuccess = await shareViaEmail(summaryText, contactInfo.email, subject);
+      if (emailSuccess) successCount++;
+    }
+    
+    return successCount > 0;
   } catch (error) {
     console.error('Error in autoShareAttendanceSummary:', error);
     return false;
@@ -567,6 +589,34 @@ export const shareViaWhatsApp = async (message: string, phoneNumber: string): Pr
     return true;
   } catch (error) {
     console.error('Error in shareViaWhatsApp:', error);
+    return false;
+  }
+};
+
+// Share via Email
+export const shareViaEmail = async (message: string, email: string, subject: string): Promise<boolean> => {
+  try {
+    // Validate email
+    if (!email) {
+      console.error("No email provided for email sharing");
+      return false;
+    }
+    
+    // Encode the message and subject for URL
+    const encodedSubject = encodeURIComponent(subject);
+    const encodedMessage = encodeURIComponent(message);
+    
+    // Email URL scheme
+    const emailUrl = `mailto:${email}?subject=${encodedSubject}&body=${encodedMessage}`;
+    
+    console.log("Opening email client");
+    
+    // Open in a new window
+    window.open(emailUrl, '_blank');
+    
+    return true;
+  } catch (error) {
+    console.error('Error in shareViaEmail:', error);
     return false;
   }
 };
@@ -624,9 +674,9 @@ export const setupAutoReportScheduling = () => {
       const hours = now.getHours();
       const minutes = now.getMinutes();
       
-      // Schedule for 5:00 PM (17:00)
-      if (hours === 17 && minutes === 0) {
-        console.log("It's report time (5:00 PM), attempting to send report...");
+      // Schedule for 6:00 PM (18:00)
+      if (hours === 18 && minutes === 0) {
+        console.log("It's report time (6:00 PM), attempting to send report...");
         const success = await autoShareAttendanceSummary();
         console.log("Auto report sharing result:", success ? "Successful" : "Failed");
       }
