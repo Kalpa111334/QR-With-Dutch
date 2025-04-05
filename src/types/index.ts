@@ -21,6 +21,10 @@ export interface Attendance {
   checkOutTime: string | null;
   date: string;
   status: 'present' | 'late' | 'absent';
+  // New fields for late minutes and working duration
+  minutesLate?: number;
+  workingDuration?: string;
+  workingDurationMinutes?: number;
 }
 
 export interface Department {

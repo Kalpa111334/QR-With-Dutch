@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Attendance } from '@/types';
-import { Calendar, Download, Search } from 'lucide-react';
+import { Calendar, Download, Search, Clock, Timer } from 'lucide-react';
 import { getAttendanceRecords } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 
@@ -77,14 +77,16 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const exportToCsv = () => {
     if (filteredRecords.length === 0) return;
     
-    const headers = ['Date', 'Employee Name', 'Check In', 'Check Out', 'Status'];
+    const headers = ['Date', 'Employee Name', 'Check In', 'Check Out', 'Status', 'Minutes Late', 'Working Duration'];
     
     const rows = filteredRecords.map(record => [
       record.date,
       record.employeeName,
       new Date(record.checkInTime).toLocaleTimeString(),
       record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString() : '-',
-      record.status
+      record.status,
+      record.minutesLate || 0,
+      record.workingDuration || '-'
     ]);
     
     const csvContent = [
@@ -177,7 +179,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
             </div>
           </div>
           
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -186,12 +188,24 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                   <TableHead>Check In</TableHead>
                   <TableHead>Check Out</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>
+                    <div className="flex items-center">
+                      <Clock className="mr-1 h-4 w-4" />
+                      Late (mins)
+                    </div>
+                  </TableHead>
+                  <TableHead>
+                    <div className="flex items-center">
+                      <Timer className="mr-1 h-4 w-4" />
+                      Working Time
+                    </div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center h-24">
+                    <TableCell colSpan={7} className="text-center h-24">
                       <div className="flex justify-center">
                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                       </div>
@@ -199,7 +213,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                   </TableRow>
                 ) : filteredRecords.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center h-24">
+                    <TableCell colSpan={7} className="text-center h-24">
                       No attendance records found
                     </TableCell>
                   </TableRow>
@@ -227,6 +241,20 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                         >
                           {record.status}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {record.status === 'late' ? (
+                          <span className="text-destructive font-medium">
+                            {record.minutesLate || 0}
+                          </span>
+                        ) : (
+                          '0'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="whitespace-nowrap">
+                          {record.workingDuration || 'Calculating...'}
+                        </span>
                       </TableCell>
                     </TableRow>
                   ))

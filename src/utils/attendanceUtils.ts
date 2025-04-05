@@ -1,5 +1,6 @@
+
 import { supabase } from '../integrations/supabase/client';
-import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay, differenceInMinutes, differenceInHours, differenceInSeconds, parseISO } from 'date-fns';
 import { Attendance } from '../types';
 import { toast } from '../components/ui/use-toast';
 
@@ -24,6 +25,70 @@ interface AdminContactInfo {
   email: string;
   isEmailShareEnabled: boolean;
 }
+
+// Define the start of workday (9:00 AM) for late calculation
+const WORKDAY_START_HOUR = 9;
+const WORKDAY_START_MINUTE = 0;
+
+// Function to check if an employee is late based on check-in time
+const isLateArrival = (checkInTime: string): boolean => {
+  const checkIn = new Date(checkInTime);
+  const workdayStart = new Date(checkIn);
+  
+  // Set to 9:00 AM of the same day
+  workdayStart.setHours(WORKDAY_START_HOUR, WORKDAY_START_MINUTE, 0, 0);
+  
+  // Employee is late if check-in time is after 9:00 AM
+  return checkIn > workdayStart;
+};
+
+// Calculate minutes late (0 if not late)
+const calculateMinutesLate = (checkInTime: string): number => {
+  const checkIn = new Date(checkInTime);
+  const workdayStart = new Date(checkIn);
+  
+  // Set to 9:00 AM of the same day
+  workdayStart.setHours(WORKDAY_START_HOUR, WORKDAY_START_MINUTE, 0, 0);
+  
+  // If not late, return 0
+  if (checkIn <= workdayStart) {
+    return 0;
+  }
+  
+  // Calculate minutes late
+  return differenceInMinutes(checkIn, workdayStart);
+};
+
+// Calculate real-time working duration in minutes
+const calculateWorkingDuration = (checkInTime: string, checkOutTime: string | null): { minutes: number, formatted: string } => {
+  if (!checkOutTime) {
+    // If no checkout time, calculate duration up until now
+    const checkIn = new Date(checkInTime);
+    const now = new Date();
+    const minutes = differenceInMinutes(now, checkIn);
+    
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    
+    return {
+      minutes,
+      formatted: `${hours}h ${remainingMinutes}m`
+    };
+  }
+  
+  // Calculate duration between check-in and check-out
+  const checkIn = new Date(checkInTime);
+  const checkOut = new Date(checkOutTime);
+  const minutes = differenceInMinutes(checkOut, checkIn);
+  
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  
+  return {
+    minutes,
+    formatted: `${hours}h ${remainingMinutes}m`
+  };
+};
 
 // Get all attendance records - using the old function name for backward compatibility
 export const getAttendance = async (): Promise<Attendance[]> => {
@@ -51,15 +116,30 @@ export const getAttendance = async (): Promise<Attendance[]> => {
     }
     
     // Transform the data to match our Attendance type with proper type casting
-    return data.map(record => ({
-      id: record.id,
-      employeeId: record.employee_id,
-      employeeName: `${record.employees?.first_name || ''} ${record.employees?.last_name || ''}`.trim(),
-      checkInTime: record.check_in_time,
-      checkOutTime: record.check_out_time,
-      date: format(new Date(record.date), 'yyyy-MM-dd'),
-      status: (record.status as 'present' | 'late' | 'absent') || 'present'
-    }));
+    return data.map(record => {
+      const checkInTime = record.check_in_time;
+      const checkOutTime = record.check_out_time;
+      
+      // Determine if late based on check-in time
+      const late = isLateArrival(checkInTime);
+      const minutesLate = calculateMinutesLate(checkInTime);
+      
+      // Calculate working duration
+      const workingDuration = calculateWorkingDuration(checkInTime, checkOutTime);
+      
+      return {
+        id: record.id,
+        employeeId: record.employee_id,
+        employeeName: `${record.employees?.first_name || ''} ${record.employees?.last_name || ''}`.trim(),
+        checkInTime,
+        checkOutTime,
+        date: format(new Date(record.date), 'yyyy-MM-dd'),
+        status: late ? 'late' : 'present' as 'present' | 'late' | 'absent',
+        minutesLate,
+        workingDuration: workingDuration.formatted,
+        workingDurationMinutes: workingDuration.minutes
+      };
+    });
   } catch (error) {
     console.error('Error in getAttendance:', error);
     return [];
@@ -96,16 +176,31 @@ export const getAttendanceByDateRange = async (startDate: string, endDate: strin
       return [];
     }
     
-    // Transform with proper type casting
-    return data.map(record => ({
-      id: record.id,
-      employeeId: record.employee_id,
-      employeeName: `${record.employees?.first_name || ''} ${record.employees?.last_name || ''}`.trim(),
-      checkInTime: record.check_in_time,
-      checkOutTime: record.check_out_time,
-      date: format(new Date(record.date), 'yyyy-MM-dd'),
-      status: (record.status as 'present' | 'late' | 'absent') || 'present'
-    }));
+    // Transform with proper type casting and calculate late/duration values
+    return data.map(record => {
+      const checkInTime = record.check_in_time;
+      const checkOutTime = record.check_out_time;
+      
+      // Determine if late based on check-in time
+      const late = isLateArrival(checkInTime);
+      const minutesLate = calculateMinutesLate(checkInTime);
+      
+      // Calculate working duration
+      const workingDuration = calculateWorkingDuration(checkInTime, checkOutTime);
+      
+      return {
+        id: record.id,
+        employeeId: record.employee_id,
+        employeeName: `${record.employees?.first_name || ''} ${record.employees?.last_name || ''}`.trim(),
+        checkInTime,
+        checkOutTime,
+        date: format(new Date(record.date), 'yyyy-MM-dd'),
+        status: late ? 'late' : 'present' as 'present' | 'late' | 'absent',
+        minutesLate,
+        workingDuration: workingDuration.formatted,
+        workingDurationMinutes: workingDuration.minutes
+      };
+    });
   } catch (error) {
     console.error('Error in getAttendanceByDateRange:', error);
     return [];
@@ -137,8 +232,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
     
-    // Format the check-in time as an ISO string instead of just time
-    // This ensures Postgres can properly parse it as a timestamp with timezone
+    // Format the check-in time as an ISO string
     const checkInTime = now.toISOString();
     
     // Check if already checked in today - use maybeSingle() instead of single()
@@ -163,6 +257,9 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
       return false;
     }
     
+    // Determine if the employee is late (after 9:00 AM)
+    const isLate = isLateArrival(checkInTime);
+    
     // Insert new record
     const { error } = await supabase
       .from('attendance')
@@ -170,7 +267,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
         employee_id: employeeId,
         date: today,
         check_in_time: checkInTime,
-        status: 'present'
+        status: isLate ? 'late' : 'present'
       });
     
     if (error) {
@@ -179,8 +276,10 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     }
     
     toast({
-      title: "Checked In",
-      description: "Your attendance has been recorded.",
+      title: isLate ? "Checked In (Late)" : "Checked In",
+      description: isLate 
+        ? `Your attendance has been recorded. You are ${calculateMinutesLate(checkInTime)} minutes late.`
+        : "Your attendance has been recorded.",
     });
     return true;
   } catch (error) {
@@ -230,6 +329,9 @@ export const recordAttendanceCheckOut = async (employeeId: string): Promise<bool
       return false;
     }
     
+    // Calculate working duration
+    const workingDuration = calculateWorkingDuration(data.check_in_time, checkOutTime);
+    
     // Update record with check-out time
     const { error: updateError } = await supabase
       .from('attendance')
@@ -245,7 +347,7 @@ export const recordAttendanceCheckOut = async (employeeId: string): Promise<bool
     
     toast({
       title: "Checked Out",
-      description: "Your check-out time has been recorded.",
+      description: `Your check-out time has been recorded. Working duration: ${workingDuration.formatted}`,
     });
     return true;
   } catch (error) {
@@ -456,11 +558,19 @@ export const generateAttendanceSummaryText = (date: Date, records: Attendance[])
   const lateCount = records.filter(r => r.status === 'late').length;
   const checkedOutCount = records.filter(r => r.checkOutTime).length;
   
-  // Calculate average hours worked for those who checked out
+  // Calculate average working hours and late minutes
   let totalHoursWorked = 0;
   let totalCheckedOut = 0;
+  let totalLateMinutes = 0;
   
   records.forEach(record => {
+    // Calculate late minutes
+    if (record.status === 'late') {
+      const minutesLate = calculateMinutesLate(record.checkInTime);
+      totalLateMinutes += minutesLate;
+    }
+    
+    // Calculate hours worked for those who checked out
     if (record.checkOutTime && record.checkInTime) {
       const checkIn = new Date(record.checkInTime);
       const checkOut = new Date(record.checkOutTime);
@@ -471,32 +581,34 @@ export const generateAttendanceSummaryText = (date: Date, records: Attendance[])
   });
   
   const avgHoursWorked = totalCheckedOut > 0 ? (totalHoursWorked / totalCheckedOut).toFixed(1) : '0';
+  const avgLateMinutes = lateCount > 0 ? Math.round(totalLateMinutes / lateCount) : 0;
   
   // New requested format
   let summaryText = `📊 *Daily Attendance Summary* 📊\n`;
   summaryText += `📆 *${formattedDate}*\n\n`;
   
   summaryText += `👥 *Total Attendance*: ${records.length} employees\n`;
-  summaryText += `⏰ *Late Arrivals*: ${lateCount} employees\n`;
+  summaryText += `⏰ *Late Arrivals*: ${lateCount} employees (avg ${avgLateMinutes} mins late)\n`;
   summaryText += `🏠 *Left For Home*: ${checkedOutCount} employees\n`;
   
   if (totalCheckedOut > 0) {
     summaryText += `⌛ *Average Hours Worked*: ${avgHoursWorked} hours\n\n`;
   }
   
-  // Late employees detail section
+  // Late employees detail section with minutes late
   if (lateCount > 0) {
     summaryText += `*⚠️ Late Employees:*\n`;
     records
       .filter(r => r.status === 'late')
       .forEach(record => {
         const checkInTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        summaryText += `- ${record.employeeName}: ${checkInTime}\n`;
+        const minutesLate = calculateMinutesLate(record.checkInTime);
+        summaryText += `- ${record.employeeName}: ${checkInTime} (${minutesLate} mins late)\n`;
       });
     summaryText += `\n`;
   }
   
-  // Present employees summary
+  // Present employees summary with working duration
   if (records.length > 0) {
     summaryText += `*✅ Attendance Details:*\n`;
     records.forEach(record => {
@@ -505,9 +617,11 @@ export const generateAttendanceSummaryText = (date: Date, records: Attendance[])
         ? new Date(record.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
         : 'Still working';
         
+      // Calculate working duration
+      const workingDuration = calculateWorkingDuration(record.checkInTime, record.checkOutTime);
       const status = record.status === 'late' ? '⚠️' : '✓';
       
-      summaryText += `- ${record.employeeName} ${status}: ${checkInTime} to ${checkOutTime}\n`;
+      summaryText += `- ${record.employeeName} ${status}: ${checkInTime} to ${checkOutTime} (${workingDuration.formatted})\n`;
     });
   } else {
     summaryText += "No attendance records for this date.";
