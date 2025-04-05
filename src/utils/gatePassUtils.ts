@@ -199,76 +199,24 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
   }
 };
 
-// Verify a gate pass by ID or code with enhanced parsing and error handling
-export const verifyGatePass = async (passIdentifier: string): Promise<{
+// Verify a gate pass by code - simplified for manual entry
+export const verifyGatePass = async (passCode: string): Promise<{
   verified: boolean;
   message: string;
   pass?: GatePass;
 }> => {
   try {
-    console.log('Verifying gate pass with identifier:', passIdentifier);
+    console.log('Verifying gate pass with code:', passCode);
     
-    if (!passIdentifier || passIdentifier.trim() === '') {
+    if (!passCode || passCode.trim() === '') {
       return {
         verified: false,
-        message: 'Invalid gate pass identifier. No pass ID or code provided.'
+        message: 'Invalid gate pass code. Please enter a valid code.'
       };
     }
     
-    // First try to parse if this is a JSON string containing pass information
-    let id: string | null = null;
-    let passCode: string | null = null;
-    
-    try {
-      // Try to parse as JSON if it looks like a JSON object or if it's a string that might be JSON
-      if (
-        (passIdentifier.startsWith('{') && passIdentifier.endsWith('}')) ||
-        passIdentifier.includes('"passId"') ||
-        passIdentifier.includes('"id"')
-      ) {
-        const parsed = JSON.parse(passIdentifier);
-        id = parsed.passId || parsed.id || null;
-        passCode = parsed.passCode || null;
-        console.log('Parsed from JSON:', { id, passCode });
-      }
-    } catch (e) {
-      // If parsing fails, try to extract UUID pattern from the string
-      console.log('Parsing as JSON failed, checking for UUID pattern');
-      const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-      const match = passIdentifier.match(uuidRegex);
-      if (match) {
-        id = match[0];
-        console.log('Found UUID in string:', id);
-      } else {
-        // Try to find pass code pattern (alphanumeric with possible hyphen)
-        const codeRegex = /([A-Z0-9]{6,}-[A-Z0-9]{2,})/;
-        const codeMatch = passIdentifier.match(codeRegex);
-        if (codeMatch) {
-          passCode = codeMatch[0];
-          console.log('Found pass code in string:', passCode);
-        } else {
-          console.log('Using full string as raw identifier');
-          // If no specific format is detected, try using the whole string as a pass code
-          passCode = passIdentifier;
-        }
-      }
-    }
-    
-    // If we couldn't extract from JSON, check if it's a UUID
-    if (!id && !passCode) {
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(passIdentifier)) {
-        id = passIdentifier;
-        console.log('Input is a valid UUID:', id);
-      } else {
-        passCode = passIdentifier;
-        console.log('Using input as pass code:', passCode);
-      }
-    }
-    
-    console.log('After processing, searching by:', { id, passCode });
-    
-    // Build the query based on the identifier type
-    let query = supabase
+    // Retrieve the pass by code
+    const { data: pass, error } = await supabase
       .from('gate_passes')
       .select(`
         id,
@@ -282,16 +230,9 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
         expires_at,
         used_at,
         employees (id, first_name, last_name)
-      `);
-    
-    if (id) {
-      query = query.eq('id', id);
-    } else if (passCode) {
-      query = query.eq('pass_code', passCode);
-    }
-    
-    // Execute the query
-    const { data: pass, error } = await query.maybeSingle();
+      `)
+      .eq('pass_code', passCode)
+      .maybeSingle();
     
     console.log('Gate pass query result:', { pass, error });
       
@@ -304,8 +245,7 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
     }
     
     if (!pass) {
-      // Log what we tried to find to help debug
-      console.log('No pass found with search criteria:', { id, passCode, originalInput: passIdentifier });
+      console.log('No pass found with code:', passCode);
       return {
         verified: false,
         message: 'Invalid gate pass. This pass does not exist.'

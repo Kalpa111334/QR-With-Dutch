@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { QrCode, Check, X, Clipboard, Users, Download } from 'lucide-react';
+import { QrCode, Check, X, Clipboard, Users, Download, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -8,10 +9,10 @@ import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
+import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Employee } from '@/types';
 import { getEmployees } from '@/utils/employeeUtils';
-import QRScanner from '@/components/QRScanner';
 import { 
   getGatePasses,
   createGatePass,
@@ -27,7 +28,7 @@ const GatePass: React.FC = () => {
   const [passValidity, setPassValidity] = useState<'single' | 'day' | 'week' | 'month'>('single');
   const [passReason, setPassReason] = useState<string>('');
   const [activeTab, setActiveTab] = useState<string>('create');
-  const [scanResult, setScanResult] = useState<string | null>(null);
+  const [passCode, setPassCode] = useState<string>('');
   const [verificationResult, setVerificationResult] = useState<{
     verified: boolean;
     message: string;
@@ -36,6 +37,7 @@ const GatePass: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [showAlert, setShowAlert] = useState(false);
   
   const { toast } = useToast();
 
@@ -114,6 +116,9 @@ const GatePass: React.FC = () => {
         
         // Switch to verify tab to show the new pass
         setActiveTab('verify');
+        
+        // Show alert with pass code
+        setShowAlert(true);
       } else {
         toast({
           title: 'Error',
@@ -133,37 +138,30 @@ const GatePass: React.FC = () => {
     }
   };
 
-  // Handle QR code scan result
-  const handleScanResult = async (result: string) => {
-    setScanResult(result);
+  // Verify gate pass by code
+  const handleVerifyPass = async () => {
+    if (!passCode || passCode.trim() === '') {
+      toast({
+        title: 'Error',
+        description: 'Please enter a pass code to verify',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     setIsVerifying(true);
     
     try {
-      console.log("Raw scan result:", result);
-      
-      // Try to parse the QR code data (could be JSON or just the pass ID/code)
-      let passIdentifier = result;
-      try {
-        // Check if result is valid JSON
-        if (result.trim().startsWith('{') && result.trim().endsWith('}')) {
-          const parsedData = JSON.parse(result);
-          // Use either passId, id, or passCode, in that order of preference
-          passIdentifier = parsedData.passId || parsedData.id || parsedData.passCode || result;
-          console.log("Parsed identifier from JSON:", passIdentifier);
-        } else {
-          console.log("Not JSON, using raw value:", passIdentifier);
-        }
-      } catch (e) {
-        // If not valid JSON, use the raw result
-        console.log("Error parsing result as JSON:", e);
-        console.log("Using raw scan result:", passIdentifier);
-      }
-      
-      // Verify the pass
-      console.log("Verifying pass with identifier:", passIdentifier);
-      const verification = await verifyGatePass(passIdentifier);
+      console.log("Verifying pass with code:", passCode);
+      const verification = await verifyGatePass(passCode);
       console.log("Verification result:", verification);
+      
       setVerificationResult(verification);
+      
+      // If verified, show success alert
+      if (verification.verified) {
+        setShowAlert(true);
+      }
       
       // If valid, update the pass in local state if it exists there
       if (verification.pass && verification.pass.id) {
@@ -174,10 +172,10 @@ const GatePass: React.FC = () => {
         );
       }
     } catch (error) {
-      console.error('Error processing scan result:', error);
+      console.error('Error verifying gate pass:', error);
       setVerificationResult({
         verified: false,
-        message: 'Invalid QR code format. Please try again.',
+        message: 'Error verifying pass. Please try again.',
       });
     } finally {
       setIsVerifying(false);
@@ -260,32 +258,6 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
         return 'bg-red-100 text-red-800';
       default:
         return '';
-    }
-  };
-
-  // Function to manually verify a pass by ID or code
-  const verifyPassByCode = async () => {
-    if (!scanResult || scanResult.trim() === '') {
-      toast({
-        title: 'Error',
-        description: 'Please enter a pass code or ID to verify',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    setIsVerifying(true);
-    try {
-      const verification = await verifyGatePass(scanResult);
-      setVerificationResult(verification);
-    } catch (error) {
-      console.error('Error verifying pass:', error);
-      setVerificationResult({
-        verified: false,
-        message: 'Error verifying pass. Please try again.',
-      });
-    } finally {
-      setIsVerifying(false);
     }
   };
 
@@ -398,36 +370,29 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
-                <CardTitle>Scan or Enter Pass Code</CardTitle>
+                <CardTitle>Enter Pass Code</CardTitle>
                 <CardDescription>
-                  Scan the QR code or enter the pass code manually to verify
+                  Enter the gate pass code to verify
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex justify-center flex-col space-y-4">
                 <div className="w-full max-w-md mx-auto">
-                  <QRScanner onScan={handleScanResult} mode="gatepass" />
-                  {isVerifying && (
-                    <div className="mt-4 text-center text-sm text-muted-foreground">
-                      Processing scan...
+                  <div className="flex flex-col space-y-2">
+                    <Label htmlFor="pass-code">Gate Pass Code</Label>
+                    <div className="flex space-x-2">
+                      <Input 
+                        id="pass-code"
+                        placeholder="Enter gate pass code" 
+                        value={passCode}
+                        onChange={(e) => setPassCode(e.target.value)}
+                      />
+                      <Button 
+                        onClick={handleVerifyPass} 
+                        disabled={isVerifying || !passCode}
+                      >
+                        {isVerifying ? 'Verifying...' : 'Verify'}
+                      </Button>
                     </div>
-                  )}
-                </div>
-                
-                <div className="mt-4 flex flex-col space-y-2">
-                  <Label htmlFor="manual-code">Or enter pass code manually</Label>
-                  <div className="flex space-x-2">
-                    <Input 
-                      id="manual-code"
-                      placeholder="Enter pass code or ID" 
-                      value={scanResult || ''}
-                      onChange={(e) => setScanResult(e.target.value)}
-                    />
-                    <Button 
-                      onClick={verifyPassByCode} 
-                      disabled={isVerifying || !scanResult}
-                    >
-                      Verify
-                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -462,12 +427,9 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                     {verificationResult.pass && (
                       <div className="mt-4 border rounded-md p-4 space-y-2">
                         <p className="font-medium">Pass Details:</p>
-                        <p><span className="font-medium">ID:</span> {verificationResult.pass.id}</p>
-                        <p><span className="font-medium">Code:</span> {verificationResult.pass.passCode}</p>
+                        <p><span className="font-medium">Pass Code:</span> {verificationResult.pass.passCode}</p>
                         <p><span className="font-medium">Employee:</span> {verificationResult.pass.employeeName}</p>
-                        <p><span className="font-medium">Type:</span> {/* Fix Badge nesting issue */}
-                          <span className="capitalize">{verificationResult.pass.type}</span>
-                        </p>
+                        <p><span className="font-medium">Type:</span> <span className="capitalize">{verificationResult.pass.type}</span></p>
                         <p><span className="font-medium">Reason:</span> {verificationResult.pass.reason}</p>
                         <p><span className="font-medium">Created:</span> {new Date(verificationResult.pass.createdAt).toLocaleString()}</p>
                         <p><span className="font-medium">Expires:</span> {new Date(verificationResult.pass.expiresAt).toLocaleString()}</p>
@@ -475,19 +437,11 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                           <p><span className="font-medium">Used:</span> {new Date(verificationResult.pass.usedAt).toLocaleString()}</p>
                         )}
                         
-                        {/* QR Code Display */}
+                        {/* Pass Code Display */}
                         <div className="pt-4 flex flex-col items-center">
-                          <div className="bg-white p-4 rounded-lg shadow-md mb-4" id="qr-container">
-                            {verificationResult.verified && (
-                              <img
-                                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(JSON.stringify({
-                                  passId: verificationResult.pass.id,
-                                  passCode: verificationResult.pass.passCode
-                                }))}`}
-                                alt="Gate Pass QR Code"
-                                className="w-48 h-48"
-                              />
-                            )}
+                          <div className="bg-white p-4 rounded-lg shadow-md mb-4 text-center">
+                            <p className="text-sm text-gray-500 mb-1">Gate Pass Code</p>
+                            <p className="text-xl font-bold tracking-wider">{verificationResult.pass.passCode}</p>
                           </div>
                           <div className="flex gap-2">
                             <Button
@@ -517,8 +471,8 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                 ) : (
                   <div className="flex flex-col items-center justify-center h-40 text-center">
                     <QrCode className="h-10 w-10 text-muted-foreground mb-2" />
-                    <p className="text-muted-foreground">No gate pass scanned yet</p>
-                    <p className="text-sm text-muted-foreground">Scan a QR code to see verification results</p>
+                    <p className="text-muted-foreground">No gate pass verified yet</p>
+                    <p className="text-sm text-muted-foreground">Enter a gate pass code to see verification results</p>
                   </div>
                 )}
               </CardContent>
@@ -595,6 +549,43 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Verification Success/Failure Alert Dialog */}
+      <AlertDialog open={showAlert} onOpenChange={setShowAlert}>
+        <AlertDialogContent className={verificationResult?.verified ? "border-green-500" : "border-red-500"}>
+          <AlertDialogHeader>
+            <div className="flex items-center">
+              {verificationResult?.verified ? (
+                <Check className="h-6 w-6 text-green-600 mr-2" />
+              ) : (
+                <AlertTriangle className="h-6 w-6 text-red-600 mr-2" />
+              )}
+              <AlertDialogTitle>
+                {verificationResult?.verified ? "Access Granted" : "Access Denied"}
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription>
+              {verificationResult?.message}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          {verificationResult?.pass && (
+            <div className="my-4 p-4 bg-gray-50 rounded-md">
+              <p className="font-medium mb-2">Gate Pass Details:</p>
+              <p><span className="font-medium">Pass Code:</span> {verificationResult.pass.passCode}</p>
+              <p><span className="font-medium">Employee:</span> {verificationResult.pass.employeeName}</p>
+              <p><span className="font-medium">Type:</span> <span className="capitalize">{verificationResult.pass.type}</span></p>
+              <p><span className="font-medium">Expires:</span> {new Date(verificationResult.pass.expiresAt).toLocaleString()}</p>
+            </div>
+          )}
+          
+          <AlertDialogFooter>
+            <AlertDialogAction>
+              {verificationResult?.verified ? "Approve Entry" : "Close"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
