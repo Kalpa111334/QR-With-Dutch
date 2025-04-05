@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { QrCode, Check, X, Clipboard, Users, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
