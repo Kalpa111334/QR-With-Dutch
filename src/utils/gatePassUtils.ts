@@ -248,6 +248,8 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
           console.log('Found pass code in string:', passCode);
         } else {
           console.log('Using full string as raw identifier');
+          // If no specific format is detected, try using the whole string as a pass code
+          passCode = passIdentifier;
         }
       }
     }
@@ -302,6 +304,8 @@ export const verifyGatePass = async (passIdentifier: string): Promise<{
     }
     
     if (!pass) {
+      // Log what we tried to find to help debug
+      console.log('No pass found with search criteria:', { id, passCode, originalInput: passIdentifier });
       return {
         verified: false,
         message: 'Invalid gate pass. This pass does not exist.'

@@ -140,17 +140,30 @@ const GatePass: React.FC = () => {
     setIsVerifying(true);
     
     try {
+      console.log("Raw scan result:", result);
+      
       // Try to parse the QR code data (could be JSON or just the pass ID/code)
       let passIdentifier = result;
       try {
-        const parsedData = JSON.parse(result);
-        passIdentifier = parsedData.id || parsedData.passCode || parsedData.passId || result;
-      } catch {
-        // If not valid JSON, assume it's the pass ID or code directly
+        // Check if result is valid JSON
+        if (result.trim().startsWith('{') && result.trim().endsWith('}')) {
+          const parsedData = JSON.parse(result);
+          // Use either passId, id, or passCode, in that order of preference
+          passIdentifier = parsedData.passId || parsedData.id || parsedData.passCode || result;
+          console.log("Parsed identifier from JSON:", passIdentifier);
+        } else {
+          console.log("Not JSON, using raw value:", passIdentifier);
+        }
+      } catch (e) {
+        // If not valid JSON, use the raw result
+        console.log("Error parsing result as JSON:", e);
+        console.log("Using raw scan result:", passIdentifier);
       }
       
       // Verify the pass
+      console.log("Verifying pass with identifier:", passIdentifier);
       const verification = await verifyGatePass(passIdentifier);
+      console.log("Verification result:", verification);
       setVerificationResult(verification);
       
       // If valid, update the pass in local state if it exists there
@@ -248,6 +261,32 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
         return 'bg-red-100 text-red-800';
       default:
         return '';
+    }
+  };
+
+  // Function to manually verify a pass by ID or code
+  const verifyPassByCode = async () => {
+    if (!scanResult || scanResult.trim() === '') {
+      toast({
+        title: 'Error',
+        description: 'Please enter a pass code or ID to verify',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    setIsVerifying(true);
+    try {
+      const verification = await verifyGatePass(scanResult);
+      setVerificationResult(verification);
+    } catch (error) {
+      console.error('Error verifying pass:', error);
+      setVerificationResult({
+        verified: false,
+        message: 'Error verifying pass. Please try again.',
+      });
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -360,13 +399,13 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
-                <CardTitle>Scan QR Code</CardTitle>
+                <CardTitle>Scan or Enter Pass Code</CardTitle>
                 <CardDescription>
-                  Scan the QR code on the gate pass to verify
+                  Scan the QR code or enter the pass code manually to verify
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex justify-center">
-                <div className="w-full max-w-md">
+              <CardContent className="flex justify-center flex-col space-y-4">
+                <div className="w-full max-w-md mx-auto">
                   <QRScanner onScan={handleScanResult} mode="gatepass" />
                   {isVerifying && (
                     <div className="mt-4 text-center text-sm text-muted-foreground">
@@ -374,12 +413,25 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                     </div>
                   )}
                 </div>
-              </CardContent>
-              <CardFooter className="flex flex-col items-start">
-                <div className="text-sm text-muted-foreground">
-                  <p>Scan result: {scanResult || 'No scan yet'}</p>
+                
+                <div className="mt-4 flex flex-col space-y-2">
+                  <Label htmlFor="manual-code">Or enter pass code manually</Label>
+                  <div className="flex space-x-2">
+                    <Input 
+                      id="manual-code"
+                      placeholder="Enter pass code or ID" 
+                      value={scanResult || ''}
+                      onChange={(e) => setScanResult(e.target.value)}
+                    />
+                    <Button 
+                      onClick={verifyPassByCode} 
+                      disabled={isVerifying || !scanResult}
+                    >
+                      Verify
+                    </Button>
+                  </div>
                 </div>
-              </CardFooter>
+              </CardContent>
             </Card>
             
             <Card>
