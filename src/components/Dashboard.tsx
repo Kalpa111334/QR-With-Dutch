@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { getAttendanceRecords, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary } from '@/utils/attendanceUtils';
+import { getAttendanceRecords, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary, getTodayAttendanceSummary } from '@/utils/attendanceUtils';
 import { getEmployees } from '@/utils/employeeUtils';
-import { User, Users, Clock, CheckCircle, UploadCloud, Share2, AlertTriangle, MessageSquare, Smartphone, Calendar, TestTube, Mail } from 'lucide-react';
+import { User, Users, Clock, CheckCircle, UploadCloud, Share2, AlertTriangle, Calendar, TestTube, Mail } from 'lucide-react';
 import { Attendance, Employee } from '@/types';
 import { Button } from '@/components/ui/button';
 import BulkEmployeeUpload from './BulkEmployeeUpload';
@@ -21,11 +22,14 @@ const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'settings'>('overview');
   
   // Admin contact settings
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [isAutoShareEnabled, setIsAutoShareEnabled] = useState(false);
+  const [email, setEmail] = useState('');
+  const [isEmailShareEnabled, setIsEmailShareEnabled] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [sharingError, setSharingError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
+  
+  // Today's summary
+  const [summary, setSummary] = useState<any>(null);
   
   const today = new Date().toISOString().split('T')[0];
   
@@ -33,18 +37,20 @@ const Dashboard: React.FC = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [attendanceData, employeesData, adminSettings] = await Promise.all([
+        const [attendanceData, employeesData, adminSettings, todaySummary] = await Promise.all([
           getAttendanceRecords(),
           getEmployees(),
-          getAdminContactInfo()
+          getAdminContactInfo(),
+          getTodayAttendanceSummary().catch(() => null)
         ]);
         
         setAttendanceRecords(attendanceData);
         setEmployees(employeesData);
+        setSummary(todaySummary);
         
         // Set admin settings
-        setPhoneNumber(adminSettings.phoneNumber || '');
-        setIsAutoShareEnabled(adminSettings.isAutoShareEnabled || false);
+        setEmail(adminSettings.email || '');
+        setIsEmailShareEnabled(adminSettings.isEmailShareEnabled || false);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -61,6 +67,19 @@ const Dashboard: React.FC = () => {
   }, []);
   
   const stats = React.useMemo(() => {
+    if (summary) {
+      return {
+        totalEmployees: summary.totalEmployees,
+        activeEmployees: summary.totalEmployees,
+        present: summary.presentCount,
+        late: summary.lateCount,
+        absent: summary.absentCount,
+        checkedOut: summary.checkedOutCount,
+        lateRate: summary.lateRate,
+        absentRate: summary.absentRate
+      };
+    }
+    
     const todayRecords = attendanceRecords.filter(record => record.date === today);
     const activeEmployees = employees.filter(emp => emp.status === 'active');
     
@@ -74,9 +93,11 @@ const Dashboard: React.FC = () => {
       present: presentCount,
       late: lateCount,
       absent: absentCount,
-      checkedOut: todayRecords.filter(record => record.checkOutTime).length
+      checkedOut: todayRecords.filter(record => record.checkOutTime).length,
+      lateRate: presentCount > 0 ? ((lateCount / presentCount) * 100).toFixed(1) : '0',
+      absentRate: activeEmployees.length > 0 ? ((absentCount / activeEmployees.length) * 100).toFixed(1) : '0'
     };
-  }, [attendanceRecords, employees, today]);
+  }, [attendanceRecords, employees, today, summary]);
 
   const handleSaveSettings = async () => {
     setSavingSettings(true);
@@ -84,23 +105,18 @@ const Dashboard: React.FC = () => {
     setTestResult(null);
     
     try {
-      if (!phoneNumber || phoneNumber.trim().length < 10) {
-        setSharingError("Please enter a valid phone number with country code (e.g. +1234567890)");
+      if (!email || !email.includes('@')) {
+        setSharingError("Please enter a valid email address");
         setSavingSettings(false);
         return;
       }
       
-      // Always use WhatsApp as the send method
-      const success = await saveAdminContactInfo(
-        phoneNumber,
-        'whatsapp', // Force WhatsApp as requested
-        isAutoShareEnabled
-      );
+      const success = await saveAdminContactInfo(email, isEmailShareEnabled);
       
       if (success) {
         toast({
           title: 'Settings saved',
-          description: 'Automatic WhatsApp sharing settings have been updated',
+          description: 'Automatic email sharing settings have been updated',
         });
       } else {
         toast({
@@ -125,8 +141,8 @@ const Dashboard: React.FC = () => {
     setSharingError(null);
     setTestResult(null);
     
-    if (!phoneNumber || phoneNumber.trim().length < 10) {
-      setSharingError("Please enter a valid phone number with country code (e.g. +1234567890)");
+    if (!email || !email.includes('@')) {
+      setSharingError("Please enter a valid email address");
       return;
     }
     
@@ -136,12 +152,12 @@ const Dashboard: React.FC = () => {
       if (result) {
         setTestResult('success');
         toast({
-          title: 'WhatsApp sharing initiated',
-          description: 'Check your WhatsApp for the attendance report',
+          title: 'Email sharing initiated',
+          description: 'Check your email client for the attendance report',
         });
       } else {
         setTestResult('error');
-        setSharingError("Sharing failed. This might be due to a popup blocker or an invalid phone number.");
+        setSharingError("Sharing failed. This might be due to an invalid email address.");
         toast({
           title: 'Sharing failed',
           description: 'Please check your settings and try again',
@@ -180,11 +196,11 @@ const Dashboard: React.FC = () => {
     <div className="space-y-6">
       <Tabs defaultValue="overview" onValueChange={(value) => setActiveTab(value as 'overview' | 'settings')}>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
-          <h2 className="text-2xl font-semibold">{activeTab === 'overview' ? 'Dashboard Overview' : 'WhatsApp Settings'}</h2>
+          <h2 className="text-2xl font-semibold">{activeTab === 'overview' ? 'Dashboard Overview' : 'Email Report Settings'}</h2>
           <div className="flex flex-wrap gap-2">
             <TabsList className="bg-slate-100 dark:bg-slate-800">
               <TabsTrigger value="overview" className="text-xs sm:text-sm">Overview</TabsTrigger>
-              <TabsTrigger value="settings" className="text-xs sm:text-sm">WhatsApp Settings</TabsTrigger>
+              <TabsTrigger value="settings" className="text-xs sm:text-sm">Email Settings</TabsTrigger>
             </TabsList>
             <Button 
               onClick={() => setShowBulkUpload(true)}
@@ -221,7 +237,7 @@ const Dashboard: React.FC = () => {
                 <div className="text-2xl font-bold">{stats.present}</div>
                 <p className="text-xs text-muted-foreground">
                   {stats.present > 0 && stats.activeEmployees > 0
-                    ? `${Math.round((stats.present / stats.activeEmployees) * 100)}% attendance rate`
+                    ? `${100 - parseFloat(stats.absentRate)}% attendance rate`
                     : 'No attendance data yet'}
                 </p>
               </CardContent>
@@ -236,7 +252,7 @@ const Dashboard: React.FC = () => {
                 <div className="text-2xl font-bold">{stats.late}</div>
                 <p className="text-xs text-muted-foreground">
                   {stats.late > 0 && stats.present > 0
-                    ? `${Math.round((stats.late / stats.present) * 100)}% of present employees`
+                    ? `${stats.lateRate}% of present employees`
                     : 'No late arrivals today'}
                 </p>
               </CardContent>
@@ -270,7 +286,7 @@ const Dashboard: React.FC = () => {
                 <div className="text-xl font-bold text-red-700 dark:text-red-300">{stats.absent}</div>
                 <p className="text-xs text-red-600/80 dark:text-red-400/80">
                   {stats.absent > 0 && stats.activeEmployees > 0
-                    ? `${Math.round((stats.absent / stats.activeEmployees) * 100)}% absence rate today`
+                    ? `${stats.absentRate}% absence rate today`
                     : 'All employees present today!'}
                 </p>
               </CardContent>
@@ -291,35 +307,36 @@ const Dashboard: React.FC = () => {
             <Alert className="mb-4 bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800">
               <CheckCircle className="h-4 w-4 text-green-600" />
               <AlertTitle className="text-green-700 dark:text-green-500">Test Successful</AlertTitle>
-              <AlertDescription>WhatsApp share test was successful! Check your WhatsApp for the message.</AlertDescription>
+              <AlertDescription>Email share test was successful! Check your email for the message.</AlertDescription>
             </Alert>
           )}
           
-          <Card className="bg-gradient-to-br from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-800/30 border-none shadow-md">
+          <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-800/30 border-none shadow-md">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 text-green-600" />
-                WhatsApp Attendance Reports
+                <Mail className="h-5 w-5 text-blue-600" />
+                Email Attendance Reports
               </CardTitle>
               <CardDescription>
-                Configure how and when attendance reports are shared via WhatsApp
+                Configure how and when attendance reports are sent via email
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-3">
                 <div className="flex items-start gap-2">
-                  <Smartphone className="h-4 w-4 mt-1 flex-shrink-0 text-slate-500" />
+                  <Mail className="h-4 w-4 mt-1 flex-shrink-0 text-slate-500" />
                   <div className="space-y-1 w-full">
-                    <Label htmlFor="phone-number" className="text-sm font-medium">Admin WhatsApp Number</Label>
+                    <Label htmlFor="email-address" className="text-sm font-medium">Admin Email Address</Label>
                     <Input 
-                      id="phone-number" 
-                      placeholder="+1234567890 (include country code)" 
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      id="email-address" 
+                      type="email"
+                      placeholder="admin@example.com" 
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                       className="border-slate-300 dark:border-slate-700"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Enter the phone number including country code (e.g., +1 for US)
+                      Enter the email address where attendance reports will be sent
                     </p>
                   </div>
                 </div>
@@ -327,17 +344,17 @@ const Dashboard: React.FC = () => {
                 <div className="flex items-start gap-2 pt-2">
                   <Calendar className="h-4 w-4 mt-1 flex-shrink-0 text-slate-500" />
                   <div className="space-y-1">
-                    <Label htmlFor="auto-share" className="text-sm font-medium">Automatic Daily Sharing</Label>
+                    <Label htmlFor="auto-share" className="text-sm font-medium">Automatic Daily Emailing</Label>
                     <div className="flex items-center space-x-2">
                       <Switch 
                         id="auto-share" 
-                        checked={isAutoShareEnabled}
-                        onCheckedChange={setIsAutoShareEnabled}
+                        checked={isEmailShareEnabled}
+                        onCheckedChange={setIsEmailShareEnabled}
                       />
-                      <Label htmlFor="auto-share" className="text-sm">Enable daily reports at 6:00 PM</Label>
+                      <Label htmlFor="auto-share" className="text-sm">Enable daily email reports at 6:00 PM</Label>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      When enabled, a daily attendance summary will be sent automatically
+                      When enabled, a daily attendance summary will be emailed automatically
                     </p>
                   </div>
                 </div>
@@ -345,7 +362,7 @@ const Dashboard: React.FC = () => {
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4">
                 <Button
-                  className="bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white"
+                  className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white"
                   onClick={handleSaveSettings}
                   disabled={savingSettings}
                 >
@@ -353,22 +370,23 @@ const Dashboard: React.FC = () => {
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 flex gap-1 items-center"
+                  className="border-blue-500 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex gap-1 items-center"
                   onClick={handleShareNow}
-                  disabled={!phoneNumber || phoneNumber.length < 10}
+                  disabled={!email || !email.includes('@')}
                 >
                   <TestTube size={16} />
-                  <span>Test WhatsApp Share</span>
+                  <span>Test Email Report</span>
                 </Button>
               </div>
               
               <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <h3 className="text-sm font-medium mb-2">About WhatsApp Sharing</h3>
+                <h3 className="text-sm font-medium mb-2">About Email Reports</h3>
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md text-xs space-y-1">
-                  <p>• Daily attendance summary will be sent at 6:00 PM</p>
+                  <p>• Daily attendance summary will be emailed at 6:00 PM</p>
                   <p>• The summary includes late arrivals, check-ins, and check-outs</p>
-                  <p>• You must grant permission when the WhatsApp web page opens</p>
-                  <p>• If you receive an error, check for popup blockers in your browser</p>
+                  <p>• You will need to grant permission when the email client opens</p>
+                  <p>• Reports show detailed statistics of employee attendance</p>
+                  <p>• Get insights into late arrivals and absence rates</p>
                 </div>
               </div>
             </CardContent>

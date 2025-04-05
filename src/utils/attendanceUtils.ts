@@ -19,9 +19,6 @@ interface AdminSettings {
 
 // Admin contact info type for better type safety
 interface AdminContactInfo {
-  phoneNumber: string;
-  sendMethod: 'whatsapp' | 'sms';
-  isAutoShareEnabled: boolean;
   email: string;
   isEmailShareEnabled: boolean;
 }
@@ -474,27 +471,18 @@ export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
     
     if (!settings) {
       return {
-        phoneNumber: '',
-        sendMethod: 'whatsapp', // Default to WhatsApp
-        isAutoShareEnabled: false,
         email: '',
         isEmailShareEnabled: false
       };
     }
     
     return {
-      phoneNumber: settings.phone_number || '',
-      sendMethod: 'whatsapp', // Always use WhatsApp as requested
-      isAutoShareEnabled: settings.auto_share_enabled || false,
       email: settings.email || '',
       isEmailShareEnabled: settings.email_share_enabled || false
     };
   } catch (error) {
     console.error('Error in getAdminContactInfo:', error);
     return {
-      phoneNumber: '',
-      sendMethod: 'whatsapp',
-      isAutoShareEnabled: false,
       email: '',
       isEmailShareEnabled: false
     };
@@ -503,35 +491,21 @@ export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
 
 // Save admin contact info
 export const saveAdminContactInfo = async (
-  phoneNumber: string,
-  sendMethod: 'whatsapp' | 'sms',
-  autoShareEnabled: boolean,
-  email: string = '',
-  emailShareEnabled: boolean = false
+  email: string,
+  emailShareEnabled: boolean
 ): Promise<boolean> => {
   try {
-    // Validation for phone number if WhatsApp is enabled
-    if (autoShareEnabled && !phoneNumber) {
-      console.error('Phone number is required for WhatsApp sharing');
-      return false;
-    }
-    
     // Validation for email if email sharing is enabled
     if (emailShareEnabled && !email) {
       console.error('Email is required for email sharing');
       return false;
     }
     
-    // Force WhatsApp as the send method regardless of input
-    const actualSendMethod = 'whatsapp';
-
     const { data, error } = await supabase
       .from('admin_settings')
       .upsert({
         setting_type: 'attendance_report',
-        send_method: actualSendMethod,
-        phone_number: phoneNumber,
-        auto_share_enabled: autoShareEnabled,
+        send_method: 'email',  // Always use email
         email: email,
         email_share_enabled: emailShareEnabled,
         updated_at: new Date().toISOString()
@@ -551,85 +525,208 @@ export const saveAdminContactInfo = async (
   }
 };
 
-// Generate summary text for sharing
-export const generateAttendanceSummaryText = (date: Date, records: Attendance[]): string => {
-  const formattedDate = format(date, 'MMMM d, yyyy');
-  const presentCount = records.filter(r => r.status === 'present').length;
-  const lateCount = records.filter(r => r.status === 'late').length;
-  const checkedOutCount = records.filter(r => r.checkOutTime).length;
-  
-  // Calculate average working hours and late minutes
-  let totalHoursWorked = 0;
-  let totalCheckedOut = 0;
-  let totalLateMinutes = 0;
-  
-  records.forEach(record => {
-    // Calculate late minutes
-    if (record.status === 'late') {
-      const minutesLate = calculateMinutesLate(record.checkInTime);
-      totalLateMinutes += minutesLate;
+// Get today's attendance summary statistics
+export const getTodayAttendanceSummary = async () => {
+  try {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    
+    // Get all active employees
+    const { data: employees, error: employeesError } = await supabase
+      .from('employees')
+      .select('id')
+      .eq('status', 'active');
+      
+    if (employeesError) {
+      throw new Error('Failed to get employee count');
     }
     
-    // Calculate hours worked for those who checked out
-    if (record.checkOutTime && record.checkInTime) {
-      const checkIn = new Date(record.checkInTime);
-      const checkOut = new Date(record.checkOutTime);
-      const hoursWorked = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
-      totalHoursWorked += hoursWorked;
-      totalCheckedOut++;
-    }
-  });
-  
-  const avgHoursWorked = totalCheckedOut > 0 ? (totalHoursWorked / totalCheckedOut).toFixed(1) : '0';
-  const avgLateMinutes = lateCount > 0 ? Math.round(totalLateMinutes / lateCount) : 0;
-  
-  // New requested format
-  let summaryText = `📊 *Daily Attendance Summary* 📊\n`;
-  summaryText += `📆 *${formattedDate}*\n\n`;
-  
-  summaryText += `👥 *Total Attendance*: ${records.length} employees\n`;
-  summaryText += `⏰ *Late Arrivals*: ${lateCount} employees (avg ${avgLateMinutes} mins late)\n`;
-  summaryText += `🏠 *Left For Home*: ${checkedOutCount} employees\n`;
-  
-  if (totalCheckedOut > 0) {
-    summaryText += `⌛ *Average Hours Worked*: ${avgHoursWorked} hours\n\n`;
-  }
-  
-  // Late employees detail section with minutes late
-  if (lateCount > 0) {
-    summaryText += `*⚠️ Late Employees:*\n`;
-    records
-      .filter(r => r.status === 'late')
-      .forEach(record => {
-        const checkInTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const minutesLate = calculateMinutesLate(record.checkInTime);
-        summaryText += `- ${record.employeeName}: ${checkInTime} (${minutesLate} mins late)\n`;
-      });
-    summaryText += `\n`;
-  }
-  
-  // Present employees summary with working duration
-  if (records.length > 0) {
-    summaryText += `*✅ Attendance Details:*\n`;
-    records.forEach(record => {
-      const checkInTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const checkOutTime = record.checkOutTime 
-        ? new Date(record.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-        : 'Still working';
-        
-      // Calculate working duration
-      const workingDuration = calculateWorkingDuration(record.checkInTime, record.checkOutTime);
-      const status = record.status === 'late' ? '⚠️' : '✓';
+    const totalEmployees = employees.length;
+    
+    // Get today's attendance records
+    const { data: attendanceRecords, error: attendanceError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('date', today);
       
-      summaryText += `- ${record.employeeName} ${status}: ${checkInTime} to ${checkOutTime} (${workingDuration.formatted})\n`;
-    });
-  } else {
-    summaryText += "No attendance records for this date.";
+    if (attendanceError) {
+      throw new Error('Failed to get attendance records');
+    }
+    
+    // Calculate summary statistics
+    const presentCount = attendanceRecords.length;
+    const lateCount = attendanceRecords.filter(record => record.status === 'late').length;
+    const checkedOutCount = attendanceRecords.filter(record => record.check_out_time).length;
+    const absentCount = totalEmployees - presentCount;
+    
+    return {
+      date: today,
+      totalEmployees,
+      presentCount,
+      lateCount,
+      checkedOutCount,
+      absentCount,
+      absentRate: totalEmployees > 0 ? (absentCount / totalEmployees * 100).toFixed(1) : '0',
+      lateRate: presentCount > 0 ? (lateCount / presentCount * 100).toFixed(1) : '0'
+    };
+  } catch (error) {
+    console.error('Error getting attendance summary:', error);
+    throw error;
   }
-  
-  summaryText += `\n💬 *Need assistance?* Contact HR for any questions.`;
-  
-  return summaryText;
+};
+
+// Generate summary text for email sharing
+export const generateAttendanceSummaryHTML = async (date: Date): Promise<string> => {
+  try {
+    const formattedDate = format(date, 'MMMM d, yyyy');
+    const dateString = format(date, 'yyyy-MM-dd');
+    
+    // Get attendance records for the date
+    const records = await getAttendanceByDateRange(dateString, dateString);
+    
+    // Get summary statistics
+    const summary = await getTodayAttendanceSummary();
+    
+    // Calculate average working hours and late minutes
+    let totalHoursWorked = 0;
+    let totalCheckedOut = 0;
+    let totalLateMinutes = 0;
+    
+    records.forEach(record => {
+      // Calculate late minutes
+      if (record.status === 'late' && record.minutesLate) {
+        totalLateMinutes += record.minutesLate;
+      }
+      
+      // Calculate hours worked for those who checked out
+      if (record.checkOutTime && record.checkInTime) {
+        const checkIn = new Date(record.checkInTime);
+        const checkOut = new Date(record.checkOutTime);
+        const hoursWorked = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
+        totalHoursWorked += hoursWorked;
+        totalCheckedOut++;
+      }
+    });
+    
+    const avgHoursWorked = totalCheckedOut > 0 ? (totalHoursWorked / totalCheckedOut).toFixed(1) : '0';
+    const avgLateMinutes = summary.lateCount > 0 ? Math.round(totalLateMinutes / summary.lateCount) : 0;
+    
+    // Create HTML email content
+    let htmlContent = `
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          h1 { color: #2563eb; text-align: center; }
+          h2 { color: #4b5563; margin-top: 20px; }
+          .summary-box { background-color: #f3f4f6; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+          .stat { margin-bottom: 10px; }
+          .label { font-weight: bold; }
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+          th { background-color: #e5e7eb; text-align: left; padding: 8px; }
+          td { border-bottom: 1px solid #e5e7eb; padding: 8px; }
+          .late { color: #ef4444; }
+          .footer { margin-top: 30px; font-size: 12px; color: #6b7280; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Daily Attendance Summary</h1>
+          <p style="text-align: center;"><strong>${formattedDate}</strong></p>
+          
+          <div class="summary-box">
+            <div class="stat"><span class="label">Total Employees:</span> ${summary.totalEmployees}</div>
+            <div class="stat"><span class="label">Present Today:</span> ${summary.presentCount} (${(summary.presentCount / summary.totalEmployees * 100).toFixed(1)}%)</div>
+            <div class="stat"><span class="label">Absent Today:</span> ${summary.absentCount} (${summary.absentRate}%)</div>
+            <div class="stat"><span class="label">Late Arrivals:</span> ${summary.lateCount} employees`;
+    
+    if (summary.lateCount > 0) {
+      htmlContent += ` (avg ${avgLateMinutes} mins late)`;
+    }
+    
+    htmlContent += `</div>
+            <div class="stat"><span class="label">Checked Out:</span> ${summary.checkedOutCount} employees</div>`;
+    
+    if (totalCheckedOut > 0) {
+      htmlContent += `<div class="stat"><span class="label">Average Hours Worked:</span> ${avgHoursWorked} hours</div>`;
+    }
+    
+    htmlContent += `</div>`;
+    
+    // Late employees section
+    if (summary.lateCount > 0) {
+      htmlContent += `
+        <h2>Late Employees</h2>
+        <table>
+          <tr>
+            <th>Name</th>
+            <th>Check-in Time</th>
+            <th>Minutes Late</th>
+          </tr>`;
+          
+      records
+        .filter(r => r.status === 'late')
+        .forEach(record => {
+          const checkInTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          htmlContent += `
+            <tr>
+              <td>${record.employeeName}</td>
+              <td>${checkInTime}</td>
+              <td class="late">${record.minutesLate} mins</td>
+            </tr>`;
+        });
+        
+      htmlContent += `</table>`;
+    }
+    
+    // Attendance details section
+    if (records.length > 0) {
+      htmlContent += `
+        <h2>Attendance Details</h2>
+        <table>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Check-in</th>
+            <th>Check-out</th>
+            <th>Duration</th>
+          </tr>`;
+          
+      records.forEach(record => {
+        const checkInTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const checkOutTime = record.checkOutTime 
+          ? new Date(record.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+          : 'Still working';
+          
+        htmlContent += `
+          <tr>
+            <td>${record.employeeName}</td>
+            <td>${record.status === 'late' ? '<span class="late">Late</span>' : 'Present'}</td>
+            <td>${checkInTime}</td>
+            <td>${checkOutTime}</td>
+            <td>${record.workingDuration}</td>
+          </tr>`;
+      });
+        
+      htmlContent += `</table>`;
+    } else {
+      htmlContent += `<p>No attendance records for this date.</p>`;
+    }
+    
+    htmlContent += `
+          <div class="footer">
+            <p>This is an automated attendance summary. For any questions, please contact HR.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    return htmlContent;
+  } catch (error) {
+    console.error('Error generating attendance summary HTML:', error);
+    throw error;
+  }
 };
 
 // Auto share attendance summary with improved error handling
@@ -640,75 +737,28 @@ export const autoShareAttendanceSummary = async (): Promise<boolean> => {
     // Get admin settings
     const contactInfo = await getAdminContactInfo();
     
-    let successCount = 0;
-    
     // Get today's date
     const today = new Date();
+    const subject = `Attendance Summary for ${format(today, 'MMMM d, yyyy')}`;
     
-    // Get attendance for today
-    const todayAttendance = await getAttendanceByDateRange(
-      format(today, 'yyyy-MM-dd'),
-      format(today, 'yyyy-MM-dd')
-    );
-    
-    // Create the summary text
-    const summaryText = generateAttendanceSummaryText(today, todayAttendance);
-    
-    // Share via WhatsApp if enabled
-    if (contactInfo.isAutoShareEnabled && contactInfo.phoneNumber) {
-      const whatsappSuccess = await shareViaWhatsApp(summaryText, contactInfo.phoneNumber);
-      if (whatsappSuccess) successCount++;
-    }
+    // Generate HTML content
+    const htmlContent = await generateAttendanceSummaryHTML(today);
     
     // Share via Email if enabled
     if (contactInfo.isEmailShareEnabled && contactInfo.email) {
-      const subject = `Attendance Summary for ${format(today, 'MMMM d, yyyy')}`;
-      const emailSuccess = await shareViaEmail(summaryText, contactInfo.email, subject);
-      if (emailSuccess) successCount++;
+      const emailSuccess = await shareViaEmail(htmlContent, contactInfo.email, subject);
+      return emailSuccess;
     }
     
-    return successCount > 0;
+    return false;
   } catch (error) {
     console.error('Error in autoShareAttendanceSummary:', error);
     return false;
   }
 };
 
-// Share via WhatsApp with better error handling
-export const shareViaWhatsApp = async (message: string, phoneNumber: string): Promise<boolean> => {
-  try {
-    // Validate phone number
-    if (!phoneNumber) {
-      console.error("No phone number provided for WhatsApp sharing");
-      return false;
-    }
-    
-    // Clean the phone number to ensure it starts with +
-    let cleanPhone = phoneNumber.trim();
-    if (!cleanPhone.startsWith('+')) {
-      cleanPhone = '+' + cleanPhone;
-    }
-    
-    // Encode the message for URL
-    const encodedMessage = encodeURIComponent(message);
-    
-    // WhatsApp API URL
-    const whatsappUrl = `https://wa.me/${cleanPhone.replace(/\D/g, '')}?text=${encodedMessage}`;
-    
-    console.log("Opening WhatsApp share URL");
-    
-    // Open in a new window
-    window.open(whatsappUrl, '_blank');
-    
-    return true;
-  } catch (error) {
-    console.error('Error in shareViaWhatsApp:', error);
-    return false;
-  }
-};
-
 // Share via Email
-export const shareViaEmail = async (message: string, email: string, subject: string): Promise<boolean> => {
+export const shareViaEmail = async (htmlContent: string, email: string, subject: string): Promise<boolean> => {
   try {
     // Validate email
     if (!email) {
@@ -716,12 +766,17 @@ export const shareViaEmail = async (message: string, email: string, subject: str
       return false;
     }
     
-    // Encode the message and subject for URL
+    // Encode the subject for URL
     const encodedSubject = encodeURIComponent(subject);
-    const encodedMessage = encodeURIComponent(message);
     
-    // Email URL scheme
-    const emailUrl = `mailto:${email}?subject=${encodedSubject}&body=${encodedMessage}`;
+    // Create a plain text version from HTML
+    const plainText = htmlContent.replace(/<[^>]*>?/gm, '')
+                                .replace(/\s+/g, ' ')
+                                .trim();
+    const encodedBody = encodeURIComponent(plainText);
+    
+    // Email URL scheme 
+    const emailUrl = `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
     
     console.log("Opening email client");
     
@@ -731,39 +786,6 @@ export const shareViaEmail = async (message: string, email: string, subject: str
     return true;
   } catch (error) {
     console.error('Error in shareViaEmail:', error);
-    return false;
-  }
-};
-
-// Share via SMS - Note: This is kept for reference but no longer used as requested
-export const shareViaSMS = async (message: string, phoneNumber: string): Promise<boolean> => {
-  try {
-    // Validate phone number
-    if (!phoneNumber) {
-      console.error("No phone number provided for SMS sharing");
-      return false;
-    }
-    
-    // Clean the phone number
-    let cleanPhone = phoneNumber.trim();
-    if (!cleanPhone.startsWith('+')) {
-      cleanPhone = '+' + cleanPhone;
-    }
-    
-    // Encode the message
-    const encodedMessage = encodeURIComponent(message);
-    
-    // SMS URL scheme
-    const smsUrl = `sms:${cleanPhone}?body=${encodedMessage}`;
-    
-    console.log("Opening SMS app");
-    
-    // Open SMS app
-    window.open(smsUrl, '_blank');
-    
-    return true;
-  } catch (error) {
-    console.error('Error in shareViaSMS:', error);
     return false;
   }
 };
@@ -781,7 +803,7 @@ export const setupAutoReportScheduling = () => {
   // Mark as scheduled
   (window as any).__autoReportScheduled = true;
   
-  // Function to check if it's time to send report (e.g., 5:00 PM)
+  // Function to check if it's time to send report (6:00 PM)
   const checkAndSendReport = async () => {
     try {
       const now = new Date();

@@ -199,7 +199,7 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
   }
 };
 
-// Verify a gate pass by code - simplified for manual entry
+// Verify a gate pass by code - fixed for more reliable pass code verification
 export const verifyGatePass = async (passCode: string): Promise<{
   verified: boolean;
   message: string;
@@ -215,8 +215,11 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    // Retrieve the pass by code
-    const { data: pass, error } = await supabase
+    // Clean up the pass code to handle potential formatting issues
+    const cleanPassCode = passCode.trim().toUpperCase();
+    
+    // Retrieve the pass by code directly without case sensitivity
+    const { data: passes, error } = await supabase
       .from('gate_passes')
       .select(`
         id,
@@ -231,11 +234,8 @@ export const verifyGatePass = async (passCode: string): Promise<{
         used_at,
         employees (id, first_name, last_name)
       `)
-      .eq('pass_code', passCode)
-      .maybeSingle();
+      .ilike('pass_code', cleanPassCode);
     
-    console.log('Gate pass query result:', { pass, error });
-      
     if (error) {
       console.error('Error querying gate pass:', error);
       return {
@@ -244,13 +244,19 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    if (!pass) {
-      console.log('No pass found with code:', passCode);
+    console.log('Gate pass query results:', passes);
+    
+    if (!passes || passes.length === 0) {
+      console.log('No pass found with code:', cleanPassCode);
       return {
         verified: false,
         message: 'Invalid gate pass. This pass does not exist.'
       };
     }
+    
+    // Get the first matching pass
+    const pass = passes[0];
+    console.log('Found pass:', pass);
     
     const now = new Date();
     const expirationDate = new Date(pass.expires_at);
