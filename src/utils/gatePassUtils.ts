@@ -1,12 +1,15 @@
+
 import { supabase } from '@/integrations/supabase/client';
 import { Employee, GatePass } from '@/types';
 import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
 
 // Generate a unique pass code with better uniqueness guarantee
 export const generatePassCode = (): string => {
-  const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
+  // Use a timestamp and random parts for better uniqueness
+  const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
   const timestampPart = Date.now().toString(36).substring(-4).toUpperCase();
-  return `${randomPart}-${timestampPart}`;
+  const secondRandom = Math.random().toString(36).substring(2, 4).toUpperCase();
+  return `${randomPart}-${timestampPart}-${secondRandom}`;
 };
 
 // Calculate expiration date based on validity with more precise timing
@@ -45,6 +48,14 @@ export const createGatePass = async (
   reason: string
 ): Promise<GatePass | null> => {
   try {
+    if (!employeeId) {
+      throw new Error('Employee ID is required');
+    }
+    
+    if (!reason || reason.trim() === '') {
+      throw new Error('Reason is required');
+    }
+    
     const passCode = generatePassCode();
     const expirationDate = calculateExpirationDate(validity);
     
@@ -123,7 +134,7 @@ export const createGatePass = async (
   }
 };
 
-// Fetch all gate passes with improved performance
+// Fetch all gate passes with improved performance and status updates
 export const getGatePasses = async (): Promise<GatePass[]> => {
   try {
     console.log('Fetching gate passes');
@@ -154,14 +165,31 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
     // Check for expired passes and update them in the database
     const now = new Date();
     const passesToUpdate = [];
-    const passesWithStatus = passes.map(pass => {
+    const formattedPasses = passes.map(pass => {
       const expirationDate = new Date(pass.expires_at);
+      let currentStatus = pass.status;
+      
+      // If pass is active but expired, mark for update
       if (pass.status === 'active' && expirationDate < now) {
-        // Mark for update
         passesToUpdate.push(pass.id);
-        return { ...pass, status: 'expired' };
+        currentStatus = 'expired';
       }
-      return pass;
+      
+      return {
+        id: pass.id,
+        employeeId: pass.employee_id,
+        employeeName: pass.employees ? 
+          `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
+          'Unknown Employee',
+        passCode: pass.pass_code,
+        validity: pass.validity,
+        type: pass.type,
+        reason: pass.reason,
+        status: currentStatus,
+        createdAt: pass.created_at,
+        expiresAt: pass.expires_at,
+        usedAt: pass.used_at
+      };
     });
     
     // Batch update expired passes
@@ -177,21 +205,7 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
       }
     }
     
-    return passesWithStatus.map(pass => ({
-      id: pass.id,
-      employeeId: pass.employee_id,
-      employeeName: pass.employees ? 
-        `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
-        'Unknown Employee',
-      passCode: pass.pass_code,
-      validity: pass.validity as 'single' | 'day' | 'week' | 'month',
-      type: pass.type as 'entry' | 'exit' | 'both',
-      reason: pass.reason,
-      status: pass.status as 'active' | 'used' | 'expired' | 'revoked',
-      createdAt: pass.created_at,
-      expiresAt: pass.expires_at,
-      usedAt: pass.used_at
-    }));
+    return formattedPasses;
   } catch (error) {
     console.error('Error fetching gate passes:', error);
     return [];
@@ -210,7 +224,7 @@ export const verifyGatePass = async (passCode: string): Promise<{
     if (!passCode || passCode.trim() === '') {
       return {
         verified: false,
-        message: 'Invalid gate pass code. Please enter a valid code.'
+        message: 'Please enter a valid gate pass code.'
       };
     }
     
@@ -218,8 +232,7 @@ export const verifyGatePass = async (passCode: string): Promise<{
     const cleanPassCode = passCode.trim().toUpperCase();
     console.log('Cleaned pass code for verification:', cleanPassCode);
     
-    // First get all active passes and filter client-side
-    // This approach works better than relying on exact DB matches
+    // Get all passes to perform client-side matching
     const { data: allPasses, error } = await supabase
       .from('gate_passes')
       .select(`
@@ -246,16 +259,15 @@ export const verifyGatePass = async (passCode: string): Promise<{
     
     console.log(`Retrieved ${allPasses?.length || 0} passes to check against`);
     
-    // Find matching pass, try exact match first
+    // Multiple matching strategies
+    // 1. Try exact match (case-insensitive)
     let matchingPass = allPasses?.find(pass => 
       pass.pass_code.toUpperCase() === cleanPassCode
     );
     
-    // If no exact match, try more flexible matching
+    // 2. If no exact match, try more flexible matching (ignore dashes and spaces)
     if (!matchingPass) {
       console.log('No exact match found, trying flexible match');
-      
-      // Remove dashes and spaces for comparison
       const normalizedInput = cleanPassCode.replace(/[-\s]/g, '');
       
       matchingPass = allPasses?.find(pass => {
@@ -264,7 +276,7 @@ export const verifyGatePass = async (passCode: string): Promise<{
       });
     }
     
-    // If still no match, try partial match (last 6 chars)
+    // 3. Try matching just the last 6 characters (useful for partial manual entry)
     if (!matchingPass && cleanPassCode.length >= 6) {
       console.log('Trying partial match with last 6 characters');
       const lastSixChars = cleanPassCode.slice(-6);
@@ -287,7 +299,7 @@ export const verifyGatePass = async (passCode: string): Promise<{
     const now = new Date();
     const expirationDate = new Date(matchingPass.expires_at);
     
-    // Format the pass object
+    // Format the pass for return
     const formattedPass: GatePass = {
       id: matchingPass.id,
       employeeId: matchingPass.employee_id,
@@ -304,7 +316,9 @@ export const verifyGatePass = async (passCode: string): Promise<{
       usedAt: matchingPass.used_at
     };
     
-    // Check if expired
+    // Check pass status and update if needed
+    
+    // 1. Check if expired
     if (expirationDate < now && matchingPass.status === 'active') {
       // Mark as expired in the database
       await supabase
@@ -319,40 +333,48 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    // Check other statuses
-    if (matchingPass.status === 'used' && matchingPass.validity === 'single') {
-      return {
-        verified: false,
-        message: 'Pass already used. This single-use pass has already been scanned.',
-        pass: formattedPass
-      };
+    // 2. Check other status issues
+    switch (matchingPass.status) {
+      case 'used':
+        if (matchingPass.validity === 'single') {
+          return {
+            verified: false,
+            message: 'Pass already used. This single-use pass has already been scanned.',
+            pass: formattedPass
+          };
+        }
+        break;
+        
+      case 'expired':
+        return {
+          verified: false,
+          message: 'Expired gate pass. This pass is no longer valid.',
+          pass: formattedPass
+        };
+        
+      case 'revoked':
+        return {
+          verified: false,
+          message: 'Revoked gate pass. This pass has been revoked by security.',
+          pass: formattedPass
+        };
     }
     
-    if (matchingPass.status === 'expired') {
-      return {
-        verified: false,
-        message: 'Expired gate pass. This pass is no longer valid.',
-        pass: formattedPass
-      };
-    }
-    
-    if (matchingPass.status === 'revoked') {
-      return {
-        verified: false,
-        message: 'Revoked gate pass. This pass has been revoked by security.',
-        pass: formattedPass
-      };
-    }
-    
-    // Valid pass - mark as used if single-use
+    // Valid pass - handle based on type
     if (matchingPass.validity === 'single' && matchingPass.status === 'active') {
-      await supabase
+      // Mark single-use passes as used
+      const { error: updateError } = await supabase
         .from('gate_passes')
         .update({ 
           status: 'used', 
           used_at: new Date().toISOString() 
         })
         .eq('id', matchingPass.id);
+        
+      if (updateError) {
+        console.error('Error updating pass status:', updateError);
+        // Continue anyway but log the error
+      }
         
       return {
         verified: true,
