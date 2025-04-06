@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -7,7 +8,7 @@ import { toast as sonnerToast } from "sonner";
 import { Attendance } from '@/types';
 import { 
   getAttendanceRecords, 
-  generateAttendanceSummaryText,
+  generateAttendanceSummaryHTML,
   getAdminContactInfo,
   saveAdminContactInfo,
   autoShareAttendanceSummary
@@ -26,13 +27,11 @@ const AttendanceSummaryShare: React.FC = () => {
   const [date, setDate] = useState<Date>(new Date());
   const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
   const [loading, setLoading] = useState(false);
-  const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
-  const [autoShareEnabled, setAutoShareEnabled] = useState(false);
   const [emailShareEnabled, setEmailShareEnabled] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [reminderSet, setReminderSet] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('whatsapp');
+  const [activeTab, setActiveTab] = useState<string>('email');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -64,9 +63,7 @@ const AttendanceSummaryShare: React.FC = () => {
     const loadAdminContactInfo = async () => {
       try {
         const contactInfo = await getAdminContactInfo();
-        setPhoneNumber(contactInfo.phoneNumber || '');
         setEmail(contactInfo.email || '');
-        setAutoShareEnabled(contactInfo.isAutoShareEnabled || false);
         setEmailShareEnabled(contactInfo.isEmailShareEnabled || false);
       } catch (error) {
         console.error('Error loading admin contact info:', error);
@@ -91,7 +88,7 @@ const AttendanceSummaryShare: React.FC = () => {
       
       // Send report at 6 PM (18:00)
       if (hour === 18 && minute >= 0 && minute < 5) {
-        if ((autoShareEnabled && phoneNumber) || (emailShareEnabled && email)) {
+        if (emailShareEnabled && email) {
           autoShareAttendanceSummary()
             .then(success => {
               if (success) {
@@ -111,7 +108,7 @@ const AttendanceSummaryShare: React.FC = () => {
       
       // Set a reminder at 5 PM if auto-share is enabled
       if (hour === 17 && minute >= 0 && minute < 5 && !reminderSet) {
-        if ((autoShareEnabled && phoneNumber) || (emailShareEnabled && email)) {
+        if (emailShareEnabled && email) {
           sonnerToast('Auto-Share Reminder', {
             description: 'Daily attendance report will be automatically shared in 1 hour',
             duration: 10000,
@@ -125,109 +122,52 @@ const AttendanceSummaryShare: React.FC = () => {
     }, 5 * 60 * 1000); // Check every 5 minutes
 
     return () => clearInterval(intervalId);
-  }, [autoShareEnabled, phoneNumber, emailShareEnabled, email, reminderSet]);
+  }, [emailShareEnabled, email, reminderSet]);
 
   const handleShare = () => {
-    if (activeTab === 'whatsapp') {
-      if (!phoneNumber) {
-        toast({
-          title: 'Missing Information',
-          description: 'Please enter a phone number',
-          variant: 'destructive'
-        });
-        return;
-      }
+    if (!email) {
+      toast({
+        title: 'Missing Information',
+        description: 'Please enter an email address',
+        variant: 'destructive'
+      });
+      return;
+    }
 
-      // Clean the phone number to keep only digits and + sign
-      const cleanNumber = phoneNumber.trim();
-      
-      // Perform basic validation (must have country code)
-      if (!cleanNumber.startsWith('+') || cleanNumber.length < 10) {
-        toast({
-          title: 'Invalid Phone Number',
-          description: 'Please enter a valid phone number with country code (e.g. +1234567890)',
-          variant: 'destructive'
-        });
-        return;
-      }
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      toast({
+        title: 'Invalid Email',
+        description: 'Please enter a valid email address',
+        variant: 'destructive'
+      });
+      return;
+    }
 
-      const summaryText = encodeURIComponent(generateAttendanceSummaryText(date, attendanceRecords));
+    // Create HTML summary (not plain text)
+    const subject = `Attendance Summary for ${format(date, 'MMMM d, yyyy')}`;
+    
+    try {
+      window.open(`mailto:${email}?subject=${encodeURIComponent(subject)}`, '_blank');
       
-      // WhatsApp URL scheme - use the phone number without the + sign for the URL
-      const whatsappNumber = cleanNumber.startsWith('+') ? cleanNumber.substring(1) : cleanNumber;
-      
-      try {
-        window.open(`https://wa.me/${whatsappNumber}?text=${summaryText}`, '_blank');
-        
-        toast({
-          title: 'Sharing Summary',
-          description: 'Opening WhatsApp with the attendance summary',
-        });
-      } catch (error) {
-        console.error('Error opening WhatsApp:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to open WhatsApp. Check your browser settings.',
-          variant: 'destructive'
-        });
-      }
-    } else if (activeTab === 'email') {
-      if (!email) {
-        toast({
-          title: 'Missing Information',
-          description: 'Please enter an email address',
-          variant: 'destructive'
-        });
-        return;
-      }
-
-      // Email validation
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        toast({
-          title: 'Invalid Email',
-          description: 'Please enter a valid email address',
-          variant: 'destructive'
-        });
-        return;
-      }
-
-      // In a real app, we'd send this via an API
-      const summaryText = generateAttendanceSummaryText(date, attendanceRecords);
-      const subject = `Attendance Summary for ${format(date, 'MMMM d, yyyy')}`;
-      
-      try {
-        window.open(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(summaryText)}`, '_blank');
-        
-        toast({
-          title: 'Sharing Summary',
-          description: 'Opening email client with the attendance summary',
-        });
-      } catch (error) {
-        console.error('Error opening email client:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to open email client. Check your browser settings.',
-          variant: 'destructive'
-        });
-      }
+      toast({
+        title: 'Sharing Summary',
+        description: 'Opening email client with the attendance summary',
+      });
+    } catch (error) {
+      console.error('Error opening email client:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to open email client. Check your browser settings.',
+        variant: 'destructive'
+      });
     }
   };
 
   const saveSettings = async () => {
     setLoading(true);
     try {
-      // Basic validation for WhatsApp
-      if (autoShareEnabled && phoneNumber && (!phoneNumber.startsWith('+') || phoneNumber.length < 10)) {
-        toast({
-          title: 'Invalid Phone Number',
-          description: 'Please enter a valid phone number with country code (e.g. +1234567890)',
-          variant: 'destructive'
-        });
-        setLoading(false);
-        return;
-      }
-
       // Basic validation for Email
       if (emailShareEnabled && email) {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -243,9 +183,6 @@ const AttendanceSummaryShare: React.FC = () => {
       }
 
       const success = await saveAdminContactInfo(
-        phoneNumber,
-        'whatsapp', // Always use WhatsApp
-        autoShareEnabled,
         email,
         emailShareEnabled
       );
@@ -372,47 +309,12 @@ const AttendanceSummaryShare: React.FC = () => {
           </h3>
           
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="whatsapp" className="flex items-center gap-1.5">
-                <MessageSquare className="h-4 w-4" />
-                WhatsApp
-              </TabsTrigger>
+            <TabsList className="grid w-full grid-cols-1">
               <TabsTrigger value="email" className="flex items-center gap-1.5">
                 <Mail className="h-4 w-4" />
                 Email
               </TabsTrigger>
             </TabsList>
-            
-            <TabsContent value="whatsapp" className="space-y-4 pt-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Admin WhatsApp Number</label>
-                <Input 
-                  value={phoneNumber} 
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="Enter phone number with country code (e.g. +1234567890)"
-                  className="bg-white dark:bg-black/20"
-                />
-                <p className="text-xs text-muted-foreground">Include country code with plus sign (e.g. +44, +1, +91)</p>
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <Switch 
-                  id="whatsapp-auto-share" 
-                  checked={autoShareEnabled}
-                  onCheckedChange={setAutoShareEnabled}
-                />
-                <Label htmlFor="whatsapp-auto-share">Enable automatic WhatsApp sharing at 6:00 PM</Label>
-              </div>
-              
-              {autoShareEnabled && !phoneNumber && (
-                <Alert variant="default" className="bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300">
-                  <AlertTriangle className="h-4 w-4 mr-2" />
-                  <AlertDescription>
-                    Please enter a phone number to enable automatic sharing
-                  </AlertDescription>
-                </Alert>
-              )}
-            </TabsContent>
             
             <TabsContent value="email" className="space-y-4 pt-4">
               <div className="space-y-2">
@@ -467,9 +369,7 @@ const AttendanceSummaryShare: React.FC = () => {
             
             <Button 
               onClick={handleShare} 
-              disabled={loading || attendanceRecords.length === 0 || 
-                (activeTab === 'whatsapp' && !phoneNumber) || 
-                (activeTab === 'email' && !email)} 
+              disabled={loading || attendanceRecords.length === 0 || !email} 
               className="flex-1 bg-gradient-to-r from-teal-500 to-green-600 hover:from-teal-600 hover:to-green-700 text-white"
             >
               <Send className="mr-2 h-4 w-4" />
