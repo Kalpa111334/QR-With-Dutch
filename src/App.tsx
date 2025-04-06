@@ -2,7 +2,6 @@
 import React from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
@@ -86,26 +85,24 @@ const App: React.FC = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        {showSplash ? (
-          <SplashScreen onFinished={handleSplashFinished} />
-        ) : (
-          <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950 overflow-x-hidden">
-            <Toaster />
-            <Sonner position="top-center" closeButton={true} richColors />
-            <BrowserRouter>
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/roster" element={<RosterManagement />} />
-                <Route path="/gate-pass" element={<GatePass />} />
-                <Route path="/home" element={<Navigate to="/" replace />} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </BrowserRouter>
-          </div>
-        )}
-      </TooltipProvider>
+      {showSplash ? (
+        <SplashScreen onFinished={handleSplashFinished} />
+      ) : (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-blue-950 dark:via-purple-950 dark:to-pink-950 overflow-x-hidden">
+          <Toaster />
+          <Sonner position="top-center" closeButton={true} richColors />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/roster" element={<RosterManagement />} />
+              <Route path="/gate-pass" element={<GatePass />} />
+              <Route path="/home" element={<Navigate to="/" replace />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </div>
+      )}
     </QueryClientProvider>
   );
 };
