@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { QrCode, Check, X, Clipboard, Users, Download, AlertTriangle, Search, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -442,6 +441,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   </div>
                 </div>
                 
+                
                 <div className="text-center">
                   <p className="mb-2 text-sm text-muted-foreground">Or enter code with segments</p>
                   <div className="flex justify-center">
@@ -451,7 +451,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                       onChange={(value) => setPassCode(value)}
                       render={({ slots }) => (
                         <InputOTPGroup>
-                          {slots.map((slot, index) => (
+                          {slots && slots.map((slot, index) => (
                             <InputOTPSlot key={index} {...slot} index={index} />
                           ))}
                         </InputOTPGroup>
