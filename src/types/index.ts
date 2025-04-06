@@ -1,3 +1,4 @@
+
 export interface Employee {
   id: string;
   firstName: string;
@@ -9,6 +10,22 @@ export interface Employee {
   position?: string;
   department?: string;
   hireDate?: string;
+  // Add missing properties referenced in the codebase
+  joinDate?: string;
+  status?: string;
+  departmentId?: string;
+}
+
+// Add Attendance type that's being referenced in several files
+export interface Attendance {
+  id: string;
+  employeeId: string;
+  checkInTime: string;
+  checkOutTime?: string;
+  date: string;
+  createdAt: string;
+  status: string;
+  employee?: Employee;
 }
 
 // Updated GatePass type with time tracking fields

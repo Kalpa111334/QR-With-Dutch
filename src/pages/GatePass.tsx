@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Employee, GatePass } from '@/types';
+import { Employee, type GatePass as GatePassType } from '@/types';
 import { getEmployees } from '@/utils/employeeUtils';
 import { 
   getGatePasses,

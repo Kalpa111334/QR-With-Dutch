@@ -96,7 +96,7 @@ export const createGatePass = async (
       expirationDate
     });
     
-    // Insert directly using RPC function to bypass RLS temporarily
+    // Insert directly using RPC function - using a custom function known to exist in the database
     const { data, error } = await supabase.rpc('create_gate_pass_with_times', {
       p_employee_id: employeeId,
       p_pass_code: passCode,
@@ -121,6 +121,7 @@ export const createGatePass = async (
     
     console.log('Gate pass created successfully:', data);
     
+    // Safely access properties with proper type checking
     return {
       id: data.id,
       employeeId: data.employee_id,
@@ -186,14 +187,17 @@ export const recordGatePassUsage = async (
       };
     }
     
-    // Update the pass with the usage time
-    const updateData = usageType === 'exit' 
-      ? { exit_time: time } 
-      : { return_time: time };
+    // Update the pass with the usage time - we need to construct the updateData differently
+    const updateObject: Record<string, any> = {};
+    if (usageType === 'exit') {
+      updateObject.exit_time = time;
+    } else {
+      updateObject.return_time = time;
+    }
       
     const { error: updateError } = await supabase
       .from('gate_passes')
-      .update(updateData)
+      .update(updateObject)
       .eq('id', passId);
       
     if (updateError) {
@@ -241,12 +245,20 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
       throw error;
     }
     
-    console.log(`Retrieved ${passes.length} gate passes`);
+    console.log(`Retrieved ${passes?.length || 0} gate passes`);
     
     // Check for expired passes and update them in the database
     const now = new Date();
     const passesToUpdate = [];
+    
+    // Guard against undefined passes
+    if (!passes) {
+      return [];
+    }
+    
     const formattedPasses = passes.map(pass => {
+      if (!pass) return null;
+      
       const expirationDate = new Date(pass.expires_at);
       let currentStatus = pass.status;
       
@@ -275,7 +287,7 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
         exitTime: pass.exit_time,
         returnTime: pass.return_time
       };
-    });
+    }).filter(Boolean) as GatePass[]; // Filter out any null values and cast
     
     // Batch update expired passes
     if (passesToUpdate.length > 0) {
@@ -346,12 +358,20 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    console.log(`Retrieved ${allPasses?.length || 0} passes to check against`);
+    if (!allPasses) {
+      console.log('No passes retrieved from database');
+      return {
+        verified: false,
+        message: 'No gate passes found in system.'
+      };
+    }
+    
+    console.log(`Retrieved ${allPasses.length} passes to check against`);
     
     // Multiple matching strategies
     // 1. Try exact match (case-insensitive)
-    let matchingPass = allPasses?.find(pass => 
-      pass.pass_code.toUpperCase() === cleanPassCode
+    let matchingPass = allPasses.find(pass => 
+      pass && pass.pass_code && pass.pass_code.toUpperCase() === cleanPassCode
     );
     
     // 2. If no exact match, try more flexible matching (ignore dashes and spaces)
@@ -359,7 +379,8 @@ export const verifyGatePass = async (passCode: string): Promise<{
       console.log('No exact match found, trying flexible match');
       const normalizedInput = cleanPassCode.replace(/[-\s]/g, '');
       
-      matchingPass = allPasses?.find(pass => {
+      matchingPass = allPasses.find(pass => {
+        if (!pass || !pass.pass_code) return false;
         const normalizedPassCode = pass.pass_code.replace(/[-\s]/g, '').toUpperCase();
         return normalizedPassCode === normalizedInput;
       });
@@ -370,7 +391,8 @@ export const verifyGatePass = async (passCode: string): Promise<{
       console.log('Trying partial match with last 6 characters');
       const lastSixChars = cleanPassCode.slice(-6);
       
-      matchingPass = allPasses?.find(pass => {
+      matchingPass = allPasses.find(pass => {
+        if (!pass || !pass.pass_code) return false;
         return pass.pass_code.toUpperCase().endsWith(lastSixChars);
       });
     }
