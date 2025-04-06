@@ -1,4 +1,3 @@
-
 import { supabase } from '@/integrations/supabase/client';
 import { Employee, GatePass } from '@/types';
 import { generateQRCodeForPass as generateQRCode } from './qrCodeUtils';
@@ -199,7 +198,7 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
   }
 };
 
-// Verify a gate pass by code - fixed for more reliable pass code verification
+// Verify a gate pass by code - completely rewritten for more reliable verification
 export const verifyGatePass = async (passCode: string): Promise<{
   verified: boolean;
   message: string;
@@ -217,9 +216,10 @@ export const verifyGatePass = async (passCode: string): Promise<{
     
     // Clean up the pass code to handle potential formatting issues
     const cleanPassCode = passCode.trim().toUpperCase();
+    console.log('Cleaned pass code for verification:', cleanPassCode);
     
-    // Retrieve the pass by code directly without case sensitivity
-    const { data: passes, error } = await supabase
+    // First try exact match (case insensitive)
+    let { data: passes, error } = await supabase
       .from('gate_passes')
       .select(`
         id,
@@ -245,6 +245,46 @@ export const verifyGatePass = async (passCode: string): Promise<{
     }
     
     console.log('Gate pass query results:', passes);
+    
+    // If no passes found with exact match, try with more flexible matching
+    if (!passes || passes.length === 0) {
+      console.log('No exact match found, trying flexible match');
+      
+      // Try with more flexible matching (removing dashes, spaces)
+      const flexibleCode = cleanPassCode.replace(/[-\s]/g, '');
+      
+      const { data: flexiblePasses, error: flexError } = await supabase
+        .from('gate_passes')
+        .select(`
+          id,
+          employee_id,
+          pass_code,
+          validity,
+          type,
+          reason,
+          status,
+          created_at,
+          expires_at,
+          used_at,
+          employees (id, first_name, last_name)
+        `);
+      
+      if (flexError) {
+        console.error('Error in flexible query:', flexError);
+        return {
+          verified: false,
+          message: 'Error verifying gate pass. Please try again.'
+        };
+      }
+      
+      // Filter passes manually to find potential matches
+      passes = flexiblePasses?.filter(pass => {
+        const dbPassCode = pass.pass_code.replace(/[-\s]/g, '').toUpperCase();
+        return dbPassCode === flexibleCode;
+      }) || [];
+      
+      console.log('Flexible match results:', passes);
+    }
     
     if (!passes || passes.length === 0) {
       console.log('No pass found with code:', cleanPassCode);
@@ -290,7 +330,7 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    // Check if already used (for single-use passes)
+    // Check statuses
     if (pass.validity === 'single' && pass.status === 'used') {
       return {
         verified: false,
@@ -313,7 +353,6 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    // If expired
     if (pass.status === 'expired') {
       return {
         verified: false,
@@ -336,7 +375,6 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    // Check if revoked
     if (pass.status === 'revoked') {
       return {
         verified: false,

@@ -153,13 +153,18 @@ const GatePass: React.FC = () => {
     
     try {
       console.log("Verifying pass with code:", passCode);
-      const verification = await verifyGatePass(passCode);
+      // Trim the pass code to remove whitespace
+      const cleanPassCode = passCode.trim();
+      const verification = await verifyGatePass(cleanPassCode);
       console.log("Verification result:", verification);
       
       setVerificationResult(verification);
       
       // If verified, show success alert
       if (verification.verified) {
+        setShowAlert(true);
+      } else {
+        // Even if verification fails, show the alert with the error
         setShowAlert(true);
       }
       
@@ -177,6 +182,8 @@ const GatePass: React.FC = () => {
         verified: false,
         message: 'Error verifying pass. Please try again.',
       });
+      // Show error alert
+      setShowAlert(true);
     } finally {
       setIsVerifying(false);
     }
@@ -385,6 +392,11 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                         placeholder="Enter gate pass code" 
                         value={passCode}
                         onChange={(e) => setPassCode(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter' && passCode.trim() !== '') {
+                            handleVerifyPass();
+                          }
+                        }}
                       />
                       <Button 
                         onClick={handleVerifyPass} 
@@ -393,6 +405,9 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                         {isVerifying ? 'Verifying...' : 'Verify'}
                       </Button>
                     </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enter the code exactly as shown, including any dashes or special characters
+                    </p>
                   </div>
                 </div>
               </CardContent>
