@@ -21,10 +21,10 @@ export interface Attendance {
   checkInTime: string;
   checkOutTime?: string;
   date: string;
-  createdAt: string;
+  createdAt?: string; // Making this optional to fix the TypeScript errors
   status: string;
   employee?: Employee;
-  // Add the missing properties referenced in components
+  // Additional properties used in components
   employeeName?: string;
   minutesLate?: number;
   workingDuration?: string;
