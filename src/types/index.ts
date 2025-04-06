@@ -1,41 +1,21 @@
-
 export interface Employee {
   id: string;
   firstName: string;
   lastName: string;
-  email: string;
-  department: string;
-  phone: string;
-  position: string;
-  joinDate: string;
-  status: 'active' | 'inactive';
-  // Add a computed name property for backward compatibility
   name?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  position?: string;
+  department?: string;
+  hireDate?: string;
 }
 
-export interface Attendance {
-  id: string;
-  employeeId: string;
-  employeeName: string;
-  checkInTime: string;
-  checkOutTime: string | null;
-  date: string;
-  status: 'present' | 'late' | 'absent';
-  // New fields for late minutes and working duration
-  minutesLate?: number;
-  workingDuration?: string;
-  workingDurationMinutes?: number;
-}
-
-export interface Department {
-  id: string;
-  name: string;
-}
-
+// Updated GatePass type with time tracking fields
 export interface GatePass {
   id: string;
   employeeId: string;
-  employeeName?: string;
+  employeeName: string;
   passCode: string;
   validity: 'single' | 'day' | 'week' | 'month';
   type: 'entry' | 'exit' | 'both';
@@ -43,5 +23,9 @@ export interface GatePass {
   status: 'active' | 'used' | 'expired' | 'revoked';
   createdAt: string;
   expiresAt: string;
-  usedAt?: string | null;
+  usedAt?: string;
+  expectedExitTime?: string;
+  expectedReturnTime?: string;
+  exitTime?: string;
+  returnTime?: string;
 }

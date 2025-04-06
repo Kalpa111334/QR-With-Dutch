@@ -40,12 +40,14 @@ export const calculateExpirationDate = (validity: 'single' | 'day' | 'week' | 'm
   return expirationDate;
 };
 
-// Create a new gate pass with improved error handling
+// Create a new gate pass with improved error handling and time tracking
 export const createGatePass = async (
   employeeId: string,
   validity: 'single' | 'day' | 'week' | 'month',
   type: 'entry' | 'exit' | 'both',
-  reason: string
+  reason: string,
+  expectedExitTime?: string,
+  expectedReturnTime?: string
 ): Promise<GatePass | null> => {
   try {
     if (!employeeId) {
@@ -88,18 +90,22 @@ export const createGatePass = async (
       validity,
       type,
       reason,
+      expectedExitTime,
+      expectedReturnTime,
       systemUserId,
       expirationDate
     });
     
     // Insert directly using RPC function to bypass RLS temporarily
-    const { data, error } = await supabase.rpc('create_gate_pass', {
+    const { data, error } = await supabase.rpc('create_gate_pass_with_times', {
       p_employee_id: employeeId,
       p_pass_code: passCode,
       p_employee_name: employeeName,
       p_validity: validity,
       p_type: type,
       p_reason: reason,
+      p_expected_exit_time: expectedExitTime || null,
+      p_expected_return_time: expectedReturnTime || null,
       p_created_by: systemUserId,
       p_expires_at: expirationDate.toISOString()
     });
@@ -126,11 +132,82 @@ export const createGatePass = async (
       status: data.status,
       createdAt: data.created_at,
       expiresAt: data.expires_at,
-      usedAt: data.used_at
+      usedAt: data.used_at,
+      expectedExitTime: data.expected_exit_time,
+      expectedReturnTime: data.expected_return_time,
+      exitTime: data.exit_time,
+      returnTime: data.return_time
     };
   } catch (error) {
     console.error('Error creating gate pass:', error);
     return null;
+  }
+};
+
+// Record gate pass usage (exit or return)
+export const recordGatePassUsage = async (
+  passId: string,
+  usageType: 'exit' | 'return',
+  time: string
+): Promise<{ success: boolean; message?: string }> => {
+  try {
+    if (!passId) {
+      return { success: false, message: 'Pass ID is required' };
+    }
+    
+    // Get the current pass status first to check if it's valid
+    const { data: pass, error: getError } = await supabase
+      .from('gate_passes')
+      .select('*')
+      .eq('id', passId)
+      .single();
+      
+    if (getError) {
+      console.error('Error fetching gate pass:', getError);
+      return { success: false, message: 'Error fetching gate pass' };
+    }
+    
+    if (!pass) {
+      return { success: false, message: 'Gate pass not found' };
+    }
+    
+    if (pass.status !== 'active') {
+      return { 
+        success: false, 
+        message: `This pass is ${pass.status} and cannot be used for ${usageType}` 
+      };
+    }
+    
+    // For return, check if exit time is recorded
+    if (usageType === 'return' && !pass.exit_time) {
+      return { 
+        success: false, 
+        message: 'Cannot record return time without an exit time' 
+      };
+    }
+    
+    // Update the pass with the usage time
+    const updateData = usageType === 'exit' 
+      ? { exit_time: time } 
+      : { return_time: time };
+      
+    const { error: updateError } = await supabase
+      .from('gate_passes')
+      .update(updateData)
+      .eq('id', passId);
+      
+    if (updateError) {
+      console.error(`Error recording ${usageType} time:`, updateError);
+      return { success: false, message: `Error recording ${usageType} time` };
+    }
+    
+    return { 
+      success: true, 
+      message: usageType === 'exit' ? 'Exit time recorded' : 'Return time recorded' 
+    };
+  } catch (error) {
+    console.error(`Error recording ${usageType} time:`, error);
+    return { success: false, message: `Unexpected error recording ${usageType} time` };
   }
 };
 
@@ -151,6 +228,10 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
         created_at,
         expires_at,
         used_at,
+        expected_exit_time,
+        expected_return_time,
+        exit_time,
+        return_time,
         employees (id, first_name, last_name)
       `)
       .order('created_at', { ascending: false });
@@ -188,7 +269,11 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
         status: currentStatus,
         createdAt: pass.created_at,
         expiresAt: pass.expires_at,
-        usedAt: pass.used_at
+        usedAt: pass.used_at,
+        expectedExitTime: pass.expected_exit_time,
+        expectedReturnTime: pass.expected_return_time,
+        exitTime: pass.exit_time,
+        returnTime: pass.return_time
       };
     });
     
@@ -246,6 +331,10 @@ export const verifyGatePass = async (passCode: string): Promise<{
         created_at,
         expires_at,
         used_at,
+        expected_exit_time,
+        expected_return_time,
+        exit_time,
+        return_time,
         employees (id, first_name, last_name)
       `);
     
@@ -313,7 +402,11 @@ export const verifyGatePass = async (passCode: string): Promise<{
       status: matchingPass.status,
       createdAt: matchingPass.created_at,
       expiresAt: matchingPass.expires_at,
-      usedAt: matchingPass.used_at
+      usedAt: matchingPass.used_at,
+      expectedExitTime: matchingPass.expected_exit_time,
+      expectedReturnTime: matchingPass.expected_return_time,
+      exitTime: matchingPass.exit_time,
+      returnTime: matchingPass.return_time
     };
     
     // Check pass status and update if needed
