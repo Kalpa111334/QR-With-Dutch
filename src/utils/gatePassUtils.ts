@@ -198,7 +198,7 @@ export const getGatePasses = async (): Promise<GatePass[]> => {
   }
 };
 
-// Verify a gate pass by code - completely rewritten for more reliable verification
+// Completely rewritten verification function for better reliability
 export const verifyGatePass = async (passCode: string): Promise<{
   verified: boolean;
   message: string;
@@ -214,12 +214,13 @@ export const verifyGatePass = async (passCode: string): Promise<{
       };
     }
     
-    // Clean up the pass code to handle potential formatting issues
+    // Sanitize the pass code input
     const cleanPassCode = passCode.trim().toUpperCase();
     console.log('Cleaned pass code for verification:', cleanPassCode);
     
-    // First try exact match (case insensitive)
-    let { data: passes, error } = await supabase
+    // First get all active passes and filter client-side
+    // This approach works better than relying on exact DB matches
+    const { data: allPasses, error } = await supabase
       .from('gate_passes')
       .select(`
         id,
@@ -233,199 +234,138 @@ export const verifyGatePass = async (passCode: string): Promise<{
         expires_at,
         used_at,
         employees (id, first_name, last_name)
-      `)
-      .ilike('pass_code', cleanPassCode);
+      `);
     
     if (error) {
-      console.error('Error querying gate pass:', error);
+      console.error('Error querying gate passes:', error);
       return {
         verified: false,
         message: 'Error verifying gate pass. Please try again.'
       };
     }
     
-    console.log('Gate pass query results:', passes);
+    console.log(`Retrieved ${allPasses?.length || 0} passes to check against`);
     
-    // If no passes found with exact match, try with more flexible matching
-    if (!passes || passes.length === 0) {
+    // Find matching pass, try exact match first
+    let matchingPass = allPasses?.find(pass => 
+      pass.pass_code.toUpperCase() === cleanPassCode
+    );
+    
+    // If no exact match, try more flexible matching
+    if (!matchingPass) {
       console.log('No exact match found, trying flexible match');
       
-      // Try with more flexible matching (removing dashes, spaces)
-      const flexibleCode = cleanPassCode.replace(/[-\s]/g, '');
+      // Remove dashes and spaces for comparison
+      const normalizedInput = cleanPassCode.replace(/[-\s]/g, '');
       
-      const { data: flexiblePasses, error: flexError } = await supabase
-        .from('gate_passes')
-        .select(`
-          id,
-          employee_id,
-          pass_code,
-          validity,
-          type,
-          reason,
-          status,
-          created_at,
-          expires_at,
-          used_at,
-          employees (id, first_name, last_name)
-        `);
-      
-      if (flexError) {
-        console.error('Error in flexible query:', flexError);
-        return {
-          verified: false,
-          message: 'Error verifying gate pass. Please try again.'
-        };
-      }
-      
-      // Filter passes manually to find potential matches
-      passes = flexiblePasses?.filter(pass => {
-        const dbPassCode = pass.pass_code.replace(/[-\s]/g, '').toUpperCase();
-        return dbPassCode === flexibleCode;
-      }) || [];
-      
-      console.log('Flexible match results:', passes);
+      matchingPass = allPasses?.find(pass => {
+        const normalizedPassCode = pass.pass_code.replace(/[-\s]/g, '').toUpperCase();
+        return normalizedPassCode === normalizedInput;
+      });
     }
     
-    if (!passes || passes.length === 0) {
-      console.log('No pass found with code:', cleanPassCode);
+    // If still no match, try partial match (last 6 chars)
+    if (!matchingPass && cleanPassCode.length >= 6) {
+      console.log('Trying partial match with last 6 characters');
+      const lastSixChars = cleanPassCode.slice(-6);
+      
+      matchingPass = allPasses?.find(pass => {
+        return pass.pass_code.toUpperCase().endsWith(lastSixChars);
+      });
+    }
+    
+    if (!matchingPass) {
+      console.log('No matching pass found for:', cleanPassCode);
       return {
         verified: false,
         message: 'Invalid gate pass. This pass does not exist.'
       };
     }
     
-    // Get the first matching pass
-    const pass = passes[0];
-    console.log('Found pass:', pass);
+    console.log('Found matching pass:', matchingPass);
     
     const now = new Date();
-    const expirationDate = new Date(pass.expires_at);
+    const expirationDate = new Date(matchingPass.expires_at);
+    
+    // Format the pass object
+    const formattedPass: GatePass = {
+      id: matchingPass.id,
+      employeeId: matchingPass.employee_id,
+      employeeName: matchingPass.employees ? 
+        `${matchingPass.employees.first_name || ''} ${matchingPass.employees.last_name || ''}`.trim() : 
+        'Unknown Employee',
+      passCode: matchingPass.pass_code,
+      validity: matchingPass.validity,
+      type: matchingPass.type,
+      reason: matchingPass.reason,
+      status: matchingPass.status,
+      createdAt: matchingPass.created_at,
+      expiresAt: matchingPass.expires_at,
+      usedAt: matchingPass.used_at
+    };
     
     // Check if expired
-    if (expirationDate < now && pass.status === 'active') {
+    if (expirationDate < now && matchingPass.status === 'active') {
       // Mark as expired in the database
       await supabase
         .from('gate_passes')
         .update({ status: 'expired' })
-        .eq('id', pass.id);
+        .eq('id', matchingPass.id);
         
       return {
         verified: false,
         message: 'Expired gate pass. This pass is no longer valid.',
-        pass: {
-          id: pass.id,
-          employeeId: pass.employee_id,
-          employeeName: pass.employees ? 
-            `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
-            'Unknown Employee',
-          passCode: pass.pass_code,
-          validity: pass.validity,
-          type: pass.type,
-          reason: pass.reason,
-          status: 'expired',
-          createdAt: pass.created_at,
-          expiresAt: pass.expires_at,
-          usedAt: pass.used_at
-        }
+        pass: { ...formattedPass, status: 'expired' }
       };
     }
     
-    // Check statuses
-    if (pass.validity === 'single' && pass.status === 'used') {
+    // Check other statuses
+    if (matchingPass.status === 'used' && matchingPass.validity === 'single') {
       return {
         verified: false,
         message: 'Pass already used. This single-use pass has already been scanned.',
-        pass: {
-          id: pass.id,
-          employeeId: pass.employee_id,
-          employeeName: pass.employees ? 
-            `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
-            'Unknown Employee',
-          passCode: pass.pass_code,
-          validity: pass.validity,
-          type: pass.type,
-          reason: pass.reason,
-          status: pass.status,
-          createdAt: pass.created_at,
-          expiresAt: pass.expires_at,
-          usedAt: pass.used_at
-        }
+        pass: formattedPass
       };
     }
     
-    if (pass.status === 'expired') {
+    if (matchingPass.status === 'expired') {
       return {
         verified: false,
         message: 'Expired gate pass. This pass is no longer valid.',
-        pass: {
-          id: pass.id,
-          employeeId: pass.employee_id,
-          employeeName: pass.employees ? 
-            `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
-            'Unknown Employee',
-          passCode: pass.pass_code,
-          validity: pass.validity,
-          type: pass.type,
-          reason: pass.reason,
-          status: pass.status,
-          createdAt: pass.created_at,
-          expiresAt: pass.expires_at,
-          usedAt: pass.used_at
-        }
+        pass: formattedPass
       };
     }
     
-    if (pass.status === 'revoked') {
+    if (matchingPass.status === 'revoked') {
       return {
         verified: false,
         message: 'Revoked gate pass. This pass has been revoked by security.',
-        pass: {
-          id: pass.id,
-          employeeId: pass.employee_id,
-          employeeName: pass.employees ? 
-            `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
-            'Unknown Employee',
-          passCode: pass.pass_code,
-          validity: pass.validity,
-          type: pass.type,
-          reason: pass.reason,
-          status: pass.status,
-          createdAt: pass.created_at,
-          expiresAt: pass.expires_at,
-          usedAt: pass.used_at
-        }
+        pass: formattedPass
       };
     }
     
     // Valid pass - mark as used if single-use
-    if (pass.validity === 'single') {
+    if (matchingPass.validity === 'single' && matchingPass.status === 'active') {
       await supabase
         .from('gate_passes')
         .update({ 
           status: 'used', 
           used_at: new Date().toISOString() 
         })
-        .eq('id', pass.id);
+        .eq('id', matchingPass.id);
+        
+      return {
+        verified: true,
+        message: 'Valid gate pass. Employee may proceed.',
+        pass: { ...formattedPass, status: 'used', usedAt: new Date().toISOString() }
+      };
     }
     
+    // Valid multi-use pass
     return {
       verified: true,
       message: 'Valid gate pass. Employee may proceed.',
-      pass: {
-        id: pass.id,
-        employeeId: pass.employee_id,
-        employeeName: pass.employees ? 
-          `${pass.employees.first_name || ''} ${pass.employees.last_name || ''}`.trim() : 
-          'Unknown Employee',
-        passCode: pass.pass_code,
-        validity: pass.validity,
-        type: pass.type,
-        reason: pass.reason,
-        status: pass.validity === 'single' ? 'used' : pass.status,
-        createdAt: pass.created_at,
-        expiresAt: pass.expires_at,
-        usedAt: pass.validity === 'single' ? new Date().toISOString() : pass.used_at
-      }
+      pass: formattedPass
     };
   } catch (error) {
     console.error('Error verifying gate pass:', error);

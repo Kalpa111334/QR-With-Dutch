@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { QrCode, Check, X, Clipboard, Users, Download, AlertTriangle } from 'lucide-react';
+import { QrCode, Check, X, Clipboard, Users, Download, AlertTriangle, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -38,10 +38,11 @@ const GatePass: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [showAlert, setShowAlert] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   
   const { toast } = useToast();
 
-  // Fetch employees and gate passes on component mount
+  // Fetch employees and gate passes on component mount or refresh
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -68,7 +69,7 @@ const GatePass: React.FC = () => {
     };
 
     fetchData();
-  }, [toast]);
+  }, [toast, refreshTrigger]);
 
   // Create a new gate pass
   const handleCreateGatePass = async () => {
@@ -93,8 +94,8 @@ const GatePass: React.FC = () => {
       );
       
       if (newPass) {
-        // Add to passes state
-        setGatePasses(prevPasses => [newPass, ...prevPasses]);
+        // Refresh gate passes list
+        setRefreshTrigger(prev => prev + 1);
         
         toast({
           title: 'Gate Pass Created',
@@ -153,28 +154,20 @@ const GatePass: React.FC = () => {
     
     try {
       console.log("Verifying pass with code:", passCode);
-      // Trim the pass code to remove whitespace
-      const cleanPassCode = passCode.trim();
-      const verification = await verifyGatePass(cleanPassCode);
+      const verification = await verifyGatePass(passCode);
       console.log("Verification result:", verification);
       
       setVerificationResult(verification);
       
-      // If verified, show success alert
-      if (verification.verified) {
-        setShowAlert(true);
-      } else {
-        // Even if verification fails, show the alert with the error
-        setShowAlert(true);
-      }
+      // Show the alert regardless of verification result
+      setShowAlert(true);
       
-      // If valid, update the pass in local state if it exists there
-      if (verification.pass && verification.pass.id) {
-        setGatePasses(prev => 
-          prev.map(pass => 
-            pass.id === verification.pass!.id ? verification.pass! : pass
-          )
-        );
+      // If the pass was updated, refresh the gate passes list
+      if (verification.pass && 
+         (verification.verified || 
+          verification.pass.status === 'expired' || 
+          verification.pass.status === 'used')) {
+        setRefreshTrigger(prev => prev + 1);
       }
     } catch (error) {
       console.error('Error verifying gate pass:', error);
@@ -402,11 +395,14 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                         onClick={handleVerifyPass} 
                         disabled={isVerifying || !passCode}
                       >
-                        {isVerifying ? 'Verifying...' : 'Verify'}
+                        {isVerifying ? 'Verifying...' : 
+                         <span className="flex items-center">
+                           <Search className="h-4 w-4 mr-1" /> Verify
+                         </span>}
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Enter the code exactly as shown, including any dashes or special characters
+                      Enter the pass code as shown on the employee's pass. Verification matches are not case-sensitive.
                     </p>
                   </div>
                 </div>
@@ -422,7 +418,10 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
               </CardHeader>
               <CardContent>
                 {loading || isVerifying ? (
-                  <div className="py-10 text-center">Verifying pass...</div>
+                  <div className="py-10 text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                    <p>Verifying pass...</p>
+                  </div>
                 ) : verificationResult ? (
                   <div className="space-y-4">
                     <Alert variant={verificationResult.verified ? "default" : "destructive"}>
@@ -509,56 +508,77 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
             </CardHeader>
             <CardContent>
               {loading ? (
-                <div className="py-10 text-center">Loading gate passes...</div>
+                <div className="py-10 text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                  <p>Loading gate passes...</p>
+                </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Pass Code</TableHead>
-                      <TableHead>Employee</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Validity</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Expiration</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {gatePasses.length > 0 ? (
-                      gatePasses.map(pass => (
-                        <TableRow key={pass.id}>
-                          <TableCell className="font-medium">{pass.passCode}</TableCell>
-                          <TableCell>{pass.employeeName}</TableCell>
-                          <TableCell>
-                            <span className="capitalize">{pass.type}</span>
-                          </TableCell>
-                          <TableCell className="capitalize">{pass.validity}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={getStatusBadgeClass(pass.status)}>
-                              {pass.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{new Date(pass.expiresAt).toLocaleDateString()}</TableCell>
-                          <TableCell className="text-right">
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              onClick={() => copyPassToClipboard(pass)}
-                            >
-                              <Clipboard className="h-4 w-4" />
-                            </Button>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Pass Code</TableHead>
+                        <TableHead>Employee</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Validity</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Expiration</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {gatePasses.length > 0 ? (
+                        gatePasses.map(pass => (
+                          <TableRow key={pass.id}>
+                            <TableCell className="font-medium">{pass.passCode}</TableCell>
+                            <TableCell>{pass.employeeName}</TableCell>
+                            <TableCell>
+                              <span className="capitalize">{pass.type}</span>
+                            </TableCell>
+                            <TableCell className="capitalize">{pass.validity}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={getStatusBadgeClass(pass.status)}>
+                                {pass.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{new Date(pass.expiresAt).toLocaleDateString()}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => copyPassToClipboard(pass)}
+                                  title="Copy pass details"
+                                >
+                                  <Clipboard className="h-4 w-4" />
+                                </Button>
+                                {pass.status === 'active' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setPassCode(pass.passCode);
+                                      setActiveTab('verify');
+                                    }}
+                                    title="Verify this pass"
+                                  >
+                                    <Search className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center h-24 text-muted-foreground">
+                            No gate passes found
                           </TableCell>
                         </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center h-24 text-muted-foreground">
-                          No gate passes found
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -590,6 +610,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
               <p><span className="font-medium">Pass Code:</span> {verificationResult.pass.passCode}</p>
               <p><span className="font-medium">Employee:</span> {verificationResult.pass.employeeName}</p>
               <p><span className="font-medium">Type:</span> <span className="capitalize">{verificationResult.pass.type}</span></p>
+              <p><span className="font-medium">Status:</span> <span className="capitalize">{verificationResult.pass.status}</span></p>
               <p><span className="font-medium">Expires:</span> {new Date(verificationResult.pass.expiresAt).toLocaleString()}</p>
             </div>
           )}
