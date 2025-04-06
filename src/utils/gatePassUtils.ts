@@ -96,19 +96,24 @@ export const createGatePass = async (
       expirationDate
     });
     
-    // Insert directly using RPC function - using a custom function known to exist in the database
-    const { data, error } = await supabase.rpc('create_gate_pass_with_times', {
-      p_employee_id: employeeId,
-      p_pass_code: passCode,
-      p_employee_name: employeeName,
-      p_validity: validity,
-      p_type: type,
-      p_reason: reason,
-      p_expected_exit_time: expectedExitTime || null,
-      p_expected_return_time: expectedReturnTime || null,
-      p_created_by: systemUserId,
-      p_expires_at: expirationDate.toISOString()
-    });
+    // Using a direct insert approach instead of RPC function
+    const { data, error } = await supabase
+      .from('gate_passes')
+      .insert({
+        employee_id: employeeId,
+        pass_code: passCode,
+        employee_name: employeeName,
+        validity: validity,
+        type: type,
+        reason: reason,
+        expected_exit_time: expectedExitTime || null,
+        expected_return_time: expectedReturnTime || null,
+        created_by: systemUserId,
+        expires_at: expirationDate.toISOString(),
+        status: 'active'
+      })
+      .select()
+      .single();
       
     if (error) {
       console.error('Error creating gate pass:', error);
@@ -187,17 +192,14 @@ export const recordGatePassUsage = async (
       };
     }
     
-    // Update the pass with the usage time - we need to construct the updateData differently
-    const updateObject: Record<string, any> = {};
-    if (usageType === 'exit') {
-      updateObject.exit_time = time;
-    } else {
-      updateObject.return_time = time;
-    }
+    // Update the pass with the usage time
+    const updateData = usageType === 'exit' 
+      ? { exit_time: time } 
+      : { return_time: time };
       
     const { error: updateError } = await supabase
       .from('gate_passes')
-      .update(updateObject)
+      .update(updateData)
       .eq('id', passId);
       
     if (updateError) {

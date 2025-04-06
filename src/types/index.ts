@@ -10,13 +10,11 @@ export interface Employee {
   position?: string;
   department?: string;
   hireDate?: string;
-  // Add missing properties referenced in the codebase
   joinDate?: string;
   status?: string;
   departmentId?: string;
 }
 
-// Add Attendance type that's being referenced in several files
 export interface Attendance {
   id: string;
   employeeId: string;
@@ -26,9 +24,13 @@ export interface Attendance {
   createdAt: string;
   status: string;
   employee?: Employee;
+  // Add the missing properties referenced in components
+  employeeName?: string;
+  minutesLate?: number;
+  workingDuration?: string;
+  workingDurationMinutes?: number;
 }
 
-// Updated GatePass type with time tracking fields
 export interface GatePass {
   id: string;
   employeeId: string;
