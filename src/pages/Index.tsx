@@ -71,11 +71,11 @@ const Index = () => {
   };
   
   const handleAddEmployee = () => {
-    setActiveTab('employees');
-    // Use setTimeout to ensure the tab switch happens first
+    setSelectedEmployee(undefined);
+    setShowEmployeeForm(true);
+    // Switch tab after state updates
     setTimeout(() => {
-      setSelectedEmployee(undefined);
-      setShowEmployeeForm(true);
+      setActiveTab('employees');
     }, 0);
   };
   

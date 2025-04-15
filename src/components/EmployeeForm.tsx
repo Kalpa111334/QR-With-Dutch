@@ -33,27 +33,42 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Fetch departments when component mounts
+    let mounted = true;
+    
     const fetchDepartments = async () => {
       try {
         setLoadingDepartments(true);
         const departments = await getDepartments();
-        console.log('Fetched departments:', departments);
-        setExistingDepartments(departments);
+        if (mounted) {
+          console.log('Fetched departments:', departments);
+          setExistingDepartments(departments);
+          // If editing and department exists, ensure it's selected
+          if (employee?.department && !departments.includes(employee.department)) {
+            setExistingDepartments(prev => [...prev, employee.department]);
+          }
+        }
       } catch (error) {
         console.error('Error fetching departments:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load departments. Please refresh the page.',
-          variant: 'destructive',
-        });
+        if (mounted) {
+          toast({
+            title: 'Error',
+            description: 'Failed to load departments. Please refresh the page.',
+            variant: 'destructive',
+          });
+        }
       } finally {
-        setLoadingDepartments(false);
+        if (mounted) {
+          setLoadingDepartments(false);
+        }
       }
     };
     
     fetchDepartments();
-  }, [toast]);
+    
+    return () => {
+      mounted = false;
+    };
+  }, [toast, employee]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -64,8 +79,25 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const validateForm = () => {
+    if (!formData.department) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please select a department',
+        variant: 'destructive',
+      });
+      return false;
+    }
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
     setLoading(true);
     
     try {
@@ -115,128 +147,142 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
         <CardTitle>{employee?.id ? 'Edit' : 'Add'} Employee</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="first_name">First Name</Label>
-              <Input
-                id="first_name"
-                name="first_name"
-                value={formData.first_name}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="last_name">Last Name</Label>
-              <Input
-                id="last_name"
-                name="last_name"
-                value={formData.last_name}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="department">Department</Label>
-              <Select
-                value={formData.department}
-                onValueChange={(value) => handleSelectChange('department', value)}
-                disabled={loadingDepartments}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={loadingDepartments ? "Loading departments..." : "Select department"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {existingDepartments.length > 0 ? (
-                    existingDepartments.map(dept => (
-                      <SelectItem key={dept} value={dept}>
-                        {dept}
+        {loadingDepartments ? (
+          <div className="flex items-center justify-center p-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="first_name">First Name</Label>
+                <Input
+                  id="first_name"
+                  name="first_name"
+                  value={formData.first_name}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="last_name">Last Name</Label>
+                <Input
+                  id="last_name"
+                  name="last_name"
+                  value={formData.last_name}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="department">Department</Label>
+                <Select
+                  value={formData.department}
+                  onValueChange={(value) => handleSelectChange('department', value)}
+                  disabled={loading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {existingDepartments.length > 0 ? (
+                      existingDepartments.map(dept => (
+                        <SelectItem key={dept} value={dept}>
+                          {dept}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="" disabled>
+                        No departments found
                       </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="" disabled>
-                      {loadingDepartments ? "Loading..." : "No departments found"}
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="position">Position</Label>
+                <Input
+                  id="position"
+                  name="position"
+                  value={formData.position}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  name="phone"
+                  value={formData.phone}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="join_date">Join Date</Label>
+                <Input
+                  id="join_date"
+                  name="join_date"
+                  type="date"
+                  value={formData.join_date}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => handleSelectChange('status', value as 'active' | 'inactive')}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             
-            <div className="space-y-2">
-              <Label htmlFor="position">Position</Label>
-              <Input
-                id="position"
-                name="position"
-                value={formData.position}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input
-                id="phone"
-                name="phone"
-                value={formData.phone}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="join_date">Join Date</Label>
-              <Input
-                id="join_date"
-                name="join_date"
-                type="date"
-                value={formData.join_date}
-                onChange={handleChange}
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) => handleSelectChange('status', value as 'active' | 'inactive')}
+            <div className="flex justify-end space-x-4">
+              <Button
+                type="submit"
+                disabled={loading || !formData.department}
+                className="min-w-[120px]"
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
+                {loading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+                    <span>Saving...</span>
+                  </div>
+                ) : (
+                  employee?.id ? 'Update Employee' : 'Add Employee'
+                )}
+              </Button>
             </div>
-          </div>
-          
-          <div className="flex justify-end space-x-4">
-            <Button
-              type="submit"
-              disabled={loading}
-            >
-              {loading ? 'Saving...' : employee?.id ? 'Update Employee' : 'Add Employee'}
-            </Button>
-          </div>
-        </form>
+          </form>
+        )}
       </CardContent>
     </Card>
   );
