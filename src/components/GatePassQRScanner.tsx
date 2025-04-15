@@ -2,6 +2,22 @@ import React, { useEffect, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { toast } from '@/components/ui/use-toast';
 
+// Add type declaration for Html5QrcodeScanner
+declare global {
+  interface Window {
+    Html5QrcodeScanner: {
+      new (
+        elementId: string,
+        config: {
+          fps: number;
+          qrbox: { width: number; height: number };
+        },
+        verbose: boolean
+      ): Html5QrcodeScanner;
+    };
+  }
+}
+
 interface GatePassQRData {
   id: string;
   pass_code: string;
