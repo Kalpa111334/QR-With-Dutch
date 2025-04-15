@@ -399,9 +399,15 @@ async function parseFileToEmployees(file: File): Promise<Partial<Employee>[]> {
         }
       });
     } else if (file.name.endsWith('.xlsx')) {
-      const workbook = XLSX.read(await file.arrayBuffer());
-      const employees = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]).map(mapRowToEmployee);
-      resolve(employees);
+      (async () => {
+        try {
+          const workbook = XLSX.read(await file.arrayBuffer());
+          const employees = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]).map(mapRowToEmployee);
+          resolve(employees);
+        } catch (error) {
+          reject(error);
+        }
+      })();
     } else {
       reject(new Error('Unsupported file format'));
     }
