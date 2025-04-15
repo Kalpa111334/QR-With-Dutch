@@ -1,83 +1,60 @@
 import React from 'react';
-import QrReader from 'react-qr-reader';
-import { toast } from '@/components/ui/use-toast';
+import { QrScanner } from 'react-qr-scanner';
+import { useToast } from "@/components/ui/use-toast";
 
 interface EmployeeQRData {
   id: string;
-  type: 'employee';
   name: string;
+  email: string;
   department: string;
 }
 
-interface Props {
+interface EmployeeQRScannerProps {
   onScan: (data: EmployeeQRData) => void;
-  onError?: (error: string) => void;
+  className?: string;
 }
 
-const EmployeeQRScanner: React.FC<Props> = ({ onScan, onError }) => {
+export function EmployeeQRScanner({ onScan, className }: EmployeeQRScannerProps) {
+  const { toast } = useToast();
+
+  const handleError = (error: Error) => {
+    console.error('QR Scanner error:', error);
+    toast({
+      variant: "destructive",
+      title: "Scanner Error",
+      description: error.message || "Failed to access camera"
+    });
+  };
+
   const handleScan = (data: string | null) => {
     if (data) {
       try {
-        const parsedData = JSON.parse(data);
-        
-        // Validate that this is an employee QR code
-        if (!isValidEmployeeQR(parsedData)) {
-          throw new Error('Invalid employee QR code format');
-        }
-
-        onScan(parsedData as EmployeeQRData);
+        const parsedData = JSON.parse(data) as EmployeeQRData;
+        onScan(parsedData);
       } catch (error) {
-        const errorMessage = 'Invalid employee QR code';
         toast({
-          title: 'Error',
-          description: errorMessage,
-          variant: 'destructive',
+          variant: "destructive",
+          title: "Invalid QR Code",
+          description: "The scanned QR code is not in the correct format"
         });
-        if (onError) {
-          onError(errorMessage);
-        }
       }
     }
   };
 
-  const handleError = (err: any) => {
-    const errorMessage = 'Error accessing camera';
-    toast({
-      title: 'Error',
-      description: errorMessage,
-      variant: 'destructive',
-    });
-    if (onError) {
-      onError(errorMessage);
-    }
-  };
-
-  const isValidEmployeeQR = (data: any): data is EmployeeQRData => {
-    return (
-      data &&
-      typeof data === 'object' &&
-      typeof data.id === 'string' &&
-      data.type === 'employee' &&
-      typeof data.name === 'string' &&
-      typeof data.department === 'string'
-    );
-  };
-
   return (
-    <div className="relative">
-      <QrReader
+    <div className={className}>
+      <QrScanner
         delay={300}
         onError={handleError}
         onScan={handleScan}
-        style={{ width: '100%' }}
-        className="rounded-lg overflow-hidden"
+        style={{ width: '100%', height: '100%' }}
+        constraints={{
+          audio: false,
+          video: { facingMode: "environment" }
+        }}
       />
-      <div className="absolute inset-0 border-2 border-dashed border-primary/50 rounded-lg pointer-events-none" />
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-48 h-48 border-2 border-primary rounded-lg" />
-      </div>
     </div>
   );
-};
+}
 
 export default EmployeeQRScanner; 
