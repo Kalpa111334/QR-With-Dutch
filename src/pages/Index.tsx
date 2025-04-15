@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -72,9 +71,12 @@ const Index = () => {
   };
   
   const handleAddEmployee = () => {
-    setSelectedEmployee(undefined);
-    setShowEmployeeForm(true);
     setActiveTab('employees');
+    // Use setTimeout to ensure the tab switch happens first
+    setTimeout(() => {
+      setSelectedEmployee(undefined);
+      setShowEmployeeForm(true);
+    }, 0);
   };
   
   const handleEditEmployee = (employee: Employee) => {

@@ -254,12 +254,22 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
   }
 };
 
+let cachedDepartments: string[] | null = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 export const getDepartments = async (): Promise<string[]> => {
   try {
+    // Return cached departments if they exist and are not expired
+    const now = Date.now();
+    if (cachedDepartments && (now - lastFetchTime) < CACHE_DURATION) {
+      return cachedDepartments;
+    }
+
     console.log('Fetching departments from database...');
     const { data, error } = await supabase
       .from('departments')
-      .select('*')
+      .select('name')
       .order('name');
     
     if (error) {
@@ -272,10 +282,19 @@ export const getDepartments = async (): Promise<string[]> => {
       return [];
     }
     
-    console.log('Fetched departments:', data);
-    return data.map(dept => dept.name);
+    // Update cache
+    cachedDepartments = data.map(dept => dept.name);
+    lastFetchTime = now;
+    
+    console.log('Fetched departments:', cachedDepartments);
+    return cachedDepartments;
   } catch (error) {
     console.error('Error in getDepartments:', error);
+    // If we have cached data, return it even if expired
+    if (cachedDepartments) {
+      console.log('Returning cached departments due to error');
+      return cachedDepartments;
+    }
     throw error;
   }
 };
