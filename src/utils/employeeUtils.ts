@@ -256,20 +256,27 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
 
 export const getDepartments = async (): Promise<string[]> => {
   try {
+    console.log('Fetching departments from database...');
     const { data, error } = await supabase
       .from('departments')
-      .select('name')
+      .select('*')
       .order('name');
     
     if (error) {
       console.error('Error fetching departments:', error);
+      throw new Error(`Failed to fetch departments: ${error.message}`);
+    }
+    
+    if (!data || data.length === 0) {
+      console.log('No departments found in database');
       return [];
     }
     
+    console.log('Fetched departments:', data);
     return data.map(dept => dept.name);
   } catch (error) {
-    console.error('Error fetching departments:', error);
-    return [];
+    console.error('Error in getDepartments:', error);
+    throw error;
   }
 };
 
@@ -389,53 +396,28 @@ async function parseFileToEmployees(file: File): Promise<Partial<Employee>[]> {
           } catch (err) {
             reject(new Error(`Failed to parse CSV: ${err}`));
           }
-        },
-        error: (error) => {
-          reject(new Error(`CSV parsing error: ${error}`));
         }
       });
     } else if (file.name.endsWith('.xlsx')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: 'array' });
-          
-          // Get first sheet
-          const sheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
-          
-          // Convert to JSON
-          const jsonData = XLSX.utils.sheet_to_json(worksheet);
-          const employees = jsonData.map(mapRowToEmployee);
-          resolve(employees);
-        } catch (err) {
-          reject(new Error(`Failed to parse Excel file: ${err}`));
-        }
-      };
-      reader.onerror = () => reject(new Error('Error reading Excel file'));
-      reader.readAsArrayBuffer(file);
+      const workbook = XLSX.read(await file.arrayBuffer());
+      const employees = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]).map(mapRowToEmployee);
+      resolve(employees);
     } else {
-      reject(new Error('Unsupported file format. Please use CSV or XLSX.'));
+      reject(new Error('Unsupported file format'));
     }
   });
 }
 
-// Helper function to map a row from the parsed file to an Employee object
 function mapRowToEmployee(row: any): Partial<Employee> {
-  // Handle different possible column names from import files
-  const first_name = row.first_name || row['First Name'] || row.firstName || row['First name'] || '';
-  const last_name = row.last_name || row['Last Name'] || row.lastName || row['Last name'] || '';
-  
   return {
-    first_name,
-    last_name,
-    email: row.email || row.Email || '',
-    department: row.department || row.Department || '',
-    position: row.position || row.Position || row.title || row.Title || '',
-    phone: row.phone || row.Phone || row.phoneNumber || row['Phone Number'] || '',
-    join_date: row.join_date || row['Join Date'] || row.joinDate || '',
-    status: row.status || row.Status || 'active',
-    name: `${first_name} ${last_name}`
+    first_name: row.first_name || '',
+    last_name: row.last_name || '',
+    email: row.email,
+    department: row.department || '',
+    phone: row.phone || '',
+    position: row.position || '',
+    join_date: row.join_date || new Date().toISOString().split('T')[0],
+    status: row.status === 'inactive' ? 'inactive' : 'active' as 'active' | 'inactive',
+    name: `${row.first_name || ''} ${row.last_name || ''}`.trim()
   };
 }

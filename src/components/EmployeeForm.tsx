@@ -29,12 +29,14 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
   const [formData, setFormData] = useState<Omit<Employee, 'id'>>(employee || defaultEmployee);
   const [existingDepartments, setExistingDepartments] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingDepartments, setLoadingDepartments] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
     // Fetch departments when component mounts
     const fetchDepartments = async () => {
       try {
+        setLoadingDepartments(true);
         const departments = await getDepartments();
         console.log('Fetched departments:', departments);
         setExistingDepartments(departments);
@@ -42,9 +44,11 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
         console.error('Error fetching departments:', error);
         toast({
           title: 'Error',
-          description: 'Failed to load departments',
+          description: 'Failed to load departments. Please refresh the page.',
           variant: 'destructive',
         });
+      } finally {
+        setLoadingDepartments(false);
       }
     };
     
@@ -152,16 +156,23 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
               <Select
                 value={formData.department}
                 onValueChange={(value) => handleSelectChange('department', value)}
+                disabled={loadingDepartments}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select department" />
+                  <SelectValue placeholder={loadingDepartments ? "Loading departments..." : "Select department"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {existingDepartments.map(dept => (
-                    <SelectItem key={dept} value={dept}>
-                      {dept}
+                  {existingDepartments.length > 0 ? (
+                    existingDepartments.map(dept => (
+                      <SelectItem key={dept} value={dept}>
+                        {dept}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="" disabled>
+                      {loadingDepartments ? "Loading..." : "No departments found"}
                     </SelectItem>
-                  ))}
+                  )}
                 </SelectContent>
               </Select>
             </div>
