@@ -22,34 +22,34 @@ const defaultEmployee: Omit<Employee, 'id'> = {
   phone: '',
   join_date: new Date().toISOString().split('T')[0],
   status: 'active',
-  name: '', // Add default name property
+  name: ''
 };
 
 const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
-  const [formData, setFormData] = useState<Omit<Employee, 'id'>>({
-    ...defaultEmployee,
-  });
+  const [formData, setFormData] = useState<Omit<Employee, 'id'>>(employee || defaultEmployee);
   const [existingDepartments, setExistingDepartments] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    if (employee) {
-      setFormData(employee);
-    }
-    
-    // Fetch departments from Supabase
+    // Fetch departments when component mounts
     const fetchDepartments = async () => {
       try {
         const departments = await getDepartments();
+        console.log('Fetched departments:', departments);
         setExistingDepartments(departments);
       } catch (error) {
         console.error('Error fetching departments:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load departments',
+          variant: 'destructive',
+        });
       }
     };
     
     fetchDepartments();
-  }, [employee]);
+  }, [toast]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -65,23 +65,29 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
     setLoading(true);
     
     try {
+      // Set the full name before saving
+      const fullFormData = {
+        ...formData,
+        name: `${formData.first_name} ${formData.last_name}`.trim()
+      };
+
       if (employee?.id) {
         // Update existing employee
-        const result = await updateEmployee({ ...formData, id: employee.id });
+        const result = await updateEmployee({ ...fullFormData, id: employee.id });
         if (result) {
           toast({
             title: 'Employee Updated',
-            description: `${formData.firstName} ${formData.lastName} has been updated successfully.`,
+            description: `${formData.first_name} ${formData.last_name} has been updated successfully.`,
           });
           onSave();
         }
       } else {
         // Add new employee
-        const result = await addEmployee(formData);
+        const result = await addEmployee(fullFormData);
         if (result) {
           toast({
             title: 'Employee Added',
-            description: `${formData.firstName} ${formData.lastName} has been added successfully.`,
+            description: `${formData.first_name} ${formData.last_name} has been added successfully.`,
           });
           setFormData(defaultEmployee);
           onSave();
@@ -108,22 +114,22 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="firstName">First Name</Label>
+              <Label htmlFor="first_name">First Name</Label>
               <Input
-                id="firstName"
-                name="firstName"
-                value={formData.firstName}
+                id="first_name"
+                name="first_name"
+                value={formData.first_name}
                 onChange={handleChange}
                 required
               />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="lastName">Last Name</Label>
+              <Label htmlFor="last_name">Last Name</Label>
               <Input
-                id="lastName"
-                name="lastName"
-                value={formData.lastName}
+                id="last_name"
+                name="last_name"
+                value={formData.last_name}
                 onChange={handleChange}
                 required
               />
@@ -211,19 +217,12 @@ const EmployeeForm: React.FC<EmployeeFormProps> = ({ employee, onSave }) => {
             </div>
           </div>
           
-          <div className="flex justify-end space-x-2 pt-4">
-            <Button type="button" variant="outline" onClick={onSave} disabled={loading}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? (
-                <span className="flex items-center">
-                  <span className="animate-spin mr-2 h-4 w-4 border-2 border-current border-t-transparent rounded-full"></span>
-                  Processing...
-                </span>
-              ) : (
-                `${employee?.id ? 'Update' : 'Add'} Employee`
-              )}
+          <div className="flex justify-end space-x-4">
+            <Button
+              type="submit"
+              disabled={loading}
+            >
+              {loading ? 'Saving...' : employee?.id ? 'Update Employee' : 'Add Employee'}
             </Button>
           </div>
         </form>
