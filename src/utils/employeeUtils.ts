@@ -280,12 +280,30 @@ export const getDepartments = async (): Promise<string[]> => {
     if (!data || data.length === 0) {
       // Return default departments without trying to create them
       const defaultDepartments = [
-        'Engineering',
-        'Sales',
-        'Marketing',
+        'IT',
         'HR',
         'Finance',
-        'Operations'
+        'Marketing',
+        'Sales',
+        'Operations',
+        'Engineering',
+        'Research',
+        'Development',
+        'Customer Service',
+        'Administration',
+        'Transport',
+        'Maintenance',
+        'Security',
+        'Dutch Activity',
+        'Kitchen',
+        'Food & Beverage Department',
+        'Butchery',
+        'Reservations',
+        'House Keeping',
+        'Pastry Kitchen',
+        'Stores',
+        'Purchasing & Stores',
+        'Accounts Department'
       ];
       
       // Cache the default departments
@@ -305,12 +323,30 @@ export const getDepartments = async (): Promise<string[]> => {
     console.error('Error in getDepartments:', error);
     // Return default departments on error
     const defaultDepartments = [
-      'Engineering',
-      'Sales',
-      'Marketing',
+      'IT',
       'HR',
       'Finance',
-      'Operations'
+      'Marketing',
+      'Sales',
+      'Operations',
+      'Engineering',
+      'Research',
+      'Development',
+      'Customer Service',
+      'Administration',
+      'Transport',
+      'Maintenance',
+      'Security',
+      'Dutch Activity',
+      'Kitchen',
+      'Food & Beverage Department',
+      'Butchery',
+      'Reservations',
+      'House Keeping',
+      'Pastry Kitchen',
+      'Stores',
+      'Purchasing & Stores',
+      'Accounts Department'
     ];
     return defaultDepartments;
   }
