@@ -267,6 +267,13 @@ export const getDepartments = async (): Promise<string[]> => {
     }
 
     console.log('Fetching departments from database...');
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+
+    if (!userId) {
+      throw new Error('User not authenticated');
+    }
+
     const { data, error } = await supabase
       .from('departments')
       .select('name')
@@ -281,12 +288,12 @@ export const getDepartments = async (): Promise<string[]> => {
       console.log('No departments found, initializing default departments...');
       // Initialize with default departments
       const defaultDepartments = [
-        { name: 'Engineering' },
-        { name: 'Sales' },
-        { name: 'Marketing' },
-        { name: 'HR' },
-        { name: 'Finance' },
-        { name: 'Operations' }
+        { name: 'Engineering', created_by: userId },
+        { name: 'Sales', created_by: userId },
+        { name: 'Marketing', created_by: userId },
+        { name: 'HR', created_by: userId },
+        { name: 'Finance', created_by: userId },
+        { name: 'Operations', created_by: userId }
       ];
 
       const { data: insertedData, error: insertError } = await supabase
