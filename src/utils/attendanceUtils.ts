@@ -304,7 +304,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     }
 
     const now = new Date();
-    const today = format(now, 'yyyy-MM-dd');
+    const today = format(startOfDay(now), 'yyyy-MM-dd'); // Use startOfDay to ensure consistent date format
     const checkInTime = now.toISOString();
     
     // Check if already checked in today
@@ -337,7 +337,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     // Determine if the employee is late (after 9:00 AM)
     const isLate = calculateLateDuration(checkInTime).totalMinutes > 0;
     
-    // Insert new record
+    // Insert new record with RLS error handling
     const { data: insertedData, error: insertError } = await supabase
       .from('attendance')
       .insert({
@@ -349,11 +349,41 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
       .select()
       .single();
     
-    if (insertError || !insertedData) {
+    if (insertError) {
       console.error('Error recording attendance check-in:', insertError);
+      
+      // Handle unique constraint violation
+      if (insertError.code === '23505') {
+        toast({
+          title: "Already Checked In",
+          description: "You have already checked in today.",
+        });
+        return false;
+      }
+      
+      // Handle RLS violation
+      if (insertError.code === '42501') {
+        toast({
+          title: "Permission Denied",
+          description: "You don't have permission to record attendance. Please contact admin.",
+          variant: "destructive"
+        });
+        return false;
+      }
+      
       toast({
         title: "Check-in Failed",
-        description: insertError?.message || "Failed to record attendance. Please try again.",
+        description: "Failed to record attendance. Please try again.",
+        variant: "destructive"
+      });
+      return false;
+    }
+    
+    if (!insertedData) {
+      console.error('No data returned after insert');
+      toast({
+        title: "Check-in Failed",
+        description: "Failed to record attendance. Please try again.",
         variant: "destructive"
       });
       return false;
