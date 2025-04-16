@@ -6,6 +6,14 @@ CREATE TABLE IF NOT EXISTS departments (
     user_id UUID REFERENCES auth.users(id)
 );
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Allow read access to all authenticated users" ON departments;
+DROP POLICY IF EXISTS "Allow insert for authenticated users" ON departments;
+DROP POLICY IF EXISTS "Allow update for authenticated users" ON departments;
+DROP POLICY IF EXISTS "Allow delete for authenticated users" ON departments;
+DROP POLICY IF EXISTS "Allow public read access" ON departments;
+DROP POLICY IF EXISTS "Allow public insert" ON departments;
+
 -- Create RLS policies
 ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
 
