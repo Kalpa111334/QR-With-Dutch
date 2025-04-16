@@ -56,10 +56,23 @@ export const getRosters = async (): Promise<Roster[]> => {
 // Create a new roster
 export const createRoster = async (roster: Omit<Roster, 'id' | 'createdAt' | 'updatedAt'>): Promise<Roster | null> => {
   try {
+    // Get employee name first
+    const { data: employeeData } = await supabase
+      .from('employees')
+      .select('first_name, last_name')
+      .eq('id', roster.employeeId)
+      .single();
+
+    if (!employeeData) throw new Error('Employee not found');
+
+    const employeeName = `${employeeData.first_name || ''} ${employeeData.last_name || ''}`.trim();
+    if (!employeeName) throw new Error('Employee name is required');
+
     const { data, error } = await supabase
       .from('rosters')
       .insert({
         employee_id: roster.employeeId,
+        employee_name: employeeName,
         start_date: roster.startDate,
         end_date: roster.endDate,
         shift: roster.shift,
@@ -70,18 +83,13 @@ export const createRoster = async (roster: Omit<Roster, 'id' | 'createdAt' | 'up
 
     if (error) throw error;
 
-    // Get employee name
-    const { data: employee } = await supabase
-      .from('employees')
-      .select('first_name, last_name')
-      .eq('id', roster.employeeId)
-      .single();
+
 
     return {
       id: data.id,
       employeeId: data.employee_id,
-      employeeName: employee ? 
-        `${employee.first_name || ''} ${employee.last_name || ''}`.trim() : 
+      employeeName: employeeData ? 
+        `${employeeData.first_name || ''} ${employeeData.last_name || ''}`.trim() : 
         'Unknown Employee',
       startDate: data.start_date,
       endDate: data.end_date,
