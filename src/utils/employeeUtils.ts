@@ -268,30 +268,21 @@ export const getDepartments = async (): Promise<string[]> => {
 
     // Default departments list
     const defaultDepartments = [
-      'IT',
-      'HR',
-      'Finance',
-      'Marketing',
-      'Sales',
-      'Operations',
-      'Engineering',
-      'Research',
-      'Development',
-      'Customer Service',
-      'Administration',
-      'Transport',
-      'Maintenance',
-      'Security',
       'Dutch Activity',
       'Kitchen',
       'Food & Beverage Department',
       'Butchery',
+      'Operations',
+      'Maintenance',
       'Reservations',
       'House Keeping',
       'Pastry Kitchen',
       'Stores',
       'Purchasing & Stores',
-      'Accounts Department'
+      'Accounts Department',
+      'Administration',
+      'Security Department',
+      'Transport Section'
     ];
 
     console.log('Fetching departments from database...');
