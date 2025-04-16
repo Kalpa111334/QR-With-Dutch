@@ -267,13 +267,6 @@ export const getDepartments = async (): Promise<string[]> => {
     }
 
     console.log('Fetching departments from database...');
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      throw new Error('User not authenticated');
-    }
-
     const { data, error } = await supabase
       .from('departments')
       .select('name')
@@ -285,34 +278,21 @@ export const getDepartments = async (): Promise<string[]> => {
     }
     
     if (!data || data.length === 0) {
-      console.log('No departments found, initializing default departments...');
-      // Initialize with default departments
+      // Return default departments without trying to create them
       const defaultDepartments = [
-        { name: 'Engineering', created_by: userId },
-        { name: 'Sales', created_by: userId },
-        { name: 'Marketing', created_by: userId },
-        { name: 'HR', created_by: userId },
-        { name: 'Finance', created_by: userId },
-        { name: 'Operations', created_by: userId }
+        'Engineering',
+        'Sales',
+        'Marketing',
+        'HR',
+        'Finance',
+        'Operations'
       ];
-
-      const { data: insertedData, error: insertError } = await supabase
-        .from('departments')
-        .insert(defaultDepartments)
-        .select('name');
-
-      if (insertError) {
-        console.error('Error inserting default departments:', insertError);
-        throw new Error(`Failed to initialize departments: ${insertError.message}`);
-      }
-
-      if (!insertedData) {
-        return [];
-      }
-
-      cachedDepartments = insertedData.map(dept => dept.name);
+      
+      // Cache the default departments
+      cachedDepartments = defaultDepartments;
       lastFetchTime = now;
-      return cachedDepartments;
+      
+      return defaultDepartments;
     }
     
     // Update cache
@@ -323,12 +303,16 @@ export const getDepartments = async (): Promise<string[]> => {
     return cachedDepartments;
   } catch (error) {
     console.error('Error in getDepartments:', error);
-    // If we have cached data, return it even if expired
-    if (cachedDepartments) {
-      console.log('Returning cached departments due to error');
-      return cachedDepartments;
-    }
-    throw error;
+    // Return default departments on error
+    const defaultDepartments = [
+      'Engineering',
+      'Sales',
+      'Marketing',
+      'HR',
+      'Finance',
+      'Operations'
+    ];
+    return defaultDepartments;
   }
 };
 
