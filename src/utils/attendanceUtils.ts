@@ -273,6 +273,19 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
 // Record attendance check-in
 export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
   try {
+    // First check if we have an active session
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (!session || sessionError) {
+      console.error('No active session:', sessionError);
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to record attendance.",
+        variant: "destructive"
+      });
+      return false;
+    }
+
     // Verify employee exists first
     const { data: employee, error: employeeError } = await supabase
       .from('employees')
@@ -289,13 +302,12 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
       });
       return false;
     }
+
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
-    
-    // Format the check-in time as an ISO string
     const checkInTime = now.toISOString();
     
-    // Check if already checked in today - use maybeSingle() instead of single()
+    // Check if already checked in today
     const { data: existingRecord, error: existingError } = await supabase
       .from('attendance')
       .select('*')
@@ -325,44 +337,23 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     // Determine if the employee is late (after 9:00 AM)
     const isLate = calculateLateDuration(checkInTime).totalMinutes > 0;
     
-    // Insert new record with better error handling
-    const { data: insertedData, error } = await supabase
+    // Insert new record
+    const { data: insertedData, error: insertError } = await supabase
       .from('attendance')
-      .insert([
-        {
-          employee_id: employeeId,
-          date: today,
-          check_in_time: checkInTime,
-          status: isLate ? 'late' : 'present'
-        }
-      ])
-      .select();
+      .insert({
+        employee_id: employeeId,
+        date: today,
+        check_in_time: checkInTime,
+        status: isLate ? 'late' : 'present'
+      })
+      .select()
+      .single();
     
-    if (error) {
-      console.error('Error recording attendance check-in:', error);
+    if (insertError || !insertedData) {
+      console.error('Error recording attendance check-in:', insertError);
       toast({
         title: "Check-in Failed",
-        description: error.message || "Failed to record attendance. Please try again.",
-        variant: "destructive"
-      });
-      return false;
-    }
-    
-    if (!insertedData || insertedData.length === 0) {
-      console.error('No data returned after insert');
-      toast({
-        title: "Check-in Failed",
-        description: "Failed to record attendance. Please try again.",
-        variant: "destructive"
-      });
-      return false;
-    }
-    
-    if (error) {
-      console.error('Error recording attendance check-in:', error);
-      toast({
-        title: "Check-in Failed",
-        description: error.message || "Failed to record attendance. Please try again.",
+        description: insertError?.message || "Failed to record attendance. Please try again.",
         variant: "destructive"
       });
       return false;
@@ -371,7 +362,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     toast({
       title: isLate ? "Checked In (Late)" : "Checked In",
       description: isLate 
-        ? `Your attendance has been recorded. You are ${calculateLateDuration(checkInTime).formatted}.`
+        ? `Your attendance has been recorded. You are ${calculateLateDuration(checkInTime).formatted} late.`
         : "Your attendance has been recorded.",
     });
     return true;
