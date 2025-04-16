@@ -278,8 +278,34 @@ export const getDepartments = async (): Promise<string[]> => {
     }
     
     if (!data || data.length === 0) {
-      console.log('No departments found in database');
-      return [];
+      console.log('No departments found, initializing default departments...');
+      // Initialize with default departments
+      const defaultDepartments = [
+        { name: 'Engineering' },
+        { name: 'Sales' },
+        { name: 'Marketing' },
+        { name: 'HR' },
+        { name: 'Finance' },
+        { name: 'Operations' }
+      ];
+
+      const { data: insertedData, error: insertError } = await supabase
+        .from('departments')
+        .insert(defaultDepartments)
+        .select('name');
+
+      if (insertError) {
+        console.error('Error inserting default departments:', insertError);
+        throw new Error(`Failed to initialize departments: ${insertError.message}`);
+      }
+
+      if (!insertedData) {
+        return [];
+      }
+
+      cachedDepartments = insertedData.map(dept => dept.name);
+      lastFetchTime = now;
+      return cachedDepartments;
     }
     
     // Update cache
@@ -410,39 +436,78 @@ async function parseFileToEmployees(file: File): Promise<Partial<Employee>[]> {
         skipEmptyLines: true,
         complete: (results) => {
           try {
+            if (results.errors && results.errors.length > 0) {
+              const errorMessage = results.errors
+                .map(err => `Row ${err.row + 1}: ${err.message}`)
+                .join('\n');
+              reject(new Error(`CSV parsing errors:\n${errorMessage}`));
+              return;
+            }
             const employees = results.data.map(mapRowToEmployee);
             resolve(employees);
           } catch (err) {
             reject(new Error(`Failed to parse CSV: ${err}`));
           }
+        },
+        error: (error) => {
+          reject(new Error(`CSV parsing error: ${error}`));
         }
       });
     } else if (file.name.endsWith('.xlsx')) {
       (async () => {
         try {
           const workbook = XLSX.read(await file.arrayBuffer());
-          const employees = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]).map(mapRowToEmployee);
+          
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            reject(new Error('Excel file does not contain any sheets'));
+            return;
+          }
+          
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          if (!firstSheet) {
+            reject(new Error('First sheet is empty or invalid'));
+            return;
+          }
+          
+          const data = XLSX.utils.sheet_to_json(firstSheet);
+          if (!Array.isArray(data) || data.length === 0) {
+            reject(new Error('No data found in the Excel file'));
+            return;
+          }
+          
+          const employees = data.map(mapRowToEmployee);
           resolve(employees);
         } catch (error) {
-          reject(error);
+          reject(new Error(`Failed to parse Excel file: ${error.message || 'Unknown error'}`));
         }
       })();
     } else {
-      reject(new Error('Unsupported file format'));
+      reject(new Error('Unsupported file format. Please use a CSV or Excel (xlsx) file.'));
     }
   });
 }
 
 function mapRowToEmployee(row: any): Partial<Employee> {
+  // Convert keys to lowercase and trim whitespace
+  const normalizedRow = Object.keys(row).reduce((acc, key) => {
+    acc[key.toLowerCase().trim()] = typeof row[key] === 'string' ? row[key].trim() : row[key];
+    return acc;
+  }, {} as Record<string, any>);
+
+  // Map common variations of column names
+  const data = {
+    first_name: normalizedRow.first_name || normalizedRow.firstname || normalizedRow['first name'] || '',
+    last_name: normalizedRow.last_name || normalizedRow.lastname || normalizedRow['last name'] || '',
+    email: normalizedRow.email || normalizedRow['email address'] || '',
+    department: normalizedRow.department || normalizedRow.dept || '',
+    phone: normalizedRow.phone || normalizedRow.phone_number || normalizedRow['phone number'] || '',
+    position: normalizedRow.position || normalizedRow.title || normalizedRow.role || '',
+    join_date: normalizedRow.join_date || normalizedRow.joindate || normalizedRow['join date'] || new Date().toISOString().split('T')[0],
+    status: normalizedRow.status?.toLowerCase() === 'inactive' ? 'inactive' : 'active' as 'active' | 'inactive'
+  };
+
   return {
-    first_name: row.first_name || '',
-    last_name: row.last_name || '',
-    email: row.email,
-    department: row.department || '',
-    phone: row.phone || '',
-    position: row.position || '',
-    join_date: row.join_date || new Date().toISOString().split('T')[0],
-    status: row.status === 'inactive' ? 'inactive' : 'active' as 'active' | 'inactive',
-    name: `${row.first_name || ''} ${row.last_name || ''}`.trim()
+    ...data,
+    name: `${data.first_name} ${data.last_name}`.trim()
   };
 }
