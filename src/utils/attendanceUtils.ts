@@ -273,6 +273,22 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
 // Record attendance check-in
 export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
   try {
+    // Verify employee exists first
+    const { data: employee, error: employeeError } = await supabase
+      .from('employees')
+      .select('id, first_name, last_name')
+      .eq('id', employeeId)
+      .single();
+
+    if (employeeError || !employee) {
+      console.error('Error verifying employee:', employeeError);
+      toast({
+        title: "Employee Not Found",
+        description: "Could not verify employee ID. Please try again or contact admin.",
+        variant: "destructive"
+      });
+      return false;
+    }
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
     
@@ -289,6 +305,11 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     
     if (existingError) {
       console.error('Error checking existing attendance:', existingError);
+      toast({
+        title: "Error Checking Attendance",
+        description: "Failed to verify existing attendance. Please try again.",
+        variant: "destructive"
+      });
       return false;
     }
     
@@ -316,6 +337,11 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     
     if (error) {
       console.error('Error recording attendance check-in:', error);
+      toast({
+        title: "Check-in Failed",
+        description: error.message || "Failed to record attendance. Please try again.",
+        variant: "destructive"
+      });
       return false;
     }
     
@@ -328,6 +354,11 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     return true;
   } catch (error) {
     console.error('Error in recordAttendanceCheckIn:', error);
+    toast({
+      title: "Check-in Failed",
+      description: error instanceof Error ? error.message : "An unexpected error occurred. Please try again.",
+      variant: "destructive"
+    });
     return false;
   }
 };
