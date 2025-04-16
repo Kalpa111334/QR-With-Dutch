@@ -328,16 +328,27 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
     // Insert new record with better error handling
     const { data: insertedData, error } = await supabase
       .from('attendance')
-      .insert({
-        employee_id: employeeId,
-        date: today,
-        check_in_time: checkInTime,
-        status: isLate ? 'late' : 'present'
-      })
-      .select()
-      .single();
+      .insert([
+        {
+          employee_id: employeeId,
+          date: today,
+          check_in_time: checkInTime,
+          status: isLate ? 'late' : 'present'
+        }
+      ])
+      .select();
     
-    if (!insertedData && !error) {
+    if (error) {
+      console.error('Error recording attendance check-in:', error);
+      toast({
+        title: "Check-in Failed",
+        description: error.message || "Failed to record attendance. Please try again.",
+        variant: "destructive"
+      });
+      return false;
+    }
+    
+    if (!insertedData || insertedData.length === 0) {
       console.error('No data returned after insert');
       toast({
         title: "Check-in Failed",
