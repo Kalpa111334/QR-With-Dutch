@@ -77,7 +77,8 @@ VALUES
     ('Accounts Department', NOW()),
     ('Administration', NOW()),
     ('Security Department', NOW()),
-    ('Transport Section', NOW())
+    ('Transport Section', NOW()),
+    ('Human Resources', NOW())
 ON CONFLICT (name) DO NOTHING;
 
 
