@@ -282,7 +282,8 @@ export const getDepartments = async (): Promise<string[]> => {
       'Accounts Department',
       'Administration',
       'Security Department',
-      'Transport Section'
+      'Transport Section',
+      'Human Resources',
     ];
 
     console.log('Fetching departments from database...');
