@@ -266,62 +266,7 @@ export const getDepartments = async (): Promise<string[]> => {
       return cachedDepartments;
     }
 
-    console.log('Fetching departments from database...');
-    const { data, error } = await supabase
-      .from('departments')
-      .select('name')
-      .order('name');
-    
-    if (error) {
-      console.error('Error fetching departments:', error);
-      throw new Error(`Failed to fetch departments: ${error.message}`);
-    }
-    
-    if (!data || data.length === 0) {
-      // Return default departments without trying to create them
-      const defaultDepartments = [
-        'IT',
-        'HR',
-        'Finance',
-        'Marketing',
-        'Sales',
-        'Operations',
-        'Engineering',
-        'Research',
-        'Development',
-        'Customer Service',
-        'Administration',
-        'Transport',
-        'Maintenance',
-        'Security',
-        'Dutch Activity',
-        'Kitchen',
-        'Food & Beverage Department',
-        'Butchery',
-        'Reservations',
-        'House Keeping',
-        'Pastry Kitchen',
-        'Stores',
-        'Purchasing & Stores',
-        'Accounts Department'
-      ];
-      
-      // Cache the default departments
-      cachedDepartments = defaultDepartments;
-      lastFetchTime = now;
-      
-      return defaultDepartments;
-    }
-    
-    // Update cache
-    cachedDepartments = data.map(dept => dept.name);
-    lastFetchTime = now;
-    
-    console.log('Fetched departments:', cachedDepartments);
-    return cachedDepartments;
-  } catch (error) {
-    console.error('Error in getDepartments:', error);
-    // Return default departments on error
+    // Default departments list
     const defaultDepartments = [
       'IT',
       'HR',
@@ -348,7 +293,110 @@ export const getDepartments = async (): Promise<string[]> => {
       'Purchasing & Stores',
       'Accounts Department'
     ];
-    return defaultDepartments;
+
+    console.log('Fetching departments from database...');
+    const { data, error } = await supabase
+      .from('departments')
+      .select('name')
+      .order('name');
+    
+    if (error) {
+      console.error('Error fetching departments:', error);
+      throw new Error(`Failed to fetch departments: ${error.message}`);
+    }
+    
+    if (!data || data.length === 0) {
+      console.log('No departments found, creating default departments...');
+      
+      // Create departments one by one to handle RLS gracefully
+      for (const deptName of defaultDepartments) {
+        const { error: insertError } = await supabase
+          .from('departments')
+          .insert({ name: deptName })
+          .select('name')
+          .single();
+        
+        if (insertError) {
+          console.warn(`Failed to create department ${deptName}:`, insertError);
+        }
+      }
+
+      // Fetch the departments again after creation
+      const { data: refetchedData, error: refetchError } = await supabase
+        .from('departments')
+        .select('name')
+        .order('name');
+
+      if (refetchError || !refetchedData) {
+        console.warn('Failed to fetch departments after creation:', refetchError);
+        cachedDepartments = defaultDepartments;
+        lastFetchTime = now;
+        return defaultDepartments;
+      }
+
+      cachedDepartments = refetchedData.map(dept => dept.name);
+      lastFetchTime = now;
+      return cachedDepartments;
+    }
+    
+    // Update cache with existing departments
+    cachedDepartments = data.map(dept => dept.name);
+    lastFetchTime = now;
+    
+    // Check if we need to add any missing departments
+    const existingDepts = new Set(cachedDepartments);
+    const missingDepts = defaultDepartments.filter(dept => !existingDepts.has(dept));
+    
+    if (missingDepts.length > 0) {
+      console.log('Adding missing departments:', missingDepts);
+      
+      // Add missing departments one by one
+      for (const deptName of missingDepts) {
+        const { error: insertError } = await supabase
+          .from('departments')
+          .insert({ name: deptName })
+          .select('name')
+          .single();
+        
+        if (insertError) {
+          console.warn(`Failed to create department ${deptName}:`, insertError);
+        } else {
+          cachedDepartments.push(deptName);
+        }
+      }
+    }
+    
+    console.log('Available departments:', cachedDepartments);
+    return cachedDepartments;
+  } catch (error) {
+    console.error('Error in getDepartments:', error);
+    // Return cached departments if available, otherwise return default list
+    return cachedDepartments || [
+      'IT',
+      'HR',
+      'Finance',
+      'Marketing',
+      'Sales',
+      'Operations',
+      'Engineering',
+      'Research',
+      'Development',
+      'Customer Service',
+      'Administration',
+      'Transport',
+      'Maintenance',
+      'Security',
+      'Dutch Activity',
+      'Kitchen',
+      'Food & Beverage Department',
+      'Butchery',
+      'Reservations',
+      'House Keeping',
+      'Pastry Kitchen',
+      'Stores',
+      'Purchasing & Stores',
+      'Accounts Department'
+    ];
   }
 };
 
