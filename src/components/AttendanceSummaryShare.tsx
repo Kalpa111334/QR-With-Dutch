@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,7 +10,8 @@ import {
   generateAttendanceSummaryHTML,
   getAdminContactInfo,
   saveAdminContactInfo,
-  autoShareAttendanceSummary
+  autoShareAttendanceSummary,
+  AdminContactInfo
 } from '@/utils/attendanceUtils';
 import { CalendarIcon, Send, MessageSquare, Clock, Save, Check, AlertTriangle, Mail, Share2, Settings } from 'lucide-react';
 import { format } from 'date-fns';
@@ -63,8 +63,8 @@ const AttendanceSummaryShare: React.FC = () => {
     const loadAdminContactInfo = async () => {
       try {
         const contactInfo = await getAdminContactInfo();
-        setEmail(contactInfo.email || '');
-        setEmailShareEnabled(contactInfo.isEmailShareEnabled || false);
+        setEmail(contactInfo.whatsappNumber || '');
+        setEmailShareEnabled(contactInfo.isWhatsappShareEnabled || false);
       } catch (error) {
         console.error('Error loading admin contact info:', error);
         toast({
@@ -89,7 +89,7 @@ const AttendanceSummaryShare: React.FC = () => {
       // Send report at 6 PM (18:00)
       if (hour === 18 && minute >= 0 && minute < 5) {
         if (emailShareEnabled && email) {
-          autoShareAttendanceSummary()
+          autoShareAttendanceSummary('evening')
             .then(success => {
               if (success) {
                 sonnerToast.success('Auto-Share Success', {
@@ -182,27 +182,15 @@ const AttendanceSummaryShare: React.FC = () => {
         }
       }
 
-      const success = await saveAdminContactInfo(
-        email,
-        emailShareEnabled
-      );
-      
-      if (success) {
-        setSettingsSaved(true);
-        toast({
-          title: 'Settings Saved',
-          description: `Admin contact information saved successfully.`,
-        });
+      await saveAdminContactInfo(email, emailShareEnabled);
+      setSettingsSaved(true);
+      toast({
+        title: 'Settings Saved',
+        description: `Admin contact information saved successfully.`,
+      });
 
-        // Reset the saved status after 3 seconds
-        setTimeout(() => setSettingsSaved(false), 3000);
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Failed to save admin contact information',
-          variant: 'destructive'
-        });
-      }
+      // Reset the saved status after 3 seconds
+      setTimeout(() => setSettingsSaved(false), 3000);
     } catch (error) {
       console.error('Error saving settings:', error);
       toast({

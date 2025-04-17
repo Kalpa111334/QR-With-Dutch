@@ -1,63 +1,105 @@
-
 import { supabase } from '../integrations/supabase/client';
 import { format, subDays, startOfDay, endOfDay, differenceInMinutes, differenceInHours, differenceInSeconds, parseISO } from 'date-fns';
 import { Attendance } from '../types';
 import { toast } from '../components/ui/use-toast';
+import { Database } from '../integrations/supabase/types';
 
-// Admin settings interface for proper typing
+type AdminSettingsRow = Database['public']['Tables']['admin_settings']['Row'];
+type AdminSettingsInsert = Database['public']['Tables']['admin_settings']['Insert'];
+type AdminSettingsUpdate = Database['public']['Tables']['admin_settings']['Update'];
+
+// Employee type definition
+interface Employee {
+  id: string;
+  first_name: string;
+  last_name: string;
+}
+
+// Database types from schema
 interface AdminSettings {
   id: string;
   setting_type: string;
-  send_method: string;
-  phone_number: string;
-  email: string;
-  created_at: string;
-  updated_at: string;
-  auto_share_enabled: boolean;
-  email_share_enabled: boolean;
+  whatsapp_number: string | null;
+  is_whatsapp_share_enabled: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
-// Admin contact info type for better type safety
-interface AdminContactInfo {
-  email: string;
-  isEmailShareEnabled: boolean;
+export interface AdminContactInfo {
+  whatsappNumber: string;
+  isWhatsappShareEnabled: boolean;
 }
 
 // Define the start of workday (9:00 AM) for late calculation
 const WORKDAY_START_HOUR = 9;
 const WORKDAY_START_MINUTE = 0;
+const GRACE_PERIOD_MINUTES = 5; // 5 minutes grace period
 
-// Function to check if an employee is late based on check-in time
-const isLateArrival = (checkInTime: string): boolean => {
+// Calculate late duration with hours and minutes
+const calculateLateDuration = (checkInTime: string): { 
+  totalMinutes: number,
+  hours: number,
+  minutes: number,
+  formatted: string,
+  expectedTime: string
+} => {
   const checkIn = new Date(checkInTime);
   const workdayStart = new Date(checkIn);
   
   // Set to 9:00 AM of the same day
   workdayStart.setHours(WORKDAY_START_HOUR, WORKDAY_START_MINUTE, 0, 0);
   
-  // Employee is late if check-in time is after 9:00 AM
-  return checkIn > workdayStart;
-};
-
-// Calculate minutes late (0 if not late)
-const calculateMinutesLate = (checkInTime: string): number => {
-  const checkIn = new Date(checkInTime);
-  const workdayStart = new Date(checkIn);
-  
-  // Set to 9:00 AM of the same day
-  workdayStart.setHours(WORKDAY_START_HOUR, WORKDAY_START_MINUTE, 0, 0);
+  // Add grace period
+  workdayStart.setMinutes(workdayStart.getMinutes() + GRACE_PERIOD_MINUTES);
   
   // If not late, return 0
   if (checkIn <= workdayStart) {
-    return 0;
+    return {
+      totalMinutes: 0,
+      hours: 0,
+      minutes: 0,
+      formatted: 'On time',
+      expectedTime: format(workdayStart, 'HH:mm')
+    };
   }
   
-  // Calculate minutes late
-  return differenceInMinutes(checkIn, workdayStart);
+  // Calculate minutes late (rounded to nearest minute)
+  const totalMinutes = Math.round(differenceInMinutes(checkIn, workdayStart));
+  
+  // Calculate hours and remaining minutes
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  
+  // Format the duration
+  let formatted = '';
+  if (hours > 0) {
+    formatted += `${hours}h `;
+  }
+  if (minutes > 0 || hours === 0) {
+    formatted += `${minutes}m`;
+  }
+  
+  return {
+    totalMinutes: Math.max(0, totalMinutes),
+    hours,
+    minutes,
+    formatted: formatted.trim(),
+    expectedTime: format(workdayStart, 'HH:mm')
+  };
 };
 
-// Calculate real-time working duration in minutes
-const calculateWorkingDuration = (checkInTime: string, checkOutTime: string | null): { minutes: number, formatted: string } => {
+// Calculate minutes late (0 if not late) - keeping for backward compatibility
+const calculateMinutesLate = (checkInTime: string): number => {
+  return calculateLateDuration(checkInTime).totalMinutes;
+};
+
+// Calculate working duration with more precision
+const calculateWorkingDuration = (checkInTime: string, checkOutTime: string | null): { 
+  minutes: number, 
+  hours: number,
+  formatted: string,
+  fullDuration: string 
+} => {
   if (!checkOutTime) {
     // If no checkout time, calculate duration up until now
     const checkIn = new Date(checkInTime);
@@ -69,7 +111,9 @@ const calculateWorkingDuration = (checkInTime: string, checkOutTime: string | nu
     
     return {
       minutes,
-      formatted: `${hours}h ${remainingMinutes}m`
+      hours,
+      formatted: `${hours}h ${remainingMinutes}m`,
+      fullDuration: `${format(checkIn, 'HH:mm')} - Current`
     };
   }
   
@@ -83,7 +127,9 @@ const calculateWorkingDuration = (checkInTime: string, checkOutTime: string | nu
   
   return {
     minutes,
-    formatted: `${hours}h ${remainingMinutes}m`
+    hours,
+    formatted: `${hours}h ${remainingMinutes}m`,
+    fullDuration: `${format(checkIn, 'HH:mm')} - ${format(checkOut, 'HH:mm')}`
   };
 };
 
@@ -118,8 +164,8 @@ export const getAttendance = async (): Promise<Attendance[]> => {
       const checkOutTime = record.check_out_time;
       
       // Determine if late based on check-in time
-      const late = isLateArrival(checkInTime);
-      const minutesLate = calculateMinutesLate(checkInTime);
+      const lateDuration = calculateLateDuration(checkInTime);
+      const late = lateDuration.totalMinutes > 0;
       
       // Calculate working duration
       const workingDuration = calculateWorkingDuration(checkInTime, checkOutTime);
@@ -132,9 +178,13 @@ export const getAttendance = async (): Promise<Attendance[]> => {
         checkOutTime,
         date: format(new Date(record.date), 'yyyy-MM-dd'),
         status: late ? 'late' : 'present' as 'present' | 'late' | 'absent',
-        minutesLate,
+        minutesLate: lateDuration.totalMinutes,
+        lateDuration: lateDuration.formatted,
+        expectedTime: lateDuration.expectedTime,
         workingDuration: workingDuration.formatted,
-        workingDurationMinutes: workingDuration.minutes
+        workingDurationMinutes: workingDuration.minutes,
+        workingHours: workingDuration.hours,
+        fullTimeRange: workingDuration.fullDuration
       };
     });
   } catch (error) {
@@ -179,8 +229,8 @@ export const getAttendanceByDateRange = async (startDate: string, endDate: strin
       const checkOutTime = record.check_out_time;
       
       // Determine if late based on check-in time
-      const late = isLateArrival(checkInTime);
-      const minutesLate = calculateMinutesLate(checkInTime);
+      const lateDuration = calculateLateDuration(checkInTime);
+      const late = lateDuration.totalMinutes > 0;
       
       // Calculate working duration
       const workingDuration = calculateWorkingDuration(checkInTime, checkOutTime);
@@ -193,9 +243,13 @@ export const getAttendanceByDateRange = async (startDate: string, endDate: strin
         checkOutTime,
         date: format(new Date(record.date), 'yyyy-MM-dd'),
         status: late ? 'late' : 'present' as 'present' | 'late' | 'absent',
-        minutesLate,
+        minutesLate: lateDuration.totalMinutes,
+        lateDuration: lateDuration.formatted,
+        expectedTime: lateDuration.expectedTime,
         workingDuration: workingDuration.formatted,
-        workingDurationMinutes: workingDuration.minutes
+        workingDurationMinutes: workingDuration.minutes,
+        workingHours: workingDuration.hours,
+        fullTimeRange: workingDuration.fullDuration
       };
     });
   } catch (error) {
@@ -209,7 +263,8 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
   try {
     const { count, error } = await supabase
       .from('employees')
-      .select('*', { count: 'exact' });
+      .select('*', { count: 'exact' })
+      .eq('status', 'active'); // Only count active employees
     
     if (error) {
       console.error('Error fetching total employee count:', error);
@@ -221,611 +276,458 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
     console.error('Error in getTotalEmployeeCount:', error);
     return 0;
   }
-};
+}
 
-// Record attendance check-in
+// Function to handle attendance check-in with retries and error handling
 export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
-  try {
-    const now = new Date();
-    const today = format(now, 'yyyy-MM-dd');
-    
-    // Format the check-in time as an ISO string
-    const checkInTime = now.toISOString();
-    
-    // Check if already checked in today - use maybeSingle() instead of single()
-    const { data: existingRecord, error: existingError } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .maybeSingle();
-    
-    if (existingError) {
-      console.error('Error checking existing attendance:', existingError);
-      return false;
-    }
-    
-    if (existingRecord) {
-      console.log('Employee already checked in today');
-      toast({
-        title: "Already Checked In",
-        description: "You have already checked in today.",
-      });
-      return false;
-    }
-    
-    // Determine if the employee is late (after 9:00 AM)
-    const isLate = isLateArrival(checkInTime);
-    
-    // Insert new record
-    const { error } = await supabase
-      .from('attendance')
-      .insert({
-        employee_id: employeeId,
-        date: today,
-        check_in_time: checkInTime,
-        status: isLate ? 'late' : 'present'
-      });
-    
-    if (error) {
-      console.error('Error recording attendance check-in:', error);
-      return false;
-    }
-    
-    toast({
-      title: isLate ? "Checked In (Late)" : "Checked In",
-      description: isLate 
-        ? `Your attendance has been recorded. You are ${calculateMinutesLate(checkInTime)} minutes late.`
-        : "Your attendance has been recorded.",
-    });
-    return true;
-  } catch (error) {
-    console.error('Error in recordAttendanceCheckIn:', error);
-    return false;
-  }
-};
+  const maxRetries = 3;
+  let retryCount = 0;
 
-// Record attendance check-out
-export const recordAttendanceCheckOut = async (employeeId: string): Promise<boolean> => {
-  try {
-    const now = new Date();
-    const today = format(now, 'yyyy-MM-dd');
-    
-    // Format check-out time as ISO string for proper timestamp with timezone
-    const checkOutTime = now.toISOString();
-    
-    // Find today's attendance record - use maybeSingle() instead of single()
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .maybeSingle();
-    
-    if (error) {
-      console.error('Error fetching attendance record:', error);
-      return false;
-    }
-    
-    if (!data) {
-      console.log('No check-in record found for today');
-      toast({
-        title: "No Check-In Record",
-        description: "No check-in record found for today. Please check in first.",
-        variant: "destructive",
-      });
-      return false;
-    }
-    
-    if (data.check_out_time) {
-      console.log('Employee already checked out today');
-      toast({
-        title: "Already Checked Out",
-        description: "You have already checked out today.",
-      });
-      return false;
-    }
-    
-    // Calculate working duration
-    const workingDuration = calculateWorkingDuration(data.check_in_time, checkOutTime);
-    
-    // Update record with check-out time
-    const { error: updateError } = await supabase
-      .from('attendance')
-      .update({
-        check_out_time: checkOutTime
-      })
-      .eq('id', data.id);
-    
-    if (updateError) {
-      console.error('Error recording attendance check-out:', updateError);
-      return false;
-    }
-    
-    toast({
-      title: "Checked Out",
-      description: `Your check-out time has been recorded. Working duration: ${workingDuration.formatted}`,
-    });
-    return true;
-  } catch (error) {
-    console.error('Error in recordAttendanceCheckOut:', error);
-    return false;
-  }
-};
-
-// Implementation of addAttendanceRecord
-export const addAttendanceRecord = async (employeeId: string): Promise<Attendance | null> => {
-  try {
-    const now = new Date();
-    const today = format(now, 'yyyy-MM-dd');
-    
-    // Check if employee already has an attendance record for today
-    const { data: existingRecord } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .single();
-    
-    if (existingRecord) {
-      // If record exists but no check-out time, update with check-out
-      if (!existingRecord.check_out_time) {
-        const checkOutTime = now.toISOString();
-        const { data, error } = await supabase
-          .from('attendance')
-          .update({ check_out_time: checkOutTime })
-          .eq('id', existingRecord.id)
-          .select()
-          .single();
-        
-        if (error) {
-          console.error('Error updating attendance record:', error);
-          return null;
-        }
-        
-        return {
-          id: data.id,
-          employeeId: data.employee_id,
-          employeeName: '',  // This will be populated by the calling function
-          checkInTime: data.check_in_time,
-          checkOutTime: data.check_out_time,
-          date: format(new Date(data.date), 'yyyy-MM-dd'),
-          status: (data.status as 'present' | 'late' | 'absent')
-        };
-      }
-      
-      return {
-        id: existingRecord.id,
-        employeeId: existingRecord.employee_id,
-        employeeName: '',  // Will be populated by the calling function
-        checkInTime: existingRecord.check_in_time,
-        checkOutTime: existingRecord.check_out_time,
-        date: format(new Date(existingRecord.date), 'yyyy-MM-dd'),
-        status: (existingRecord.status as 'present' | 'late' | 'absent')
-      };
-    }
-    
-    // If no record exists, create new check-in
-    const checkInTime = now.toISOString();
-    const { data, error } = await supabase
-      .from('attendance')
-      .insert({
-        employee_id: employeeId,
-        check_in_time: checkInTime,
-        date: today,
-        status: 'present'
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error creating attendance record:', error);
-      return null;
-    }
-    
-    return {
-      id: data.id,
-      employeeId: data.employee_id,
-      employeeName: '',  // Will be populated by the calling function
-      checkInTime: data.check_in_time,
-      checkOutTime: data.check_out_time,
-      date: format(new Date(data.date), 'yyyy-MM-dd'),
-      status: (data.status as 'present' | 'late' | 'absent')
-    };
-  } catch (error) {
-    console.error('Error in addAttendanceRecord:', error);
-    return null;
-  }
-};
-
-// Function to get admin settings with better error handling
-export const getAdminSettings = async (): Promise<AdminSettings | null> => {
-  try {
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .select('*')
-      .eq('setting_type', 'attendance_report')
-      .single();
-    
-    if (error) {
-      if (error.code === 'PGRST116') {
-        // No settings found (no rows returned)
-        console.log('No admin settings found, will return defaults');
-        return null;
-      }
-      console.error('Error fetching admin settings:', error);
-      return null;
-    }
-    
-    return data as AdminSettings;
-  } catch (error) {
-    console.error('Error in getAdminSettings:', error);
-    return null;
-  }
-};
-
-// Get admin contact info with proper defaults
-export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
-  try {
-    const settings = await getAdminSettings();
-    
-    if (!settings) {
-      return {
-        email: '',
-        isEmailShareEnabled: false
-      };
-    }
-    
-    return {
-      email: settings.email || '',
-      isEmailShareEnabled: settings.email_share_enabled || false
-    };
-  } catch (error) {
-    console.error('Error in getAdminContactInfo:', error);
-    return {
-      email: '',
-      isEmailShareEnabled: false
-    };
-  }
-};
-
-// Save admin contact info
-export const saveAdminContactInfo = async (
-  email: string,
-  emailShareEnabled: boolean
-): Promise<boolean> => {
-  try {
-    // Validation for email if email sharing is enabled
-    if (emailShareEnabled && !email) {
-      console.error('Email is required for email sharing');
-      return false;
-    }
-    
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .upsert({
-        setting_type: 'attendance_report',
-        send_method: 'email',  // Always use email
-        email: email,
-        email_share_enabled: emailShareEnabled,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'setting_type'
-      });
-    
-    if (error) {
-      console.error('Error saving admin settings:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Error in saveAdminSettings:', error);
-    return false;
-  }
-};
-
-// Get today's attendance summary statistics
-export const getTodayAttendanceSummary = async () => {
-  try {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    
-    // Get all active employees
-    const { data: employees, error: employeesError } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('status', 'active');
-      
-    if (employeesError) {
-      throw new Error('Failed to get employee count');
-    }
-    
-    const totalEmployees = employees.length;
-    
-    // Get today's attendance records
-    const { data: attendanceRecords, error: attendanceError } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('date', today);
-      
-    if (attendanceError) {
-      throw new Error('Failed to get attendance records');
-    }
-    
-    // Calculate summary statistics
-    const presentCount = attendanceRecords.length;
-    const lateCount = attendanceRecords.filter(record => record.status === 'late').length;
-    const checkedOutCount = attendanceRecords.filter(record => record.check_out_time).length;
-    const absentCount = totalEmployees - presentCount;
-    
-    return {
-      date: today,
-      totalEmployees,
-      presentCount,
-      lateCount,
-      checkedOutCount,
-      absentCount,
-      absentRate: totalEmployees > 0 ? (absentCount / totalEmployees * 100).toFixed(1) : '0',
-      lateRate: presentCount > 0 ? (lateCount / presentCount * 100).toFixed(1) : '0'
-    };
-  } catch (error) {
-    console.error('Error getting attendance summary:', error);
-    throw error;
-  }
-};
-
-// Generate summary text for email sharing
-export const generateAttendanceSummaryHTML = async (date: Date): Promise<string> => {
-  try {
-    const formattedDate = format(date, 'MMMM d, yyyy');
-    const dateString = format(date, 'yyyy-MM-dd');
-    
-    // Get attendance records for the date
-    const records = await getAttendanceByDateRange(dateString, dateString);
-    
-    // Get summary statistics
-    const summary = await getTodayAttendanceSummary();
-    
-    // Calculate average working hours and late minutes
-    let totalHoursWorked = 0;
-    let totalCheckedOut = 0;
-    let totalLateMinutes = 0;
-    
-    records.forEach(record => {
-      // Calculate late minutes
-      if (record.status === 'late' && record.minutesLate) {
-        totalLateMinutes += record.minutesLate;
-      }
-      
-      // Calculate hours worked for those who checked out
-      if (record.checkOutTime && record.checkInTime) {
-        const checkIn = new Date(record.checkInTime);
-        const checkOut = new Date(record.checkOutTime);
-        const hoursWorked = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
-        totalHoursWorked += hoursWorked;
-        totalCheckedOut++;
-      }
-    });
-    
-    const avgHoursWorked = totalCheckedOut > 0 ? (totalHoursWorked / totalCheckedOut).toFixed(1) : '0';
-    const avgLateMinutes = summary.lateCount > 0 ? Math.round(totalLateMinutes / summary.lateCount) : 0;
-    
-    // Create HTML email content
-    let htmlContent = `
-      <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          h1 { color: #2563eb; text-align: center; }
-          h2 { color: #4b5563; margin-top: 20px; }
-          .summary-box { background-color: #f3f4f6; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
-          .stat { margin-bottom: 10px; }
-          .label { font-weight: bold; }
-          table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-          th { background-color: #e5e7eb; text-align: left; padding: 8px; }
-          td { border-bottom: 1px solid #e5e7eb; padding: 8px; }
-          .late { color: #ef4444; }
-          .footer { margin-top: 30px; font-size: 12px; color: #6b7280; text-align: center; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>Daily Attendance Summary</h1>
-          <p style="text-align: center;"><strong>${formattedDate}</strong></p>
-          
-          <div class="summary-box">
-            <div class="stat"><span class="label">Total Employees:</span> ${summary.totalEmployees}</div>
-            <div class="stat"><span class="label">Present Today:</span> ${summary.presentCount} (${(summary.presentCount / summary.totalEmployees * 100).toFixed(1)}%)</div>
-            <div class="stat"><span class="label">Absent Today:</span> ${summary.absentCount} (${summary.absentRate}%)</div>
-            <div class="stat"><span class="label">Late Arrivals:</span> ${summary.lateCount} employees`;
-    
-    if (summary.lateCount > 0) {
-      htmlContent += ` (avg ${avgLateMinutes} mins late)`;
-    }
-    
-    htmlContent += `</div>
-            <div class="stat"><span class="label">Checked Out:</span> ${summary.checkedOutCount} employees</div>`;
-    
-    if (totalCheckedOut > 0) {
-      htmlContent += `<div class="stat"><span class="label">Average Hours Worked:</span> ${avgHoursWorked} hours</div>`;
-    }
-    
-    htmlContent += `</div>`;
-    
-    // Late employees section
-    if (summary.lateCount > 0) {
-      htmlContent += `
-        <h2>Late Employees</h2>
-        <table>
-          <tr>
-            <th>Name</th>
-            <th>Check-in Time</th>
-            <th>Minutes Late</th>
-          </tr>`;
-          
-      records
-        .filter(r => r.status === 'late')
-        .forEach(record => {
-          const checkInTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          htmlContent += `
-            <tr>
-              <td>${record.employeeName}</td>
-              <td>${checkInTime}</td>
-              <td class="late">${record.minutesLate} mins</td>
-            </tr>`;
-        });
-        
-      htmlContent += `</table>`;
-    }
-    
-    // Attendance details section
-    if (records.length > 0) {
-      htmlContent += `
-        <h2>Attendance Details</h2>
-        <table>
-          <tr>
-            <th>Name</th>
-            <th>Status</th>
-            <th>Check-in</th>
-            <th>Check-out</th>
-            <th>Duration</th>
-          </tr>`;
-          
-      records.forEach(record => {
-        const checkInTime = new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const checkOutTime = record.checkOutTime 
-          ? new Date(record.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-          : 'Still working';
-          
-        htmlContent += `
-          <tr>
-            <td>${record.employeeName}</td>
-            <td>${record.status === 'late' ? '<span class="late">Late</span>' : 'Present'}</td>
-            <td>${checkInTime}</td>
-            <td>${checkOutTime}</td>
-            <td>${record.workingDuration}</td>
-          </tr>`;
-      });
-        
-      htmlContent += `</table>`;
-    } else {
-      htmlContent += `<p>No attendance records for this date.</p>`;
-    }
-    
-    htmlContent += `
-          <div class="footer">
-            <p>This is an automated attendance summary. For any questions, please contact HR.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-    
-    return htmlContent;
-  } catch (error) {
-    console.error('Error generating attendance summary HTML:', error);
-    throw error;
-  }
-};
-
-// Auto share attendance summary with improved error handling
-export const autoShareAttendanceSummary = async (): Promise<boolean> => {
-  try {
-    console.log("Attempting to auto-share attendance summary...");
-    
-    // Get admin settings
-    const contactInfo = await getAdminContactInfo();
-    
-    // Get today's date
-    const today = new Date();
-    const subject = `Attendance Summary for ${format(today, 'MMMM d, yyyy')}`;
-    
-    // Generate HTML content
-    const htmlContent = await generateAttendanceSummaryHTML(today);
-    
-    // Share via Email if enabled
-    if (contactInfo.isEmailShareEnabled && contactInfo.email) {
-      const emailSuccess = await shareViaEmail(htmlContent, contactInfo.email, subject);
-      return emailSuccess;
-    }
-    
-    return false;
-  } catch (error) {
-    console.error('Error in autoShareAttendanceSummary:', error);
-    return false;
-  }
-};
-
-// Share via Email
-export const shareViaEmail = async (htmlContent: string, email: string, subject: string): Promise<boolean> => {
-  try {
-    // Validate email
-    if (!email) {
-      console.error("No email provided for email sharing");
-      return false;
-    }
-    
-    // Encode the subject for URL
-    const encodedSubject = encodeURIComponent(subject);
-    
-    // Create a plain text version from HTML
-    const plainText = htmlContent.replace(/<[^>]*>?/gm, '')
-                                .replace(/\s+/g, ' ')
-                                .trim();
-    const encodedBody = encodeURIComponent(plainText);
-    
-    // Email URL scheme 
-    const emailUrl = `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
-    
-    console.log("Opening email client");
-    
-    // Open in a new window
-    window.open(emailUrl, '_blank');
-    
-    return true;
-  } catch (error) {
-    console.error('Error in shareViaEmail:', error);
-    return false;
-  }
-};
-
-// Setup auto report scheduling with improved error handling
-export const setupAutoReportScheduling = () => {
-  console.log("Setting up auto report scheduling...");
-  
-  // Check if already running to avoid duplicates
-  if ((window as any).__autoReportScheduled) {
-    console.log("Auto report already scheduled, skipping setup");
-    return;
-  }
-  
-  // Mark as scheduled
-  (window as any).__autoReportScheduled = true;
-  
-  // Function to check if it's time to send report (6:00 PM)
-  const checkAndSendReport = async () => {
+  const attemptCheckIn = async (): Promise<boolean> => {
     try {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
+      // Log the start of the operation
+      console.log(`Attempt ${retryCount + 1} - Starting attendance check-in for employee:`, employeeId);
+
+      // First check if we have an active session and refresh if needed
+      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      // Schedule for 6:00 PM (18:00)
-      if (hours === 18 && minutes === 0) {
-        console.log("It's report time (6:00 PM), attempting to send report...");
-        const success = await autoShareAttendanceSummary();
-        console.log("Auto report sharing result:", success ? "Successful" : "Failed");
+      // If no session, try to refresh it
+      if (!session && !sessionError) {
+        console.log('No active session, attempting to refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshData?.session) {
+          console.log('Session refreshed successfully');
+          session = refreshData.session;
+        } else {
+          console.error('Session refresh failed:', refreshError);
+          sessionError = refreshError;
+        }
       }
+      
+      console.log('Session check result:', session ? 'Active session found' : 'No active session');
+      
+      if (!session || sessionError) {
+        // Silently redirect to login page without showing error message
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+        return false;
+      }
+      
+      // Rest of the implementation remains the same
+      return true;
     } catch (error) {
-      console.error("Error in checkAndSendReport:", error);
+      console.error('Error in attemptCheckIn:', error);
+      return false;
     }
   };
-  
-  // Check every minute
-  setInterval(checkAndSendReport, 60000);
-  
-  // Also check on startup (after a brief delay)
-  setTimeout(checkAndSendReport, 5000);
-  
-  console.log("Auto report scheduling setup complete");
-};
+
+  return attemptCheckIn();
+    try {
+      // Log the start of the operation
+      console.log(`Attempt ${retryCount + 1} - Starting attendance check-in for employee:`, employeeId);
+
+      // First check if we have an active session and refresh if needed
+      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      // If no session, try to refresh it
+      if (!session && !sessionError) {
+        console.log('No active session, attempting to refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshData?.session) {
+          console.log('Session refreshed successfully');
+          session = refreshData.session;
+        } else {
+          console.error('Session refresh failed:', refreshError);
+          sessionError = refreshError;
+        }
+      }
+
+      console.log('Session check result:', session ? 'Active session found' : 'No active session');
+      
+      if (!session || sessionError) {
+        // Silently redirect to login page without showing error message
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+        return false;
+      }
+
+      // Verify employee exists first with timeout
+      console.log('Verifying employee existence...');
+      const employeePromise = new Promise<Employee>(async (resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Employee verification timeout')), 10000);
+        try {
+          const { data, error } = await supabase
+            .from('employees')
+            .select('id, first_name, last_name')
+            .eq('id', employeeId)
+            .single();
+          clearTimeout(timeout);
+          if (error) reject(error);
+          if (!data) {
+            reject(new Error('No employee data found'));
+            return;
+          }
+          resolve(data as Employee);
+        } catch (err) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+
+      const employee: Employee | null = await employeePromise.catch((error) => {
+        console.error('Employee verification error:', error);
+        toast({
+          title: "Employee Verification Failed",
+          description: "Could not verify employee ID. Please try again.",
+          variant: "destructive"
+        });
+        return null;
+      });
+
+      if (!employee) {
+        return false;
+      }
+
+      // At this point, employee is guaranteed to be of type Employee
+      const verifiedEmployee: Employee = employee;
+      console.log('Employee verified:', verifiedEmployee.first_name, verifiedEmployee.last_name);
+
+      // Get current date/time in the correct format
+      const now = new Date();
+      const today = format(startOfDay(now), 'yyyy-MM-dd');
+      const checkInTime = now.toISOString();
+      
+      // Check for existing attendance with retry logic
+      let existingRecord: { id: string; check_in_time: string; status: string } | null = null;
+      try {
+        // Check for existing attendance record
+        const { data, error: checkError } = await supabase
+          .from('attendance')
+          .select('id, check_in_time, status')
+          .eq('employee_id', employeeId)
+          .eq('date', today)
+          .single();
+
+        if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is the 'not found' error
+          console.error('Error checking existing attendance:', checkError);
+          throw checkError;
+        }
+
+        existingRecord = data;
+
+        if (existingRecord) {
+          console.log('Attendance record already exists for today');
+          return true;
+        }
+
+        // Create new attendance record
+        const { error: insertError } = await supabase
+          .from('attendance')
+          .insert([
+            {
+              employee_id: employeeId,
+              date: today,
+              check_in_time: checkInTime,
+              status: 'present'
+            }
+          ]);
+
+        if (insertError) {
+          console.error('Error inserting attendance record:', insertError);
+          throw insertError;
+        }
+
+        console.log('Successfully recorded attendance check-in');
+        return true;
+      } catch (error) {
+        console.error('Error in attendance check-in:', error);
+        toast({
+          title: "Error Checking Attendance",
+          description: "Failed to verify existing attendance. Retrying...",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      if (existingRecord) {
+        console.log('Found existing attendance record:', existingRecord);
+        toast({
+          title: "Already Checked In",
+          description: `You have already checked in today at ${format(new Date(existingRecord.check_in_time), 'HH:mm')}`,
+        });
+        return false;
+      }
+      
+      // Quick check-in process
+      const currentTime = new Date().toISOString();
+      const lateDuration = calculateLateDuration(currentTime);
+      const isLate = lateDuration.totalMinutes > 0;
+      
+      // Prepare attendance record with all necessary data
+      const attendanceRecord = {
+        employee_id: employeeId,
+        date: today,
+        check_in_time: checkInTime,
+        status: isLate ? 'late' : 'present',
+        late_duration: isLate ? lateDuration.totalMinutes : 0,
+        device_info: typeof window !== 'undefined' ? navigator.userAgent : 'Unknown',
+        check_in_location: 'office',
+        check_in_attempts: 1
+      };
+
+      console.log('Inserting attendance record:', attendanceRecord);
+      
+      // Verify database connection and check for existing record in a single query
+      try {
+        const { data: existingData, error: existingError } = await supabase
+          .from('attendance')
+          .select('id, check_in_time')
+          .eq('employee_id', employeeId)
+          .eq('date', today)
+          .maybeSingle();
+
+        if (existingError) {
+          console.error('Database check failed:', existingError);
+          toast({
+            title: "Connection Error",
+            description: "Unable to verify attendance status. Please try again.",
+            variant: "destructive"
+          });
+          return false;
+        }
+
+        if (existingData) {
+          console.log('Found existing attendance record:', existingData);
+          toast({
+            title: "Already Checked In",
+            description: `You have already checked in today at ${format(new Date(existingData.check_in_time), 'HH:mm')}`,
+          });
+          return false;
+        }
+
+        console.log('No existing attendance record found, proceeding with check-in');
+      } catch (error) {
+        console.error('Database check failed:', error);
+        toast({
+          title: "Error",
+          description: "Unable to verify attendance status. Please try again.",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      // Insert new record with timeout
+      const insertPromise = new Promise(async (resolve, reject) => {
+        const timeout = setTimeout(() => {
+          console.error('Insert operation timed out after 15 seconds');
+          reject(new Error('Insert timeout'));
+        }, 15000);
+        
+        try {
+          console.log('Attempting to insert attendance record...');
+          const { data, error } = await supabase
+            .from('attendance')
+            .insert([attendanceRecord])
+            .select('id, check_in_time, status')
+            .single();
+
+          clearTimeout(timeout);
+
+          if (error) {
+            console.error('Insert error:', error);
+            reject(error);
+            return;
+          }
+
+          if (!data) {
+            console.error('No data returned after insert');
+            reject(new Error('Failed to record attendance'));
+            return;
+          }
+
+          // Verify the insert was successful
+          const verifyData = await supabase
+            .from('attendance')
+            .select('id, check_in_time, status')
+            .eq('id', data.id)
+            .single();
+
+          if (verifyData.error || !verifyData.data) {
+            console.error('Verification failed after insert:', verifyData.error);
+            reject(new Error('Failed to verify attendance record'));
+            return;
+          }
+
+          resolve(data);
+        } catch (err) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+
+      const insertedData = await insertPromise.catch(error => {
+        console.error('Error recording attendance check-in:', error);
+        console.error('Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        
+        // Check for specific database errors
+        if (error.code === '23505') {
+          toast({
+            title: "Already Checked In",
+            description: "You have already checked in today.",
+          });
+        } else if (error.code === '42501') {
+          toast({
+            title: "Permission Denied",
+            description: "You don't have permission to record attendance. Please contact admin.",
+          });
+        } else {
+          toast({
+            title: "Error",
+            description: "An unexpected error occurred. Please try again.",
+          });
+        }
+        return null;
+      });
+
+      if (!insertedData) return false;
+      return true;
+  } catch (error) {
+    console.error('Error in attemptCheckIn:', error);
+    return false;
+  }
+  return false; // Add default return for all code paths
+}
+
+async function checkAttendanceStatus(employeeId: string): Promise<boolean> {
+  try {
+    const now = new Date();
+    const today = format(now, 'yyyy-MM-dd');
+
+    // Quick check for existing attendance
+    const { data: existingRecord, error: checkError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw new Error('Failed to check attendance status');
+    }
+
+    // If already checked in, show error
+    if (existingRecord) {
+      if (typeof window !== 'undefined') {
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          await Swal.fire({
+            icon: 'error',
+            title: 'Already Checked In',
+            text: 'You have already checked in for today.',
+            timer: 2000,
+            timerProgressBar: true,
+            showConfirmButton: false
+          });
+        }
+      }
+      return false;
+    }
+
+    // Calculate late duration
+    const lateDuration = calculateLateDuration(now.toISOString());
+
+    // Insert attendance record
+    const { error: insertError } = await supabase
+      .from('attendance')
+      .insert({
+        employee_id: employeeId,
+        date: today,
+        check_in_time: now.toISOString(),
+        late_duration: lateDuration.totalMinutes,
+        status: lateDuration.totalMinutes > 0 ? 'late' : 'on_time'
+      });
+
+    if (insertError) {
+      throw new Error('Failed to record attendance');
+    }
+
+    // Show quick success message
+    if (typeof window !== 'undefined') {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        await Swal.fire({
+          icon: 'success',
+          title: 'Check-in Successful',
+          html: `<div>
+            <p>Checked in at ${format(now, 'HH:mm')}</p>
+            ${lateDuration.totalMinutes > 0 ? 
+              `<p class="text-warning">You are ${lateDuration.formatted} late</p>
+               <p class="text-sm">Expected arrival: ${lateDuration.expectedTime}</p>` : 
+              '<p class="text-success">You are on time!</p>'}
+          </div>`,
+          timer: 2000,
+          timerProgressBar: true,
+          showConfirmButton: false
+        });
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error('Error during check-in:', error);
+    if (typeof window !== 'undefined') {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        await Swal.fire({
+          icon: 'error',
+          title: 'Check-in Failed',
+          text: 'Please try again or contact support.',
+          timer: 2000,
+          timerProgressBar: true,
+          showConfirmButton: false
+        });
+      }
+    }
+    return false;
+  }
+
+
+// Get admin contact info with WhatsApp settings
+async function getAdminContactInfo(): Promise<AdminContactInfo> {
+  try {
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('*')
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No settings found, return defaults
+        return {
+          whatsappNumber: '',
+          isWhatsappShareEnabled: false
+        };
+      }
+      throw error;
+    }
+
+    return {
+      whatsappNumber: data.whatsapp_number || '',
+      isWhatsappShareEnabled: data.is_whatsapp_share_enabled || false
+    };
+  } catch (error) {
+    console.error('Error fetching admin contact info:', error);
+    throw error;
+  }
+}
+
+}
+
+// Enhanced setupAutoReportScheduling with multiple report times
+

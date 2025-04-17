@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Table, 
@@ -191,7 +190,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                   <TableHead>
                     <div className="flex items-center">
                       <Clock className="mr-1 h-4 w-4" />
-                      Late (mins)
+                      Late Duration
                     </div>
                   </TableHead>
                   <TableHead>
@@ -244,17 +243,29 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                       </TableCell>
                       <TableCell>
                         {record.status === 'late' ? (
-                          <span className="text-destructive font-medium">
-                            {record.minutesLate || 0}
-                          </span>
+                          <div className="text-destructive">
+                            <div className="font-medium">
+                              {record.lateDuration}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Expected: {record.expectedTime}
+                              <br />
+                              Actual: {new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </div>
                         ) : (
-                          '0'
+                          <span className="text-muted-foreground">On time</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <span className="whitespace-nowrap">
-                          {record.workingDuration || 'Calculating...'}
-                        </span>
+                        <div>
+                          <div className="font-medium whitespace-nowrap">
+                            {record.workingDuration || 'Calculating...'}
+                          </div>
+                          <div className="text-xs text-muted-foreground whitespace-nowrap">
+                            {record.fullTimeRange || '-'}
+                          </div>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))

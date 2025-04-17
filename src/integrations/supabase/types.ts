@@ -6,35 +6,32 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export type Database = {
+export interface Database {
   public: {
     Tables: {
       admin_settings: {
         Row: {
-          auto_share_enabled: boolean | null
-          created_at: string | null
           id: string
-          phone_number: string | null
-          send_method: string | null
           setting_type: string
+          whatsapp_number: string | null
+          is_whatsapp_share_enabled: boolean | null
+          created_at: string | null
           updated_at: string | null
         }
         Insert: {
-          auto_share_enabled?: boolean | null
-          created_at?: string | null
           id?: string
-          phone_number?: string | null
-          send_method?: string | null
           setting_type: string
+          whatsapp_number?: string | null
+          is_whatsapp_share_enabled?: boolean | null
+          created_at?: string | null
           updated_at?: string | null
         }
         Update: {
-          auto_share_enabled?: boolean | null
-          created_at?: string | null
           id?: string
-          phone_number?: string | null
-          send_method?: string | null
           setting_type?: string
+          whatsapp_number?: string | null
+          is_whatsapp_share_enabled?: boolean | null
+          created_at?: string | null
           updated_at?: string | null
         }
         Relationships: []

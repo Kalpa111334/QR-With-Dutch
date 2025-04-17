@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Users, MoreVertical, Pencil, Trash } from 'lucide-react';
 import { DateRange } from 'react-day-picker';
@@ -95,7 +94,7 @@ const RosterManagement: React.FC = () => {
         
         toast({
           title: 'Roster Created',
-          description: `Schedule created for ${employee.firstName} ${employee.lastName}`,
+          description: `Schedule created for ${employee.first_name} ${employee.last_name}`,
         });
         
         // Reset form
@@ -207,17 +206,19 @@ const RosterManagement: React.FC = () => {
           <CardContent className="space-y-4">
             {/* Employee Selection */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Select Employee</label>
+              <label htmlFor="employee-select" className="text-sm font-medium">Select Employee</label>
               <select 
-                className="w-full border rounded-md p-2"
+                id="employee-select"
+                className="w-full border rounded-md p-2 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={selectedEmployee}
                 onChange={(e) => setSelectedEmployee(e.target.value)}
                 disabled={loading}
+                aria-label="Select employee"
               >
                 <option value="">Select an employee</option>
                 {employees.map(employee => (
                   <option key={employee.id} value={employee.id}>
-                    {employee.firstName} {employee.lastName}
+                    {employee.first_name} {employee.last_name}
                   </option>
                 ))}
               </select>
@@ -265,12 +266,14 @@ const RosterManagement: React.FC = () => {
             
             {/* Shift Selection */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Select Shift</label>
+              <label htmlFor="shift-select" className="text-sm font-medium">Select Shift</label>
               <select 
+                id="shift-select"
                 className="w-full border rounded-md p-2"
                 value={selectedShift}
                 onChange={(e) => setSelectedShift(e.target.value as 'morning' | 'evening' | 'night')}
                 disabled={loading}
+                aria-label="Select shift"
               >
                 <option value="morning">Morning Shift (6AM - 2PM)</option>
                 <option value="evening">Evening Shift (2PM - 10PM)</option>

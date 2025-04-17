@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { 
   Table, 
@@ -185,7 +184,7 @@ const EmployeeTable: React.FC<EmployeeTableProps> = ({
                       {employee.status}
                     </Badge>
                   </TableCell>
-                  <TableCell>{new Date(employee.joinDate).toLocaleDateString()}</TableCell>
+                  <TableCell>{employee.join_date ? new Date(employee.join_date).toLocaleDateString() : 'N/A'}</TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

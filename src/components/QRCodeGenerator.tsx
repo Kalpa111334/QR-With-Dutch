@@ -1,4 +1,3 @@
-
 import React, { useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -54,8 +53,10 @@ const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({ employee }) => {
   // Create QR code data that includes employee ID
   const qrCodeData = JSON.stringify({
     id: employee.id,
+    type: 'employee',
     name: employee.name,
-    department: employee.department
+    department: employee.department,
+    status: employee.status
   });
 
   return (

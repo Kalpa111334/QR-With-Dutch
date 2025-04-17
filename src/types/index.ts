@@ -1,18 +1,16 @@
-
 export interface Employee {
   id: string;
-  firstName: string;
-  lastName: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  position?: string;
-  department?: string;
-  hireDate?: string;
-  joinDate?: string;
-  status?: string;
-  departmentId?: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  department: string | null;
+  position: string | null;
+  phone: string | null;
+  join_date: string;
+  status: 'active' | 'inactive';
+  name: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Attendance {
@@ -21,14 +19,18 @@ export interface Attendance {
   checkInTime: string;
   checkOutTime?: string;
   date: string;
-  createdAt?: string; // Making this optional to fix the TypeScript errors
+  createdAt?: string;
   status: string;
   employee?: Employee;
   // Additional properties used in components
   employeeName?: string;
   minutesLate?: number;
+  lateDuration?: string;
+  expectedTime?: string;
   workingDuration?: string;
   workingDurationMinutes?: number;
+  workingHours?: number;
+  fullTimeRange?: string;
 }
 
 export interface GatePass {
@@ -36,15 +38,25 @@ export interface GatePass {
   employeeId: string;
   employeeName: string;
   passCode: string;
-  validity: 'single' | 'day' | 'week' | 'month';
+  validity: 'single' | 'day' | 'week' | 'month' | 'custom';
   type: 'entry' | 'exit' | 'both';
   reason: string;
   status: 'active' | 'used' | 'expired' | 'revoked';
   createdAt: string;
   expiresAt: string;
-  usedAt?: string;
-  expectedExitTime?: string;
-  expectedReturnTime?: string;
-  exitTime?: string;
-  returnTime?: string;
+  usedAt?: string | null;
+  usedBy?: string | null;
+  expectedExitTime?: string | null;
+  expectedReturnTime?: string | null;
+  exitTime?: string | null;
+  returnTime?: string | null;
+  lastUsedAt?: string | null;
+  useCount: number;
+  revokedAt?: string | null;
+  revokedBy?: string | null;
+  revocationReason?: string | null;
+  customValidity?: {
+    hours: number;
+    minutes: number;
+  };
 }

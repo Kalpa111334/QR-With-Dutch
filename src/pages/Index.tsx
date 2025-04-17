@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -74,7 +73,10 @@ const Index = () => {
   const handleAddEmployee = () => {
     setSelectedEmployee(undefined);
     setShowEmployeeForm(true);
-    setActiveTab('employees');
+    // Switch tab after state updates
+    setTimeout(() => {
+      setActiveTab('employees');
+    }, 0);
   };
   
   const handleEditEmployee = (employee: Employee) => {

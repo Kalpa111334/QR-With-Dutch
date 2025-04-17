@@ -6,6 +6,7 @@ import Papa from 'papaparse';
 
 export const getEmployees = async (): Promise<Employee[]> => {
   try {
+    console.log('Fetching employees...');
     const { data, error } = await supabase
       .from('employees')
       .select(`
@@ -18,35 +19,42 @@ export const getEmployees = async (): Promise<Employee[]> => {
         join_date,
         status,
         department_id,
-        departments(name)
-      `);
+        departments(name),
+        created_at,
+        updated_at
+      `)
+      .eq('status', 'active'); // Only fetch active employees
     
     if (error) {
       console.error('Error fetching employees:', error);
-      toast({
-        title: 'Error fetching employees',
-        description: error.message,
-        variant: 'destructive',
-      });
+      throw new Error(`Failed to fetch employees: ${error.message}`);
+    }
+    
+    if (!data) {
+      console.log('No employees found');
       return [];
     }
+    
+    console.log('Fetched employees:', data);
     
     // Transform the data to match our Employee type
     return data.map(emp => ({
       id: emp.id,
-      firstName: emp.first_name || '',
-      lastName: emp.last_name || '',
-      email: emp.email || '',
-      department: emp.departments?.name || '',
-      phone: emp.phone || '',
-      position: emp.position || '',
-      joinDate: emp.join_date,
+      first_name: emp.first_name || '',
+      last_name: emp.last_name || '',
+      email: emp.email,
+      department: emp.departments?.name || null,
+      phone: emp.phone,
+      position: emp.position,
+      join_date: emp.join_date || new Date().toISOString().split('T')[0],
       status: emp.status as 'active' | 'inactive',
-      name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(), // Ensure name is always set
+      name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+      created_at: emp.created_at,
+      updated_at: emp.updated_at
     }));
   } catch (error) {
-    console.error('Error fetching employees:', error);
-    return [];
+    console.error('Error in getEmployees:', error);
+    throw error;
   }
 };
 
@@ -72,15 +80,15 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
     const { data, error } = await supabase
       .from('employees')
       .insert({
-        first_name: employee.firstName,
-        last_name: employee.lastName,
+        first_name: employee.first_name,
+        last_name: employee.last_name,
         email: employee.email,
         department_id: deptData.id,
         phone: employee.phone,
         position: employee.position,
-        join_date: employee.joinDate,
+        join_date: employee.join_date,
         status: employee.status,
-        name: `${employee.firstName} ${employee.lastName}` // Keep name field updated for backward compatibility
+        name: `${employee.first_name} ${employee.last_name}` // Keep name field updated for backward compatibility
       })
       .select()
       .single();
@@ -98,15 +106,15 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
     // Return the new employee with the department name
     return {
       id: data.id,
-      firstName: data.first_name || '',
-      lastName: data.last_name || '',
-      email: data.email || '',
+      first_name: data.first_name || '',
+      last_name: data.last_name || '',
+      email: data.email,
       department: employee.department,
-      phone: data.phone || '',
-      position: data.position || '',
-      joinDate: data.join_date,
+      phone: data.phone,
+      position: data.position,
+      join_date: data.join_date,
       status: data.status as 'active' | 'inactive',
-      name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
+      name: `${data.first_name || ''} ${data.last_name || ''}`.trim()
     };
   } catch (error) {
     console.error('Error adding employee:', error);
@@ -136,15 +144,15 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<Employe
     const { data, error } = await supabase
       .from('employees')
       .update({
-        first_name: updatedEmployee.firstName,
-        last_name: updatedEmployee.lastName,
+        first_name: updatedEmployee.first_name,
+        last_name: updatedEmployee.last_name,
         email: updatedEmployee.email,
         department_id: deptData.id,
         phone: updatedEmployee.phone,
         position: updatedEmployee.position,
-        join_date: updatedEmployee.joinDate,
+        join_date: updatedEmployee.join_date,
         status: updatedEmployee.status,
-        name: `${updatedEmployee.firstName} ${updatedEmployee.lastName}`, // Keep name field updated
+        name: `${updatedEmployee.first_name} ${updatedEmployee.last_name}`,
         updated_at: new Date().toISOString(),
       })
       .eq('id', updatedEmployee.id)
@@ -164,13 +172,13 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<Employe
     // Return the updated employee with the department name
     return {
       id: data.id,
-      firstName: data.first_name || '',
-      lastName: data.last_name || '',
+      first_name: data.first_name || '',
+      last_name: data.last_name || '',
       email: data.email || '',
       department: updatedEmployee.department,
       phone: data.phone || '',
       position: data.position || '',
-      joinDate: data.join_date,
+      join_date: data.join_date,
       status: data.status as 'active' | 'inactive',
       name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
     };
@@ -230,13 +238,13 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
     // Transform to match our Employee type
     return {
       id: data.id,
-      firstName: data.first_name || '',
-      lastName: data.last_name || '',
+      first_name: data.first_name || '',
+      last_name: data.last_name || '',
       email: data.email || '',
       department: data.departments?.name || '',
       phone: data.phone || '',
       position: data.position || '',
-      joinDate: data.join_date,
+      join_date: data.join_date,
       status: data.status as 'active' | 'inactive',
       name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
     };
@@ -246,8 +254,39 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
   }
 };
 
+let cachedDepartments: string[] | null = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 export const getDepartments = async (): Promise<string[]> => {
   try {
+    // Return cached departments if they exist and are not expired
+    const now = Date.now();
+    if (cachedDepartments && (now - lastFetchTime) < CACHE_DURATION) {
+      return cachedDepartments;
+    }
+
+    // Default departments list
+    const defaultDepartments = [
+      'Dutch Activity',
+      'Kitchen',
+      'Food & Beverage Department',
+      'Butchery',
+      'Operations',
+      'Maintenance',
+      'Reservations',
+      'House Keeping',
+      'Pastry Kitchen',
+      'Stores',
+      'Purchasing & Stores',
+      'Accounts Department',
+      'Administration',
+      'Security Department',
+      'Transport Section',
+      'Human Resources',
+    ];
+
+    console.log('Fetching departments from database...');
     const { data, error } = await supabase
       .from('departments')
       .select('name')
@@ -255,13 +294,101 @@ export const getDepartments = async (): Promise<string[]> => {
     
     if (error) {
       console.error('Error fetching departments:', error);
-      return [];
+      throw new Error(`Failed to fetch departments: ${error.message}`);
     }
     
-    return data.map(dept => dept.name);
+    if (!data || data.length === 0) {
+      console.log('No departments found, creating default departments...');
+      
+      // Create departments one by one to handle RLS gracefully
+      for (const deptName of defaultDepartments) {
+        const { error: insertError } = await supabase
+          .from('departments')
+          .insert({ name: deptName })
+          .select('name')
+          .single();
+        
+        if (insertError) {
+          console.warn(`Failed to create department ${deptName}:`, insertError);
+        }
+      }
+
+      // Fetch the departments again after creation
+      const { data: refetchedData, error: refetchError } = await supabase
+        .from('departments')
+        .select('name')
+        .order('name');
+
+      if (refetchError || !refetchedData) {
+        console.warn('Failed to fetch departments after creation:', refetchError);
+        cachedDepartments = defaultDepartments;
+        lastFetchTime = now;
+        return defaultDepartments;
+      }
+
+      cachedDepartments = refetchedData.map(dept => dept.name);
+      lastFetchTime = now;
+      return cachedDepartments;
+    }
+    
+    // Update cache with existing departments
+    cachedDepartments = data.map(dept => dept.name);
+    lastFetchTime = now;
+    
+    // Check if we need to add any missing departments
+    const existingDepts = new Set(cachedDepartments);
+    const missingDepts = defaultDepartments.filter(dept => !existingDepts.has(dept));
+    
+    if (missingDepts.length > 0) {
+      console.log('Adding missing departments:', missingDepts);
+      
+      // Add missing departments one by one
+      for (const deptName of missingDepts) {
+        const { error: insertError } = await supabase
+          .from('departments')
+          .insert({ name: deptName })
+          .select('name')
+          .single();
+        
+        if (insertError) {
+          console.warn(`Failed to create department ${deptName}:`, insertError);
+        } else {
+          cachedDepartments.push(deptName);
+        }
+      }
+    }
+    
+    console.log('Available departments:', cachedDepartments);
+    return cachedDepartments;
   } catch (error) {
-    console.error('Error fetching departments:', error);
-    return [];
+    console.error('Error in getDepartments:', error);
+    // Return cached departments if available, otherwise return default list
+    return cachedDepartments || [
+      'IT',
+      'HR',
+      'Finance',
+      'Marketing',
+      'Sales',
+      'Operations',
+      'Engineering',
+      'Research',
+      'Development',
+      'Customer Service',
+      'Administration',
+      'Transport',
+      'Maintenance',
+      'Security',
+      'Dutch Activity',
+      'Kitchen',
+      'Food & Beverage Department',
+      'Butchery',
+      'Reservations',
+      'House Keeping',
+      'Pastry Kitchen',
+      'Stores',
+      'Purchasing & Stores',
+      'Accounts Department'
+    ];
   }
 };
 
@@ -271,7 +398,7 @@ export const bulkImportEmployees = async (
 ): Promise<{ total: number; success: number; failed: number; errors: string[] }> => {
   try {
     if (onProgress) onProgress(10);
-    const fileData = await parseFileToEmployeeData(file);
+    const fileData = await parseFileToEmployees(file);
     if (onProgress) onProgress(30);
     
     const results = {
@@ -292,13 +419,13 @@ export const bulkImportEmployees = async (
       
       try {
         // Validate required fields
-        if (!row.firstName) {
+        if (!row.first_name) {
           results.failed++;
           results.errors.push(`Row ${rowIndex}: Missing first name`);
           continue;
         }
         
-        if (!row.lastName) {
+        if (!row.last_name) {
           results.failed++;
           results.errors.push(`Row ${rowIndex}: Missing last name`);
           continue;
@@ -325,22 +452,22 @@ export const bulkImportEmployees = async (
         
         // Add employee
         const result = await addEmployee({
-          firstName: row.firstName,
-          lastName: row.lastName,
+          first_name: row.first_name,
+          last_name: row.last_name,
           email: row.email,
           department: row.department,
           position: row.position || '',
           phone: row.phone || '',
-          joinDate: row.joinDate || new Date().toISOString().split('T')[0],
+          join_date: row.join_date || new Date().toISOString().split('T')[0],
           status: (row.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
-          name: `${row.firstName} ${row.lastName}`
+          name: `${row.first_name} ${row.last_name}`
         });
         
         if (result) {
           results.success++;
         } else {
           results.failed++;
-          results.errors.push(`Row ${rowIndex}: Failed to add employee (${row.firstName} ${row.lastName})`);
+          results.errors.push(`Row ${rowIndex}: Failed to add employee (${row.first_name} ${row.last_name})`);
         }
       } catch (error) {
         results.failed++;
@@ -368,7 +495,7 @@ export const bulkImportEmployees = async (
 };
 
 // Helper function to parse either CSV or XLSX files
-async function parseFileToEmployeeData(file: File): Promise<Partial<Employee>[]> {
+async function parseFileToEmployees(file: File): Promise<Partial<Employee>[]> {
   return new Promise((resolve, reject) => {
     if (file.name.endsWith('.csv')) {
       Papa.parse(file, {
@@ -376,6 +503,13 @@ async function parseFileToEmployeeData(file: File): Promise<Partial<Employee>[]>
         skipEmptyLines: true,
         complete: (results) => {
           try {
+            if (results.errors && results.errors.length > 0) {
+              const errorMessage = results.errors
+                .map(err => `Row ${err.row + 1}: ${err.message}`)
+                .join('\n');
+              reject(new Error(`CSV parsing errors:\n${errorMessage}`));
+              return;
+            }
             const employees = results.data.map(mapRowToEmployee);
             resolve(employees);
           } catch (err) {
@@ -387,43 +521,60 @@ async function parseFileToEmployeeData(file: File): Promise<Partial<Employee>[]>
         }
       });
     } else if (file.name.endsWith('.xlsx')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
+      (async () => {
         try {
-          const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: 'array' });
+          const workbook = XLSX.read(await file.arrayBuffer());
           
-          // Get first sheet
-          const sheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            reject(new Error('Excel file does not contain any sheets'));
+            return;
+          }
           
-          // Convert to JSON
-          const jsonData = XLSX.utils.sheet_to_json(worksheet);
-          const employees = jsonData.map(mapRowToEmployee);
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          if (!firstSheet) {
+            reject(new Error('First sheet is empty or invalid'));
+            return;
+          }
+          
+          const data = XLSX.utils.sheet_to_json(firstSheet);
+          if (!Array.isArray(data) || data.length === 0) {
+            reject(new Error('No data found in the Excel file'));
+            return;
+          }
+          
+          const employees = data.map(mapRowToEmployee);
           resolve(employees);
-        } catch (err) {
-          reject(new Error(`Failed to parse Excel file: ${err}`));
+        } catch (error) {
+          reject(new Error(`Failed to parse Excel file: ${error.message || 'Unknown error'}`));
         }
-      };
-      reader.onerror = () => reject(new Error('Error reading Excel file'));
-      reader.readAsArrayBuffer(file);
+      })();
     } else {
-      reject(new Error('Unsupported file format. Please use CSV or XLSX.'));
+      reject(new Error('Unsupported file format. Please use a CSV or Excel (xlsx) file.'));
     }
   });
 }
 
-// Map a row from the parsed file to an Employee object
 function mapRowToEmployee(row: any): Partial<Employee> {
-  // Handle different possible column names from import files
+  // Convert keys to lowercase and trim whitespace
+  const normalizedRow = Object.keys(row).reduce((acc, key) => {
+    acc[key.toLowerCase().trim()] = typeof row[key] === 'string' ? row[key].trim() : row[key];
+    return acc;
+  }, {} as Record<string, any>);
+
+  // Map common variations of column names
+  const data = {
+    first_name: normalizedRow.first_name || normalizedRow.firstname || normalizedRow['first name'] || '',
+    last_name: normalizedRow.last_name || normalizedRow.lastname || normalizedRow['last name'] || '',
+    email: normalizedRow.email || normalizedRow['email address'] || '',
+    department: normalizedRow.department || normalizedRow.dept || '',
+    phone: normalizedRow.phone || normalizedRow.phone_number || normalizedRow['phone number'] || '',
+    position: normalizedRow.position || normalizedRow.title || normalizedRow.role || '',
+    join_date: normalizedRow.join_date || normalizedRow.joindate || normalizedRow['join date'] || new Date().toISOString().split('T')[0],
+    status: normalizedRow.status?.toLowerCase() === 'inactive' ? 'inactive' : 'active' as 'active' | 'inactive'
+  };
+
   return {
-    firstName: row.firstName || row['First Name'] || row.first_name || row['First name'] || '',
-    lastName: row.lastName || row['Last Name'] || row.last_name || row['Last name'] || '',
-    email: row.email || row.Email || '',
-    department: row.department || row.Department || '',
-    position: row.position || row.Position || row.title || row.Title || '',
-    phone: row.phone || row.Phone || row.phoneNumber || row['Phone Number'] || '',
-    joinDate: row.joinDate || row['Join Date'] || row.join_date || '',
-    status: row.status || row.Status || 'active'
+    ...data,
+    name: `${data.first_name} ${data.last_name}`.trim()
   };
 }

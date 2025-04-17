@@ -56,10 +56,42 @@ export const getRosters = async (): Promise<Roster[]> => {
 // Create a new roster
 export const createRoster = async (roster: Omit<Roster, 'id' | 'createdAt' | 'updatedAt'>): Promise<Roster | null> => {
   try {
+    // Validate required fields
+    if (!roster.employeeId) throw new Error('Employee ID is required');
+    if (!roster.startDate) throw new Error('Start date is required');
+    if (!roster.endDate) throw new Error('End date is required');
+    if (!roster.shift) throw new Error('Shift is required');
+    if (!roster.status) throw new Error('Status is required');
+
+    // Validate date format and order
+    const startDate = new Date(roster.startDate);
+    const endDate = new Date(roster.endDate);
+    if (isNaN(startDate.getTime())) throw new Error('Invalid start date format');
+    if (isNaN(endDate.getTime())) throw new Error('Invalid end date format');
+    if (startDate > endDate) throw new Error('Start date cannot be after end date');
+
+    // Get employee name first
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('first_name, last_name')
+      .eq('id', roster.employeeId)
+      .single();
+
+    if (employeeError) {
+      console.error('Error fetching employee:', employeeError);
+      throw new Error('Failed to fetch employee details');
+    }
+
+    if (!employeeData) throw new Error(`Employee not found with ID: ${roster.employeeId}`);
+
+    const employeeName = `${employeeData.first_name || ''} ${employeeData.last_name || ''}`.trim();
+    if (!employeeName) throw new Error('Employee name is required');
+
     const { data, error } = await supabase
       .from('rosters')
       .insert({
         employee_id: roster.employeeId,
+        employee_name: employeeName,
         start_date: roster.startDate,
         end_date: roster.endDate,
         shift: roster.shift,
@@ -68,20 +100,18 @@ export const createRoster = async (roster: Omit<Roster, 'id' | 'createdAt' | 'up
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error inserting roster:', error);
+      throw new Error('Failed to create roster in database');
+    }
 
-    // Get employee name
-    const { data: employee } = await supabase
-      .from('employees')
-      .select('first_name, last_name')
-      .eq('id', roster.employeeId)
-      .single();
+
 
     return {
       id: data.id,
       employeeId: data.employee_id,
-      employeeName: employee ? 
-        `${employee.first_name || ''} ${employee.last_name || ''}`.trim() : 
+      employeeName: employeeData ? 
+        `${employeeData.first_name || ''} ${employeeData.last_name || ''}`.trim() : 
         'Unknown Employee',
       startDate: data.start_date,
       endDate: data.end_date,

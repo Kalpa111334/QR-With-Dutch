@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { QrCode, Check, X, Clipboard, Download, AlertTriangle, Search, RefreshCw, Clock } from 'lucide-react';
+import { QrCode, Check, X, Clipboard, Download, AlertTriangle, Search, RefreshCw, Clock, Timer, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,27 +9,33 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Employee, GatePass as GatePassType } from '@/types';
+import { Employee, GatePass as GatePassType } from '@/types/index';
 import { getEmployees } from '@/utils/employeeUtils';
 import { 
   getGatePasses,
   createGatePass,
   verifyGatePass,
-  generateQRCodeForPass,
-  recordGatePassUsage
+  generateGatePassImage,
+  recordGatePassUsage,
+  deleteGatePass
 } from '@/utils/gatePassUtils';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TimeSelector } from '@/components/TimeSelector';
 
+interface ActiveGatePass {
+  endTime: string;
+  passCode: string;
+  employeeName: string;
+}
+
 const GatePass: React.FC = () => {
   // State management
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [gatePasses, setGatePasses] = useState<any[]>([]);
+  const [gatePasses, setGatePasses] = useState<GatePassType[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<string>('');
   const [passType, setPassType] = useState<'entry' | 'exit' | 'both'>('both');
-  const [passValidity, setPassValidity] = useState<'single' | 'day' | 'week' | 'month'>('single');
+  const [passValidity, setPassValidity] = useState<'single' | 'day' | 'week' | 'month' | 'custom'>('single');
   const [passReason, setPassReason] = useState<string>('');
   const [activeTab, setActiveTab] = useState<string>('create');
   const [passCode, setPassCode] = useState<string>('');
@@ -57,6 +62,17 @@ const GatePass: React.FC = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   
+  const [countdownEnd, setCountdownEnd] = useState<Date | null>(null);
+  const [remainingTime, setRemainingTime] = useState<string>('');
+  const [activePass, setActivePass] = useState<ActiveGatePass | null>(null);
+  
+  // Add new state for custom validity
+  const [customValidityHours, setCustomValidityHours] = useState<number>(1);
+  const [customValidityMinutes, setCustomValidityMinutes] = useState<number>(0);
+  const [isCustomValidity, setIsCustomValidity] = useState<boolean>(false);
+  
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  
   const { toast } = useToast();
 
   // Fetch employees and gate passes on component mount or refresh
@@ -69,9 +85,11 @@ const GatePass: React.FC = () => {
         const employeesData = await getEmployees();
         setEmployees(employeesData);
         
-        // Fetch gate passes
+        // Fetch gate passes with console logging for debugging
+        console.log('Fetching gate passes...');
         const passesData = await getGatePasses();
-        setGatePasses(passesData);
+        console.log('Fetched gate passes:', passesData);
+        setGatePasses(passesData || []); // Ensure we always set an array
         
         setLoading(false);
       } catch (error) {
@@ -88,7 +106,136 @@ const GatePass: React.FC = () => {
     fetchData();
   }, [toast, refreshTrigger]);
 
-  // Create a new gate pass
+  // Load active gate pass from localStorage on mount
+  useEffect(() => {
+    const savedPass = localStorage.getItem('activeGatePass');
+    if (savedPass) {
+      const pass = JSON.parse(savedPass);
+      const endTime = new Date(pass.endTime);
+      
+      // Only restore if the pass hasn't expired
+      if (endTime > new Date()) {
+        setActivePass(pass);
+        setCountdownEnd(endTime);
+      } else {
+        // Clear expired pass
+        localStorage.removeItem('activeGatePass');
+      }
+    }
+  }, []);
+
+  // Countdown timer effect with localStorage persistence
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    if (countdownEnd) {
+      intervalId = setInterval(() => {
+        const now = new Date();
+        const diff = Math.max(0, Math.floor((countdownEnd.getTime() - now.getTime()) / 1000));
+        
+        if (diff === 0) {
+          clearInterval(intervalId);
+          toast({
+            title: 'Gate Pass Expired',
+            description: 'The gate pass has expired.',
+            variant: 'destructive',
+          });
+          // Keep the display but update the state
+          setRemainingTime('EXPIRED');
+        } else {
+          setRemainingTime(formatTime(diff));
+        }
+      }, 1000);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [countdownEnd]);
+
+  // Function to format time in a user-friendly way
+  const formatTime = (timeInSeconds: number): string => {
+    const hours = Math.floor(timeInSeconds / 3600);
+    const minutes = Math.floor((timeInSeconds % 3600) / 60);
+    const seconds = timeInSeconds % 60;
+
+    let timeString = '';
+    if (hours > 0) {
+      timeString += `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+    }
+    if (minutes > 0) {
+      timeString += `${timeString ? ' ' : ''}${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+    }
+    if (seconds > 0 || timeString === '') {
+      timeString += `${timeString ? ' ' : ''}${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
+    }
+    return timeString;
+  };
+
+  // Modify getValidityText function
+  const getValidityText = (validity: string): string => {
+    if (validity === 'custom') {
+      const hours = customValidityHours;
+      const minutes = customValidityMinutes;
+      let text = '';
+      if (hours > 0) text += `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+      if (minutes > 0) text += `${text ? ' and ' : ''}${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+      return text || '0 minutes';
+    }
+
+    switch (validity) {
+      case 'single':
+        return '24 hours';
+      case 'day':
+        return '1 day (until midnight)';
+      case 'week':
+        return '7 days';
+      case 'month':
+        return '30 days';
+      default:
+        return '';
+    }
+  };
+
+  // Function to download gate pass image
+  const handleDownloadGatePass = async (pass: any) => {
+    try {
+      setIsDownloading(true);
+      const imageBlob = await generateGatePassImage(pass);
+      
+      if (imageBlob) {
+        // Create download link
+        const url = URL.createObjectURL(imageBlob);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = url;
+        downloadLink.download = `gate_pass_${pass.passCode}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        URL.revokeObjectURL(url);
+        
+        toast({
+          title: 'Gate Pass Downloaded',
+          description: 'Your gate pass has been downloaded successfully',
+        });
+      } else {
+        throw new Error('Failed to generate gate pass');
+      }
+    } catch (error) {
+      console.error('Error downloading gate pass:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to download gate pass',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  // Modify handleCreateGatePass
   const handleCreateGatePass = async () => {
     if (!selectedEmployee || !passReason) {
       toast({
@@ -102,10 +249,16 @@ const GatePass: React.FC = () => {
     try {
       setIsCreating(true);
       
-      // Create new pass in database with time information
+      // Calculate custom validity if needed
+      let validity = passValidity;
+      if (passValidity === 'custom') {
+        // For custom validity, we'll use 'single' but calculate the expiration differently
+        validity = 'single';
+      }
+      
       const newPass = await createGatePass(
         selectedEmployee,
-        passValidity,
+        validity as 'single' | 'day' | 'week' | 'month',
         passType,
         passReason,
         expectedExitTime,
@@ -113,35 +266,53 @@ const GatePass: React.FC = () => {
       );
       
       if (newPass) {
-        // Refresh gate passes list
-        setRefreshTrigger(prev => prev + 1);
+        // Set countdown end time based on pass validity
+        const now = new Date();
+        let endTime: Date;
         
+        if (passValidity === 'custom') {
+          // For custom validity, calculate exact hours and minutes
+          const totalMilliseconds = 
+            (customValidityHours * 60 * 60 * 1000) + 
+            (customValidityMinutes * 60 * 1000);
+          endTime = new Date(now.getTime() + totalMilliseconds);
+        } else {
+          // For predefined periods, use the expiration date from the pass
+          endTime = new Date(newPass.expiresAt);
+        }
+        
+        // Save active pass to localStorage
+        const activePassData = {
+          endTime: endTime.toISOString(),
+          passCode: newPass.passCode,
+          employeeName: newPass.employeeName
+        };
+        localStorage.setItem('activeGatePass', JSON.stringify(activePassData));
+        setActivePass(activePassData);
+        setCountdownEnd(endTime);
+        
+        // Download gate pass image automatically
+        await handleDownloadGatePass(newPass);
+        
+        // Show success toast
         toast({
-          title: 'Gate Pass Created',
-          description: `Pass code: ${newPass.passCode} - Valid until ${new Date(newPass.expiresAt).toLocaleString()}`,
+          title: 'Gate Pass Created Successfully',
+          description: `Pass code: ${newPass.passCode} - Valid until ${endTime.toLocaleString()}`,
+          variant: 'default',
+          duration: 5000,
         });
+
+        // Refresh the gate passes list
+        setRefreshTrigger(prev => prev + 1);
 
         // Reset form
         setSelectedEmployee('');
         setPassReason('');
         setPassType('both');
         setPassValidity('single');
-        
-        // Set verification result to show the new pass automatically
-        setVerificationResult({
-          verified: true,
-          message: 'Valid gate pass. Employee may proceed.',
-          pass: newPass
-        });
-        
-        // Download QR code automatically
-        handleDownloadQRCode(newPass);
-        
-        // Switch to verify tab to show the new pass
-        setActiveTab('verify');
-        
-        // Show alert with pass code
-        setShowAlert(true);
+        setCustomValidityHours(1);
+        setCustomValidityMinutes(0);
+        setIsCustomValidity(false);
       } else {
         toast({
           title: 'Error',
@@ -276,45 +447,6 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
     );
   };
 
-  // Function to download QR code as PNG and auto-verify
-  const handleDownloadQRCode = async (pass: any) => {
-    try {
-      setIsDownloading(true);
-      const qrBlob = await generateQRCodeForPass(pass);
-      
-      if (qrBlob) {
-        // Create download link
-        const url = URL.createObjectURL(qrBlob);
-        const downloadLink = document.createElement('a');
-        downloadLink.href = url;
-        downloadLink.download = `gate_pass_${pass.passCode}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-        URL.revokeObjectURL(url);
-        
-        toast({
-          title: 'QR Code Downloaded',
-          description: 'Gate pass QR code has been downloaded successfully',
-        });
-        
-        // Auto-verify the pass
-        await handleVerifyPass(pass.passCode);
-      } else {
-        throw new Error('Failed to generate QR code');
-      }
-    } catch (error) {
-      console.error('Error downloading QR code:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to download QR code',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
   // Function to get appropriate badge color based on status
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
@@ -340,6 +472,40 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
     });
   };
 
+  // Add handleDeletePass function
+  const handleDeletePass = async (passId: string) => {
+    if (!passId) return;
+
+    try {
+      setIsDeleting(passId);
+      const result = await deleteGatePass(passId);
+      
+      if (result.success) {
+        toast({
+          title: 'Success',
+          description: 'Gate pass deleted successfully',
+        });
+        // Refresh the list
+        setRefreshTrigger(prev => prev + 1);
+      } else {
+        toast({
+          title: 'Error',
+          description: result.message || 'Failed to delete gate pass',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting gate pass:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete gate pass',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
   return (
     <div className="container mx-auto py-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -347,12 +513,11 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
           <div>
             <h1 className="text-3xl font-bold tracking-tight mb-2">Gate Pass System</h1>
             <p className="text-muted-foreground">
-              Create and verify temporary access passes for employees
+              Create and manage temporary access passes for employees
             </p>
           </div>
           <TabsList className="mt-4 md:mt-0">
             <TabsTrigger value="create">Create Pass</TabsTrigger>
-            <TabsTrigger value="verify">Verify Pass</TabsTrigger>
             <TabsTrigger value="passes">All Passes</TabsTrigger>
           </TabsList>
         </div>
@@ -379,11 +544,12 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                     value={selectedEmployee}
                     onChange={(e) => setSelectedEmployee(e.target.value)}
                     disabled={isCreating}
+                    aria-label="Select employee"
                   >
                     <option value="">Select an employee</option>
                     {employees.map(employee => (
                       <option key={employee.id} value={employee.id}>
-                        {employee.firstName} {employee.lastName}
+                        {employee.first_name} {employee.last_name}
                       </option>
                     ))}
                   </select>
@@ -399,6 +565,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   value={passType}
                   onChange={(e) => setPassType(e.target.value as 'entry' | 'exit' | 'both')}
                   disabled={isCreating}
+                  aria-label="Select pass type"
                 >
                   <option value="entry">Entry Only</option>
                   <option value="exit">Exit Only</option>
@@ -413,14 +580,56 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   id="pass-validity"
                   className="w-full border rounded-md p-2"
                   value={passValidity}
-                  onChange={(e) => setPassValidity(e.target.value as 'single' | 'day' | 'week' | 'month')}
+                  onChange={(e) => {
+                    setPassValidity(e.target.value as 'single' | 'day' | 'week' | 'month' | 'custom');
+                    setIsCustomValidity(e.target.value === 'custom');
+                  }}
                   disabled={isCreating}
+                  aria-label="Select validity period"
                 >
                   <option value="single">Single Use (24 hours)</option>
                   <option value="day">One Day (until midnight)</option>
                   <option value="week">One Week</option>
                   <option value="month">One Month</option>
+                  <option value="custom">Custom Duration</option>
                 </select>
+
+                {/* Custom Validity Input */}
+                {isCustomValidity && (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="validity-hours">Hours</Label>
+                        <Input
+                          id="validity-hours"
+                          type="number"
+                          min="0"
+                          max="720"
+                          value={customValidityHours}
+                          onChange={(e) => setCustomValidityHours(Math.max(0, parseInt(e.target.value) || 0))}
+                          placeholder="Hours"
+                          className="w-full"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="validity-minutes">Minutes</Label>
+                        <Input
+                          id="validity-minutes"
+                          type="number"
+                          min="0"
+                          max="59"
+                          value={customValidityMinutes}
+                          onChange={(e) => setCustomValidityMinutes(Math.max(0, parseInt(e.target.value) || 0))}
+                          placeholder="Minutes"
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Gate pass will be valid for {getValidityText('custom')}
+                    </p>
+                  </div>
+                )}
               </div>
               
               {/* Time Selection */}
@@ -456,6 +665,62 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   disabled={isCreating}
                 />
               </div>
+
+              {/* Active Pass Display */}
+              {(countdownEnd || activePass) && (
+                <div className={`mt-6 p-4 rounded-lg border ${
+                  remainingTime === 'EXPIRED' ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
+                }`}>
+                  <div className="text-center">
+                    <div className="flex items-center justify-center mb-2">
+                      {remainingTime === 'EXPIRED' ? (
+                        <>
+                          <X className="h-6 w-6 text-red-600 mr-2" />
+                          <h3 className="text-lg font-semibold text-red-800">Gate Pass Expired</h3>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="h-6 w-6 text-green-600 mr-2" />
+                          <h3 className="text-lg font-semibold text-green-800">Gate Pass Active</h3>
+                        </>
+                      )}
+                    </div>
+                    {activePass && (
+                      <div className="mb-4">
+                        <p className={`text-sm font-medium ${
+                          remainingTime === 'EXPIRED' ? 'text-red-700' : 'text-green-700'
+                        }`}>
+                          Pass Code: {activePass.passCode}
+                        </p>
+                        <p className={`text-sm ${
+                          remainingTime === 'EXPIRED' ? 'text-red-600' : 'text-green-600'
+                        }`}>
+                          Employee: {activePass.employeeName}
+                        </p>
+                        <p className={`text-sm ${
+                          remainingTime === 'EXPIRED' ? 'text-red-600' : 'text-green-600'
+                        } mt-1`}>
+                          Validity Period: {getValidityText(passValidity)}
+                        </p>
+                      </div>
+                    )}
+                    <div className={`bg-white p-4 rounded-lg shadow-sm ${
+                      remainingTime === 'EXPIRED' ? 'bg-red-50' : ''
+                    }`}>
+                      <p className="text-sm text-gray-600 mb-1">Time Status</p>
+                      <div className={`text-2xl font-mono font-bold mb-1 ${
+                        remainingTime === 'EXPIRED' ? 'text-red-700' : 'text-green-700'
+                      }`}>
+                        {remainingTime}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        Created: {new Date().toLocaleString()}<br />
+                        Expires: {countdownEnd?.toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
             <CardFooter>
               <Button 
@@ -479,216 +744,6 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
           </Card>
         </TabsContent>
         
-        {/* Verify Pass Tab */}
-        <TabsContent value="verify">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Enter Pass Code</CardTitle>
-                <CardDescription>
-                  Enter the gate pass code to verify
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex justify-center flex-col space-y-6">
-                <div className="w-full max-w-md mx-auto">
-                  <div className="flex flex-col space-y-2">
-                    <Label htmlFor="pass-code">Gate Pass Code</Label>
-                    <div className="flex space-x-2">
-                      <Input 
-                        id="pass-code"
-                        placeholder="Enter gate pass code" 
-                        value={passCode}
-                        onChange={(e) => setPassCode(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && passCode.trim() !== '') {
-                            handleVerifyPass();
-                          }
-                        }}
-                        className="font-mono tracking-wider"
-                      />
-                      <Button 
-                        onClick={() => handleVerifyPass()}
-                        disabled={isVerifying || !passCode}
-                      >
-                        {isVerifying ? (
-                          <>
-                            <div className="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></div>
-                            Verifying...
-                          </>
-                        ) : (
-                          <>
-                            <Search className="h-4 w-4 mr-1" /> Verify
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Enter the pass code as shown on the employee's pass or scan the QR code.
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="text-center">
-                  <p className="mb-2 text-sm text-muted-foreground">Or enter code with segments</p>
-                  <div className="flex justify-center">
-                    <InputOTP
-                      maxLength={10}
-                      value={passCode}
-                      onChange={(value) => setPassCode(value)}
-                      render={({ slots }) => (
-                        <InputOTPGroup>
-                          {slots && slots.map((slot, index) => (
-                            <InputOTPSlot key={index} {...slot} index={index} />
-                          ))}
-                        </InputOTPGroup>
-                      )}
-                    />
-                  </div>
-                </div>
-                
-                {verificationResult?.verified && verificationResult.pass && (
-                  <div className="border-t pt-4 mt-4">
-                    <h3 className="font-medium mb-2">Record Pass Usage:</h3>
-                    <div className="flex flex-col space-y-2">
-                      <div className="flex justify-between gap-2">
-                        <Button 
-                          variant="outline" 
-                          className="flex-1"
-                          onClick={() => handleRecordUsage(verificationResult.pass, 'exit')}
-                          disabled={verificationResult.pass.exitTime}
-                        >
-                          <Clock className="mr-2 h-4 w-4" />
-                          {verificationResult.pass.exitTime ? 
-                            `Exit Recorded: ${verificationResult.pass.exitTime}` : 
-                            'Record Exit'
-                          }
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          className="flex-1"
-                          onClick={() => handleRecordUsage(verificationResult.pass, 'return')}
-                          disabled={!verificationResult.pass.exitTime || verificationResult.pass.returnTime}
-                        >
-                          <Clock className="mr-2 h-4 w-4" />
-                          {verificationResult.pass.returnTime ? 
-                            `Return Recorded: ${verificationResult.pass.returnTime}` : 
-                            'Record Return'
-                          }
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>Verification Result</CardTitle>
-                <CardDescription>
-                  Gate pass verification status
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {loading || isVerifying ? (
-                  <div className="py-10 text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-                    <p>{isVerifying ? 'Verifying pass...' : 'Loading...'}</p>
-                  </div>
-                ) : verificationResult ? (
-                  <div className="space-y-4">
-                    <Alert variant={verificationResult.verified ? "default" : "destructive"}>
-                      <div className="flex items-center">
-                        {verificationResult.verified ? (
-                          <Check className="h-5 w-5 mr-2 text-green-600" />
-                        ) : (
-                          <X className="h-5 w-5 mr-2" />
-                        )}
-                        <AlertTitle>
-                          {verificationResult.verified ? 'Access Granted' : 'Access Denied'}
-                        </AlertTitle>
-                      </div>
-                      <AlertDescription>{verificationResult.message}</AlertDescription>
-                    </Alert>
-                    
-                    {verificationResult.pass && (
-                      <div className="mt-4 border rounded-md p-4 space-y-2">
-                        <p className="font-medium">Pass Details:</p>
-                        <p><span className="font-medium">Pass Code:</span> {verificationResult.pass.passCode}</p>
-                        <p><span className="font-medium">Employee:</span> {verificationResult.pass.employeeName}</p>
-                        <p><span className="font-medium">Type:</span> <span className="capitalize">{verificationResult.pass.type}</span></p>
-                        <p><span className="font-medium">Reason:</span> {verificationResult.pass.reason}</p>
-                        <p><span className="font-medium">Created:</span> {new Date(verificationResult.pass.createdAt).toLocaleString()}</p>
-                        <p><span className="font-medium">Expires:</span> {new Date(verificationResult.pass.expiresAt).toLocaleString()}</p>
-                        
-                        {/* Time tracking information */}
-                        <p><span className="font-medium">Expected Exit:</span> {verificationResult.pass.expectedExitTime || 'Not specified'}</p>
-                        <p><span className="font-medium">Expected Return:</span> {verificationResult.pass.expectedReturnTime || 'Not specified'}</p>
-                        
-                        {verificationResult.pass.exitTime && (
-                          <p><span className="font-medium">Actual Exit:</span> {verificationResult.pass.exitTime}</p>
-                        )}
-                        
-                        {verificationResult.pass.returnTime && (
-                          <p><span className="font-medium">Actual Return:</span> {verificationResult.pass.returnTime}</p>
-                        )}
-                        
-                        {verificationResult.pass.usedAt && (
-                          <p><span className="font-medium">Used:</span> {new Date(verificationResult.pass.usedAt).toLocaleString()}</p>
-                        )}
-                        
-                        {/* Pass Code Display */}
-                        <div className="pt-4 flex flex-col items-center">
-                          <div className="bg-white p-4 rounded-lg shadow-md mb-4 text-center">
-                            <p className="text-sm text-gray-500 mb-1">Gate Pass Code</p>
-                            <p className="text-xl font-bold tracking-wider font-mono">{verificationResult.pass.passCode}</p>
-                          </div>
-                          <div className="flex gap-2 flex-wrap justify-center">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => copyPassToClipboard(verificationResult.pass!)}
-                            >
-                              <Clipboard className="h-4 w-4 mr-2" />
-                              Copy Pass Details
-                            </Button>
-                            {verificationResult.verified && (
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => handleDownloadQRCode(verificationResult.pass!)}
-                                disabled={isDownloading}
-                              >
-                                {isDownloading ? (
-                                  <>
-                                    <div className="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></div>
-                                    Downloading...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Download className="h-4 w-4 mr-2" />
-                                    Download QR Code
-                                  </>
-                                )}
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-40 text-center">
-                    <QrCode className="h-10 w-10 text-muted-foreground mb-2" />
-                    <p className="text-muted-foreground">No gate pass verified yet</p>
-                    <p className="text-sm text-muted-foreground">Enter a gate pass code to see verification results</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-        
         {/* All Passes Tab */}
         <TabsContent value="passes">
           <Card>
@@ -696,7 +751,7 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
               <div>
                 <CardTitle>All Gate Passes</CardTitle>
                 <CardDescription>
-                  Manage and view all issued gate passes
+                  View and manage all issued gate passes
                 </CardDescription>
               </div>
               <Button 
@@ -715,7 +770,6 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                   <Skeleton className="h-10 w-full" />
                   <Skeleton className="h-10 w-full" />
                   <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -728,41 +782,35 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                         <TableHead>Status</TableHead>
                         <TableHead>Exit Time</TableHead>
                         <TableHead>Return Time</TableHead>
-                        <TableHead>Expiration</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+                        <TableHead>Valid Until</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {gatePasses.length > 0 ? (
-                        gatePasses.map(pass => (
+                      {Array.isArray(gatePasses) && gatePasses.length > 0 ? (
+                        gatePasses.map((pass: GatePassType) => (
                           <TableRow key={pass.id}>
-                            <TableCell className="font-medium font-mono">{pass.passCode}</TableCell>
-                            <TableCell>{pass.employeeName}</TableCell>
-                            <TableCell>
-                              <span className="capitalize">{pass.type}</span>
+                            <TableCell className="font-medium font-mono">
+                              {pass.passCode}
                             </TableCell>
+                            <TableCell>{pass.employeeName}</TableCell>
+                            <TableCell className="capitalize">{pass.type}</TableCell>
                             <TableCell>
                               <Badge variant="outline" className={getStatusBadgeClass(pass.status)}>
                                 {pass.status}
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              {pass.exitTime || 
-                                <span className="text-muted-foreground text-sm">
-                                  Expected: {pass.expectedExitTime || 'N/A'}
-                                </span>
-                              }
+                              {pass.exitTime || pass.expectedExitTime || 'N/A'}
                             </TableCell>
                             <TableCell>
-                              {pass.returnTime || 
-                                <span className="text-muted-foreground text-sm">
-                                  Expected: {pass.expectedReturnTime || 'N/A'}
-                                </span>
-                              }
+                              {pass.returnTime || pass.expectedReturnTime || 'N/A'}
                             </TableCell>
-                            <TableCell>{new Date(pass.expiresAt).toLocaleDateString()}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
+                            <TableCell>
+                              {new Date(pass.expiresAt).toLocaleString()}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
                                 <Button 
                                   variant="ghost" 
                                   size="sm"
@@ -772,16 +820,30 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                                   <Clipboard className="h-4 w-4" />
                                 </Button>
                                 <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDownloadGatePass(pass)}
+                                  disabled={isDownloading}
+                                >
+                                  {isDownloading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Download className="h-4 w-4" />
+                                  )}
+                                  <span className="ml-2">Download</span>
+                                </Button>
+                                <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => {
-                                    setPassCode(pass.passCode);
-                                    setActiveTab('verify');
-                                    handleVerifyPass(pass.passCode);
-                                  }}
-                                  title="Verify this pass"
+                                  onClick={() => handleDeletePass(pass.id)}
+                                  disabled={isDeleting === pass.id}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                 >
-                                  <Search className="h-4 w-4" />
+                                  {isDeleting === pass.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
                                 </Button>
                               </div>
                             </TableCell>
@@ -790,7 +852,17 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
                       ) : (
                         <TableRow>
                           <TableCell colSpan={8} className="text-center h-24 text-muted-foreground">
-                            No gate passes found
+                            {loading ? (
+                              'Loading gate passes...'
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-center mb-2">
+                                  <AlertTriangle className="h-5 w-5 text-muted-foreground mr-2" />
+                                  No gate passes found
+                                </div>
+                                <p className="text-sm">Create a new gate pass to see it here</p>
+                              </>
+                            )}
                           </TableCell>
                         </TableRow>
                       )}
@@ -802,55 +874,6 @@ Expires: ${new Date(pass.expiresAt).toLocaleString()}`;
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* Verification Success/Failure Alert Dialog */}
-      <AlertDialog open={showAlert} onOpenChange={setShowAlert}>
-        <AlertDialogContent className={verificationResult?.verified ? "border-green-500" : "border-red-500"}>
-          <AlertDialogHeader>
-            <div className="flex items-center">
-              {verificationResult?.verified ? (
-                <Check className="h-6 w-6 text-green-600 mr-2" />
-              ) : (
-                <AlertTriangle className="h-6 w-6 text-red-600 mr-2" />
-              )}
-              <AlertDialogTitle>
-                {verificationResult?.verified ? "Access Granted" : "Access Denied"}
-              </AlertDialogTitle>
-            </div>
-            <AlertDialogDescription>
-              {verificationResult?.message}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          
-          {verificationResult?.pass && (
-            <div className="my-4 p-4 bg-gray-50 rounded-md">
-              <p className="font-medium mb-2">Gate Pass Details:</p>
-              <p><span className="font-medium">Pass Code:</span> {verificationResult.pass.passCode}</p>
-              <p><span className="font-medium">Employee:</span> {verificationResult.pass.employeeName}</p>
-              <p><span className="font-medium">Type:</span> <span className="capitalize">{verificationResult.pass.type}</span></p>
-              <p><span className="font-medium">Status:</span> <span className="capitalize">{verificationResult.pass.status}</span></p>
-              <p><span className="font-medium">Expected Exit:</span> {verificationResult.pass.expectedExitTime || 'Not specified'}</p>
-              <p><span className="font-medium">Expected Return:</span> {verificationResult.pass.expectedReturnTime || 'Not specified'}</p>
-              
-              {verificationResult.pass.exitTime && (
-                <p><span className="font-medium">Actual Exit:</span> {verificationResult.pass.exitTime}</p>
-              )}
-              
-              {verificationResult.pass.returnTime && (
-                <p><span className="font-medium">Actual Return:</span> {verificationResult.pass.returnTime}</p>
-              )}
-              
-              <p><span className="font-medium">Expires:</span> {new Date(verificationResult.pass.expiresAt).toLocaleString()}</p>
-            </div>
-          )}
-          
-          <AlertDialogFooter>
-            <AlertDialogAction>
-              {verificationResult?.verified ? "Approve Entry" : "Close"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };

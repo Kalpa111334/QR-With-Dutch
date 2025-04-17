@@ -10,6 +10,7 @@ import { SwitchCamera, Loader2, Camera, Power, Scan } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { verifyGatePass } from '@/utils/gatePassUtils';
 import { recordAttendanceCheckIn, recordAttendanceCheckOut } from '@/utils/attendanceUtils';
+import { Employee } from '@/types';
 
 interface QRScannerProps {
   onScan?: (result: string) => void; // Making this prop optional
@@ -212,8 +213,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               try {
                 if (qrData.trim().startsWith('{') && qrData.trim().endsWith('}')) {
                   employeeData = JSON.parse(qrData);
-                  employeeId = employeeData.id;
-                  console.log("Parsed employee data from QR:", employeeData);
+                  if (employeeData.type === 'employee' && employeeData.id) {
+                    employeeId = employeeData.id;
+                    console.log("Parsed employee data from QR:", employeeData);
+                  } else {
+                    throw new Error("Invalid employee QR code format");
+                  }
                 } else {
                   // Try to find UUID pattern in the string
                   const uuidMatch = qrData.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
@@ -232,10 +237,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
                 }
               } catch (e) {
                 console.log("Error parsing QR data:", e);
+                throw new Error("Invalid QR code format");
               }
             } else if (qrData && typeof qrData === 'object') {
-              employeeId = qrData.id;
-              console.log("Extracted employee ID from object:", employeeId);
+              if (qrData.type === 'employee' && qrData.id) {
+                employeeId = qrData.id;
+                console.log("Extracted employee ID from object:", employeeId);
+              } else {
+                throw new Error("Invalid employee QR code format");
+              }
             }
             
             if (!employeeId) {
@@ -247,10 +257,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           }
           
           // Check if employee exists before proceeding
-          const employee = await getEmployeeById(employeeId);
-          if (!employee) {
-            throw new Error("Employee not found");
+          const employeeResult = await getEmployeeById(employeeId);
+          if (!employeeResult || !('first_name' in employeeResult) || !('last_name' in employeeResult)) {
+            throw new Error("Employee not found or invalid data");
           }
+          const employee: Employee = employeeResult;
           console.log("Found employee:", employee);
           
           // Check if employee has already checked in today
@@ -319,7 +330,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           // Show success message using SweetAlert
           Swal.fire({
             title: `${actionMessage === 'checked in' ? 'Check-in' : 'Check-out'} Successful!`,
-            text: `${employee.firstName} ${employee.lastName} ${actionMessage} successfully at ${new Date().toLocaleTimeString()}`,
+            text: `${employee.first_name} ${employee.last_name} ${actionMessage} successfully at ${new Date().toLocaleTimeString()}`,
             icon: 'success',
             timer: 3000,
             showConfirmButton: false,
@@ -328,10 +339,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
       } catch (error) {
         console.error("Error processing QR code:", error);
         
+        // Show a more user-friendly error message
         Swal.fire({
-          title: 'Error!',
-          text: error instanceof Error ? error.message : 'Failed to process QR code',
-          icon: 'error',
+          title: 'Invalid QR Code',
+          text: 'Please scan a valid employee QR code',
+          icon: 'warning',
           timer: 3000,
           showConfirmButton: false,
         });
@@ -502,6 +514,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               className="w-full p-1.5 md:p-2 text-xs md:text-sm border rounded-md bg-white dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               onChange={(e) => setSelectedCamera(e.target.value)}
               value={selectedCamera}
+              aria-label="Select camera"
             >
               {cameras.map((camera) => (
                 <option key={camera.deviceId} value={camera.deviceId}>
