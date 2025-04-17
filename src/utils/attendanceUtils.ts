@@ -394,6 +394,14 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
       // Check for existing attendance with detailed error logging
       console.log('Checking for existing attendance record...');
       try {
+        // Ensure we have a valid session
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (!currentSession) {
+          console.error('No valid session found');
+          throw new Error('Please log in again');
+        }
+
+        // Check for existing attendance
         const { data: existingRecord, error: checkError } = await supabase
           .from('attendance')
           .select('id, check_in_time, status')
@@ -405,12 +413,7 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
 
         if (checkError) {
           console.error('Error checking existing attendance:', checkError);
-          toast({
-            title: "Check-in Failed",
-            description: "Error checking attendance record. Please try again.",
-            variant: "destructive"
-          });
-          return false;
+          throw new Error('Error checking attendance record');
         }
 
         if (existingRecord) {
@@ -430,33 +433,23 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
           date: today,
           check_in_time: checkInTime,
           status: 'present',
-          created_at: checkInTime
+          created_at: checkInTime,
+          updated_at: checkInTime
         };
         
-        // First try to insert without returning the record
-        const { error: insertError } = await supabase
+        // Insert the record and return it in a single operation
+        const { data: newRecord, error: insertError } = await supabase
           .from('attendance')
-          .insert([attendanceRecord]);
+          .insert(attendanceRecord)
+          .select()
+          .single();
 
-        if (insertError) {
-          console.error('Error inserting attendance record:', insertError);
-          throw insertError;
+        if (insertError || !newRecord) {
+          console.error('Error inserting attendance record:', { insertError, newRecord });
+          throw new Error('Failed to create attendance record');
         }
 
-        // If insert succeeded, verify the record exists
-        const { data: verifyRecord, error: verifyError } = await supabase
-          .from('attendance')
-          .select('*')
-          .eq('employee_id', employeeId)
-          .eq('date', today)
-          .maybeSingle();
-
-        if (verifyError || !verifyRecord) {
-          console.error('Error verifying inserted record:', { verifyError, verifyRecord });
-          throw new Error('Failed to verify inserted record');
-        }
-
-        console.log('Attendance check-in successful:', verifyRecord);
+        console.log('Attendance check-in successful:', newRecord);
         toast({
           title: "Check-in Successful",
           description: `Welcome, ${verifiedEmployee.first_name}! Your attendance has been recorded.`,
@@ -466,9 +459,10 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
 
       } catch (error) {
         console.error('Error in attendance process:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to record attendance';
         toast({
           title: "Check-in Failed",
-          description: error instanceof Error ? error.message : "Failed to record attendance. Please try again.",
+          description: errorMessage,
           variant: "destructive"
         });
         return false;
