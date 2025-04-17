@@ -398,7 +398,11 @@ const employee: Employee | null = await employeePromise.catch((error) => {
       
       // Verify database connection before insert
       try {
-        const { error: healthError } = await supabase.from('attendance').select('count').limit(1);
+        const { data: healthData, error: healthError } = await supabase
+          .from('attendance')
+          .select('id')
+          .limit(1);
+
         if (healthError) {
           console.error('Database health check failed:', healthError);
           toast({
@@ -406,10 +410,18 @@ const employee: Employee | null = await employeePromise.catch((error) => {
             description: "Unable to connect to the database. Please try again.",
             variant: "destructive"
           });
-          return false;
+          throw new Error('Database connection failed');
         }
+
+        console.log('Database connection verified successfully');
       } catch (healthError) {
         console.error('Health check failed:', healthError);
+        toast({
+          title: "Connection Error",
+          description: "Unable to verify database connection. Please try again.",
+          variant: "destructive"
+        });
+        return false;
       }
 
       // Insert new record with timeout
@@ -423,11 +435,23 @@ const employee: Employee | null = await employeePromise.catch((error) => {
           console.log('Attempting to insert attendance record...');
           const { data, error } = await supabase
             .from('attendance')
-            .insert(attendanceRecord)
+            .insert([attendanceRecord])
             .select()
             .single();
+
           clearTimeout(timeout);
-          if (error) reject(error);
+
+          if (error) {
+            console.error('Insert error:', error);
+            reject(error);
+            return;
+          }
+
+          if (!data) {
+            reject(new Error('No data returned after insert'));
+            return;
+          }
+
           resolve(data);
         } catch (err) {
           clearTimeout(timeout);
