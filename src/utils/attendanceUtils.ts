@@ -307,10 +307,7 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
       console.log('Session check result:', session ? 'Active session found' : 'No active session');
       
       if (!session || sessionError) {
-        // Silently redirect to login page without showing error message
-        if (typeof window !== 'undefined') {
-          window.location.href = '/login';
-        }
+        console.error('No active session found');
         return false;
       }
       
@@ -346,10 +343,7 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
       console.log('Session check result:', session ? 'Active session found' : 'No active session');
       
       if (!session || sessionError) {
-        // Silently redirect to login page without showing error message
-        if (typeof window !== 'undefined') {
-          window.location.href = '/login';
-        }
+        console.error('No active session found');
         return false;
       }
 
