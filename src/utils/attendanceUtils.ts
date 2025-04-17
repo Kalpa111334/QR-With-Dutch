@@ -396,29 +396,40 @@ const employee: Employee | null = await employeePromise.catch((error) => {
 
       console.log('Inserting attendance record:', attendanceRecord);
       
-      // Verify database connection before insert
+      // Verify database connection and check for existing record in a single query
       try {
-        const { data: healthData, error: healthError } = await supabase
+        const { data: existingData, error: existingError } = await supabase
           .from('attendance')
-          .select('id')
-          .limit(1);
+          .select('id, check_in_time')
+          .eq('employee_id', employeeId)
+          .eq('date', today)
+          .maybeSingle();
 
-        if (healthError) {
-          console.error('Database health check failed:', healthError);
+        if (existingError) {
+          console.error('Database check failed:', existingError);
           toast({
             title: "Connection Error",
-            description: "Unable to connect to the database. Please try again.",
+            description: "Unable to verify attendance status. Please try again.",
             variant: "destructive"
           });
-          throw new Error('Database connection failed');
+          return false;
         }
 
-        console.log('Database connection verified successfully');
-      } catch (healthError) {
-        console.error('Health check failed:', healthError);
+        if (existingData) {
+          console.log('Found existing attendance record:', existingData);
+          toast({
+            title: "Already Checked In",
+            description: `You have already checked in today at ${format(new Date(existingData.check_in_time), 'HH:mm')}`,
+          });
+          return false;
+        }
+
+        console.log('No existing attendance record found, proceeding with check-in');
+      } catch (error) {
+        console.error('Database check failed:', error);
         toast({
-          title: "Connection Error",
-          description: "Unable to verify database connection. Please try again.",
+          title: "Error",
+          description: "Unable to verify attendance status. Please try again.",
           variant: "destructive"
         });
         return false;
@@ -436,7 +447,7 @@ const employee: Employee | null = await employeePromise.catch((error) => {
           const { data, error } = await supabase
             .from('attendance')
             .insert([attendanceRecord])
-            .select()
+            .select('id, check_in_time, status')
             .single();
 
           clearTimeout(timeout);
@@ -448,7 +459,21 @@ const employee: Employee | null = await employeePromise.catch((error) => {
           }
 
           if (!data) {
-            reject(new Error('No data returned after insert'));
+            console.error('No data returned after insert');
+            reject(new Error('Failed to record attendance'));
+            return;
+          }
+
+          // Verify the insert was successful
+          const verifyData = await supabase
+            .from('attendance')
+            .select('id, check_in_time, status')
+            .eq('id', data.id)
+            .single();
+
+          if (verifyData.error || !verifyData.data) {
+            console.error('Verification failed after insert:', verifyData.error);
+            reject(new Error('Failed to verify attendance record'));
             return;
           }
 
