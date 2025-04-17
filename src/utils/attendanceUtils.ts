@@ -410,20 +410,8 @@ const employee: Employee | null = await employeePromise.catch((error) => {
         status: isLate ? 'late' : 'present',
         late_duration: isLate ? lateDuration.totalMinutes : 0,
         device_info: typeof window !== 'undefined' ? navigator.userAgent : 'Unknown',
-        check_in_location: 'office', // You can make this dynamic if needed
-        check_in_attempts: 1
+        check_in_location: 'office' // You can make this dynamic if needed
       };
-
-      // Validate the record before inserting
-      if (!attendanceRecord.employee_id || !attendanceRecord.date || !attendanceRecord.check_in_time) {
-        console.error('Invalid attendance record:', attendanceRecord);
-        toast({
-          title: "Error",
-          description: "Invalid attendance data. Please try again.",
-          variant: "destructive"
-        });
-        return false;
-      }
 
       console.log('Inserting attendance record:', attendanceRecord);
       
@@ -475,15 +463,11 @@ const employee: Employee | null = await employeePromise.catch((error) => {
         
         try {
           console.log('Attempting to insert attendance record...');
-          // Try to insert with a more specific select
           const { data, error } = await supabase
             .from('attendance')
             .insert([attendanceRecord])
-            .select('id, employee_id, date, check_in_time, status, late_duration, check_in_attempts')
+            .select('id, check_in_time, status')
             .single();
-
-          // Log the complete response for debugging
-          console.log('Insert response:', { data, error });
 
           clearTimeout(timeout);
 
@@ -499,28 +483,18 @@ const employee: Employee | null = await employeePromise.catch((error) => {
             return;
           }
 
-          // Verify the insert was successful with more detailed check
-          const { data: verifyData, error: verifyError } = await supabase
+          // Verify the insert was successful
+          const verifyData = await supabase
             .from('attendance')
-            .select('*')
-            .eq('employee_id', employeeId)
-            .eq('date', today)
+            .select('id, check_in_time, status')
+            .eq('id', data.id)
             .single();
 
-          if (verifyError || !verifyData) {
-            console.error('Verification failed after insert:', verifyError);
+          if (verifyData.error || !verifyData.data) {
+            console.error('Verification failed after insert:', verifyData.error);
             reject(new Error('Failed to verify attendance record'));
             return;
           }
-
-          // Validate the verified data
-          if (verifyData.id !== data.id) {
-            console.error('Verification mismatch:', { inserted: data.id, verified: verifyData.id });
-            reject(new Error('Attendance record verification failed'));
-            return;
-          }
-
-          console.log('Attendance record verified successfully:', verifyData);
 
           resolve(data);
         } catch (err) {
