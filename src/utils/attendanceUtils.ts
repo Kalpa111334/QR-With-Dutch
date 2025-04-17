@@ -134,7 +134,7 @@ const calculateWorkingDuration = (checkInTime: string, checkOutTime: string | nu
 };
 
 // Get all attendance records - using the old function name for backward compatibility
-export const getAttendance = async (): Promise<Attendance[]> => {
+async function getAttendance(): Promise<Attendance[]> {
   try {
     const { data, error } = await supabase
       .from('attendance')
@@ -194,10 +194,10 @@ export const getAttendance = async (): Promise<Attendance[]> => {
 };
 
 // New function name - adding as an alias to maintain compatibility
-export const getAttendanceRecords = getAttendance;
+const getAttendanceRecords = getAttendance;
 
 // Get attendance records by date range with proper type casting
-export const getAttendanceByDateRange = async (startDate: string, endDate: string): Promise<Attendance[]> => {
+async function getAttendanceByDateRange(startDate: string, endDate: string): Promise<Attendance[]> {
   try {
     const { data, error } = await supabase
       .from('attendance')
@@ -259,7 +259,7 @@ export const getAttendanceByDateRange = async (startDate: string, endDate: strin
 };
 
 // Get total employee count
-export const getTotalEmployeeCount = async (): Promise<number> => {
+async function getTotalEmployeeCount(): Promise<number> {
   try {
     const { count, error } = await supabase
       .from('employees')
@@ -279,7 +279,7 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
 }
 
 // Function to handle attendance check-in with retries and error handling
-export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
+async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
   const maxRetries = 3;
   let retryCount = 0;
 
@@ -729,5 +729,256 @@ async function getAdminContactInfo(): Promise<AdminContactInfo> {
 
 }
 
-// Enhanced setupAutoReportScheduling with multiple report times
+// Get admin contact info with WhatsApp settings
+async function getAdminContactInfo(): Promise<AdminContactInfo> {
+  try {
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('*')
+      .eq('setting_type', 'whatsapp')
+      .single();
 
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No settings found, return defaults
+        return {
+          whatsappNumber: '',
+          isWhatsappShareEnabled: false
+        };
+      }
+      throw error;
+    }
+
+    return {
+      whatsappNumber: data.whatsapp_number || '',
+      isWhatsappShareEnabled: data.is_whatsapp_share_enabled || false
+    };
+  } catch (error) {
+    console.error('Error fetching admin contact info:', error);
+    throw error;
+  }
+}
+
+// Save admin contact info with WhatsApp settings
+async function saveAdminContactInfo(settings: AdminContactInfo): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('admin_settings')
+      .upsert({
+        setting_type: 'whatsapp',
+        whatsapp_number: settings.whatsappNumber,
+        is_whatsapp_share_enabled: settings.isWhatsappShareEnabled
+      });
+
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Error saving admin contact info:', error);
+    return false;
+  }
+}
+
+// Auto share attendance summary via WhatsApp
+async function autoShareAttendanceSummary(): Promise<boolean> {
+  try {
+    const summary = await getTodayAttendanceSummary();
+    const adminSettings = await getAdminContactInfo();
+
+    if (!adminSettings.isWhatsappShareEnabled || !adminSettings.whatsappNumber) {
+      return false;
+    }
+
+    const message = formatAttendanceSummary(summary);
+    const whatsappUrl = `https://wa.me/${adminSettings.whatsappNumber}?text=${encodeURIComponent(message)}`;
+
+    // In a browser environment, open WhatsApp
+    if (typeof window !== 'undefined') {
+      window.open(whatsappUrl, '_blank');
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error auto-sharing attendance summary:', error);
+    return false;
+  }
+}
+
+// Get today's attendance summary
+async function getTodayAttendanceSummary(): Promise<{
+  totalEmployees: number;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  onTimeCount: number;
+}> {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const [{ data: attendanceData }, totalEmployees] = await Promise.all([
+      supabase
+        .from('attendance')
+        .select('*')
+        .eq('date', today),
+      getTotalEmployeeCount()
+    ]);
+
+    const presentCount = attendanceData?.length || 0;
+    const lateCount = attendanceData?.filter(record => record.status === 'late').length || 0;
+    const onTimeCount = attendanceData?.filter(record => record.status === 'on_time').length || 0;
+    const absentCount = totalEmployees - presentCount;
+
+    return {
+      totalEmployees,
+      presentCount,
+      lateCount,
+      absentCount,
+      onTimeCount
+    };
+  } catch (error) {
+    console.error('Error getting today\'s attendance summary:', error);
+    return {
+      totalEmployees: 0,
+      presentCount: 0,
+      lateCount: 0,
+      absentCount: 0,
+      onTimeCount: 0
+    };
+  }
+}
+
+// Format attendance summary for WhatsApp
+function formatAttendanceSummary(summary: {
+  totalEmployees: number;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  onTimeCount: number;
+}): string {
+  const date = new Date().toLocaleDateString();
+  return `*Attendance Summary - ${date}*\n\n` +
+    `Total Employees: ${summary.totalEmployees}\n` +
+    `Present: ${summary.presentCount}\n` +
+    `- On Time: ${summary.onTimeCount}\n` +
+    `- Late: ${summary.lateCount}\n` +
+    `Absent: ${summary.absentCount}\n\n` +
+    `Attendance Rate: ${((summary.presentCount / summary.totalEmployees) * 100).toFixed(1)}%\n` +
+    `On-Time Rate: ${((summary.onTimeCount / summary.presentCount) * 100).toFixed(1)}%`;
+}
+
+// Enhanced setupAutoReportScheduling with multiple report times
+async function setupAutoReportScheduling() {
+  const reportTimes = ['18:00']; // Add more times if needed
+
+  // Clear any existing intervals
+  if (typeof window !== 'undefined') {
+    const existingIntervals = window.localStorage.getItem('reportIntervals');
+    if (existingIntervals) {
+      JSON.parse(existingIntervals).forEach((intervalId: number) => {
+        clearInterval(intervalId);
+      });
+    }
+  }
+
+  const intervals: number[] = [];
+
+  reportTimes.forEach(time => {
+    const [hours, minutes] = time.split(':').map(Number);
+    const now = new Date();
+    const nextReport = new Date(now);
+    nextReport.setHours(hours, minutes, 0, 0);
+
+    if (nextReport <= now) {
+      nextReport.setDate(nextReport.getDate() + 1);
+    }
+
+    const msUntilNextReport = nextReport.getTime() - now.getTime();
+
+    // Set initial timeout to start the daily interval
+    setTimeout(() => {
+      // Share the first report
+      autoShareAttendanceSummary();
+
+      // Set up daily interval
+      const intervalId = window.setInterval(() => {
+        autoShareAttendanceSummary();
+      }, 24 * 60 * 60 * 1000); // 24 hours
+
+      intervals.push(intervalId);
+
+      // Store interval IDs
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('reportIntervals', JSON.stringify(intervals));
+      }
+    }, msUntilNextReport);
+  });
+}
+
+// Function to handle attendance check-out with retries and error handling
+async function recordAttendanceCheckOut(employeeId: string): Promise<boolean> {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get today's attendance record
+    const { data: existingRecord } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .single();
+    
+    if (!existingRecord) {
+      toast({
+        title: 'Error',
+        description: 'No check-in record found for today',
+        variant: 'destructive',
+      });
+      return false;
+    }
+    
+    if (existingRecord.check_out_time) {
+      toast({
+        title: 'Already Checked Out',
+        description: 'You have already checked out for today',
+        variant: 'destructive',
+      });
+      return false;
+    }
+    
+    // Update the record with check-out time
+    const checkOutTime = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from('attendance')
+      .update({
+        check_out_time: checkOutTime,
+        updated_at: checkOutTime
+      })
+      .eq('id', existingRecord.id);
+    
+    if (updateError) {
+      console.error('Error recording check-out:', updateError);
+      toast({
+        title: 'Error',
+        description: 'Failed to record check-out',
+        variant: 'destructive',
+      });
+      return false;
+    }
+    
+    toast({
+      title: 'Success',
+      description: 'Check-out recorded successfully',
+      variant: 'default',
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error in recordAttendanceCheckOut:', error);
+    toast({
+      title: 'Error',
+      description: 'An unexpected error occurred',
+      variant: 'destructive',
+    });
+    return false;
+  }
+}
+
+export { calculateLateDuration, calculateMinutesLate, calculateWorkingDuration, getAttendance, getAttendanceRecords, getAttendanceByDateRange, getTotalEmployeeCount, recordAttendanceCheckIn, recordAttendanceCheckOut, checkAttendanceStatus, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary, getTodayAttendanceSummary, setupAutoReportScheduling };
