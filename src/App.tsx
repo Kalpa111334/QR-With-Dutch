@@ -5,7 +5,6 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
 import RosterManagement from "./pages/RosterManagement";
 import GatePass from "./pages/GatePass";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
@@ -97,8 +96,8 @@ const App: React.FC = () => {
               <Route path="/roster" element={<RosterManagement />} />
               <Route path="/gate-pass" element={<GatePass />} />
               <Route path="/home" element={<Navigate to="/" replace />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
+              {/* Redirect all unknown routes to home */}
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
         </div>
