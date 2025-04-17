@@ -187,7 +187,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               title: 'Success!',
               text: verification.message || 'Gate pass verified successfully.',
               icon: 'success',
-              timer: 3000,
+              timer: 5000,
               showConfirmButton: false,
             });
           } else {
@@ -196,7 +196,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               title: 'Invalid Pass',
               text: verification.message || 'Pass verification failed',
               icon: 'error',
-              timer: 3000,
+              timer: 5000,
               showConfirmButton: false,
             });
           }
@@ -293,7 +293,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               title: "Already Completed",
               text: "You have already checked in and out today.",
               icon: "info",
-              timer: 3000,
+              timer: 5000,
               showConfirmButton: false,
             });
             setIsProcessing(false);
@@ -303,7 +303,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             }
             setTimeout(() => {
               setLastResult(null); // Reset after timeout to allow rescanning
-            }, 2000);
+              setScanning(true); // Re-enable scanning
+            }, 3000);
             return;
           }
           
@@ -313,7 +314,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
               title: "Error",
               text: `Failed to ${actionMessage === 'checked in' ? 'check in' : 'check out'}. Please try again.`,
               icon: "error",
-              timer: 3000,
+              timer: 5000,
               showConfirmButton: false,
             });
             setIsProcessing(false);
@@ -323,7 +324,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             }
             setTimeout(() => {
               setLastResult(null); // Reset after timeout to allow rescanning
-            }, 2000);
+              setScanning(true); // Re-enable scanning
+            }, 3000);
             return;
           }
           
@@ -332,7 +334,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
             title: `${actionMessage === 'checked in' ? 'Check-in' : 'Check-out'} Successful!`,
             text: `${employee.first_name} ${employee.last_name} ${actionMessage} successfully at ${new Date().toLocaleTimeString()}`,
             icon: 'success',
-            timer: 3000,
+            timer: 5000,
             showConfirmButton: false,
           });
         }
@@ -351,7 +353,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
       
       // Pause scanning briefly
       setScanning(false);
-      setTimeout(() => {
+      // Wait for alert to be dismissed or timeout before re-enabling scanner
+      const resumeScanning = () => {
         setScanning(true);
         setIsProcessing(false);
         if (processingTimeout.current) {
@@ -359,7 +362,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, mode = 'attendance' }) =>
           processingTimeout.current = null;
         }
         setLastResult(null); // Reset last result to allow rescanning
-      }, 1500);
+      };
+
+      // Add a longer delay to ensure the alert is visible
+      setTimeout(resumeScanning, 3000);
     } catch (error) {
       console.error("Unexpected error processing QR code:", error);
       setIsProcessing(false);
