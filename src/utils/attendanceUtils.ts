@@ -396,10 +396,31 @@ const employee: Employee | null = await employeePromise.catch((error) => {
 
       console.log('Inserting attendance record:', attendanceRecord);
       
+      // Verify database connection before insert
+      try {
+        const { error: healthError } = await supabase.from('attendance').select('count').limit(1);
+        if (healthError) {
+          console.error('Database health check failed:', healthError);
+          toast({
+            title: "Connection Error",
+            description: "Unable to connect to the database. Please try again.",
+            variant: "destructive"
+          });
+          return false;
+        }
+      } catch (healthError) {
+        console.error('Health check failed:', healthError);
+      }
+
       // Insert new record with timeout
       const insertPromise = new Promise(async (resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Insert timeout')), 15000);
+        const timeout = setTimeout(() => {
+          console.error('Insert operation timed out after 15 seconds');
+          reject(new Error('Insert timeout'));
+        }, 15000);
+        
         try {
+          console.log('Attempting to insert attendance record...');
           const { data, error } = await supabase
             .from('attendance')
             .insert(attendanceRecord)
@@ -416,7 +437,14 @@ const employee: Employee | null = await employeePromise.catch((error) => {
 
       const insertedData = await insertPromise.catch(error => {
         console.error('Error recording attendance check-in:', error);
+        console.error('Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
         
+        // Check for specific database errors
         if (error.code === '23505') {
           toast({
             title: "Already Checked In",
@@ -434,7 +462,25 @@ const employee: Employee | null = await employeePromise.catch((error) => {
             description: "This employee ID is not valid. Please contact admin.",
             variant: "destructive"
           });
+        } else if (error.code === '28P01') {
+          toast({
+            title: "Database Connection Error",
+            description: "Unable to connect to the database. Please try again.",
+            variant: "destructive"
+          });
+        } else if (error.code?.startsWith('08')) {
+          toast({
+            title: "Connection Error",
+            description: "Unable to connect to the server. Please check your internet connection.",
+            variant: "destructive"
+          });
         } else {
+          console.error('Unhandled error during check-in:', error);
+          toast({
+            title: "Check-in Failed",
+            description: "An unexpected error occurred. Please try again.",
+            variant: "destructive"
+          });
           throw error; // Re-throw for retry
         }
         return null;
