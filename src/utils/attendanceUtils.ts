@@ -299,14 +299,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
       console.log('Session check result:', session ? 'Active session found' : 'No active session');
       
       if (!session || sessionError) {
-        console.error('Authentication error:', sessionError);
-        toast({
-          title: "Authentication Required",
-          description: "Please log in again to record attendance.",
-          variant: "destructive"
-        });
-        
-        // Redirect to login page
+        // Silently redirect to login page without showing error message
         if (typeof window !== 'undefined') {
           window.location.href = '/login';
         }
