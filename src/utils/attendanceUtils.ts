@@ -398,11 +398,11 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
         .select('id, check_in_time, status')
         .eq('employee_id', employeeId)
         .eq('date', today)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single to avoid errors
 
       console.log('Existing attendance check result:', { found: !!existingRecord, error: checkError });
 
-      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is the 'not found' error
+      if (checkError) {
         console.error('Error checking existing attendance:', checkError);
         toast({
           title: "Check-in Failed",
@@ -432,30 +432,38 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
         created_at: checkInTime
       };
       
-      console.log('Attempting to insert record:', attendanceRecord);
-      const { data: insertedRecord, error: insertError } = await supabase
-        .from('attendance')
-        .insert(attendanceRecord)
-        .select()
-        .single();
+      try {
+        console.log('Attempting to insert record:', attendanceRecord);
+        const { data: insertedRecord, error: insertError } = await supabase
+          .from('attendance')
+          .insert([attendanceRecord]) // Wrap in array as required by Supabase
+          .select()
+          .single();
 
-      if (insertError) {
-        console.error('Error creating attendance record:', { error: insertError, details: insertError.details });
+        if (insertError) {
+          throw insertError;
+        }
+
+        if (!insertedRecord) {
+          throw new Error('No record was inserted');
+        }
+
+        console.log('Attendance check-in successful:', insertedRecord);
+        toast({
+          title: "Check-in Successful",
+          description: `Welcome, ${verifiedEmployee.first_name}! Your attendance has been recorded.`,
+          variant: "default"
+        });
+        return true;
+      } catch (error) {
+        console.error('Error creating attendance record:', error);
         toast({
           title: "Check-in Failed",
-          description: "Failed to record attendance. Please try again or contact support.",
+          description: "Failed to record attendance. Please try again.",
           variant: "destructive"
         });
         return false;
       }
-
-      console.log('Attendance check-in successful:', insertedRecord);
-      toast({
-        title: "Check-in Successful",
-        description: `Welcome, ${verifiedEmployee.first_name}! Your attendance has been recorded.`,
-        variant: "default"
-      });
-      return true;
 
     } catch (error) {
       console.error('Unexpected error in attemptCheckIn:', error);
