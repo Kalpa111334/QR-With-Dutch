@@ -7,15 +7,59 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { toast } from 'react-hot-toast';
+import { useRouter } from 'next/router';
 
 export default function Attendance() {
+  const router = useRouter();
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [isWhatsappShareEnabled, setIsWhatsappShareEnabled] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    loadSettings();
-  }, []);
+    const checkSession = async () => {
+      try {
+        // Try to refresh the session first
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshData?.session) {
+          console.log('Session refreshed successfully');
+          setIsLoading(false);
+          loadSettings();
+          return;
+        }
+
+        // If refresh failed, try to get current session
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (!session || error) {
+          console.error('No valid session found:', error);
+          toast.error("Session expired. Please log in again to continue.");
+          router.push('/login');
+          return;
+        }
+
+        setIsLoading(false);
+        loadSettings();
+      } catch (error) {
+        console.error('Session check failed:', error);
+        toast.error("Authentication error. Please try logging in again.");
+        router.push('/login');
+      }
+    };
+
+    checkSession();
+
+    // Set up auth state change listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        router.push('/login');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [router]);
 
   const loadSettings = async () => {
     try {

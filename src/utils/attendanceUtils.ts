@@ -293,29 +293,47 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
       
       console.log('Initial session check:', { session: !!session, error: sessionError });
       
-      // If no session, try to refresh it
-      if (!session) {
-        console.log('No active session, attempting to refresh...');
-        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-        console.log('Session refresh result:', { success: !!refreshData?.session, error: refreshError });
+      // Always try to refresh the session
+      console.log('Attempting to refresh session...');
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      console.log('Session refresh result:', { success: !!refreshData?.session, error: refreshError });
+      
+      if (refreshData?.session) {
+        console.log('Session refreshed successfully');
+        session = refreshData.session;
+      } else {
+        // Try to get a new session
+        console.log('Session refresh failed, attempting to get current session...');
+        const { data: currentData, error: currentError } = await supabase.auth.getSession();
         
-        if (refreshData?.session) {
-          console.log('Session refreshed successfully');
-          session = refreshData.session;
+        if (currentData?.session) {
+          console.log('Got current session successfully');
+          session = currentData.session;
         } else {
-          console.error('Session refresh failed:', refreshError);
-          sessionError = refreshError;
+          console.error('Failed to get current session:', { refreshError, currentError });
+          sessionError = currentError || refreshError;
         }
       }
 
-      if (!session || sessionError) {
+      if (!session) {
         console.error('No active session found:', { error: sessionError });
-        toast({
-          title: "Authentication Error",
-          description: "Please log out and log in again to refresh your session.",
-          variant: "destructive"
-        });
-        return false;
+        
+        // Try to get a new session one last time
+        const { data: finalData } = await supabase.auth.getSession();
+        if (finalData?.session) {
+          console.log('Got session on final attempt');
+          session = finalData.session;
+        } else {
+          console.error('All session retrieval attempts failed');
+          // Clear any stale session data
+          await supabase.auth.signOut();
+          toast({
+            title: "Authentication Error",
+            description: "Please refresh the page and log in again.",
+            variant: "destructive"
+          });
+          return false;
+        }
       }
 
       // Verify employee exists first with timeout
