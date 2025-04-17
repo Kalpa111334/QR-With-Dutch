@@ -296,7 +296,7 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
 
       // Verify employee exists first with timeout
       console.log('Verifying employee existence...');
-      const employeePromise = new Promise(async (resolve, reject) => {
+      const employeePromise = new Promise<Employee>(async (resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Employee verification timeout')), 10000);
         try {
           const { data, error } = await supabase
@@ -306,14 +306,24 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
             .single();
           clearTimeout(timeout);
           if (error) reject(error);
-          resolve(data);
+          if (!data) {
+            reject(new Error('No employee data found'));
+            return;
+          }
+          resolve(data as Employee);
         } catch (err) {
           clearTimeout(timeout);
           reject(err);
         }
       });
 
-      const employee = await employeePromise.catch(error => {
+      interface Employee {
+  id: string;
+  first_name: string;
+  last_name: string;
+}
+
+const employee: Employee | null = await employeePromise.catch((error) => {
         console.error('Employee verification error:', error);
         toast({
           title: "Employee Verification Failed",
@@ -327,7 +337,9 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
         return false;
       }
 
-      console.log('Employee verified:', employee.first_name, employee.last_name);
+      // At this point, employee is guaranteed to be of type Employee
+      const verifiedEmployee: Employee = employee;
+      console.log('Employee verified:', verifiedEmployee.first_name, verifiedEmployee.last_name);
 
       // Get current date/time in the correct format
       const now = new Date();
