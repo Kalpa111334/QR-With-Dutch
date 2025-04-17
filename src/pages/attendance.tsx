@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { getAdminContactInfo, saveAdminContactInfo } from '../utils/attendanceUtils';
+import { getAdminContactInfo, saveAdminContactInfo, recordAttendanceCheckIn } from '../utils/attendanceUtils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -8,12 +8,20 @@ import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/router';
+import dynamic from 'next/dynamic';
+
+// Dynamically import QR Scanner to avoid SSR issues
+const QrReader = dynamic(() => import('react-qr-reader'), {
+  ssr: false
+});
 
 export default function Attendance() {
   const router = useRouter();
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [isWhatsappShareEnabled, setIsWhatsappShareEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isScanning, setIsScanning] = useState(true);
+  const [lastScannedData, setLastScannedData] = useState<string | null>(null);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -112,8 +120,73 @@ export default function Attendance() {
     window.open(whatsappUrl, '_blank');
   };
 
+  const handleScan = async (data: string | null) => {
+    if (data) {
+      setIsScanning(false);
+      setIsLoading(true);
+      try {
+        // Try to ensure we have a session before proceeding
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          // Try anonymous sign in
+          await supabase.auth.signInAnonymously();
+        }
+
+        const success = await recordAttendanceCheckIn(data);
+        if (success) {
+          setLastScannedData(data);
+          toast.success('Attendance recorded successfully');
+        }
+      } catch (error) {
+        console.error('Error processing QR code:', error);
+        toast.error('Failed to process QR code. Please try again.');
+      } finally {
+        setIsLoading(false);
+        setIsScanning(true);
+      }
+    }
+  };
+
+  const handleError = (err: any) => {
+    console.error('QR Scanner error:', err);
+    toast.error("Error accessing camera. Please check permissions.");
+  };
+
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-4 flex justify-center items-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto p-4">
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Attendance Check-In</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="max-w-md mx-auto">
+              <QrReader
+                delay={300}
+                onError={handleError}
+                onScan={handleScan}
+                style={{ width: '100%' }}
+                facingMode="environment"
+              />
+              <p className="text-sm text-gray-500 text-center mt-2">
+                Position the QR code within the scanning area
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>WhatsApp Settings</CardTitle>
