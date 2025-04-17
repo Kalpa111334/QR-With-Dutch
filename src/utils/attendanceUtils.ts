@@ -256,7 +256,8 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
   try {
     const { count, error } = await supabase
       .from('employees')
-      .select('*', { count: 'exact' });
+      .select('*', { count: 'exact' })
+      .eq('status', 'active'); // Only count active employees
     
     if (error) {
       console.error('Error fetching total employee count:', error);
@@ -266,72 +267,13 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
     return count || 0;
   } catch (error) {
     console.error('Error in getTotalEmployeeCount:', error);
-
-    if (!existingRecord) {
-      if (typeof window !== 'undefined') {
-        const Swal = (window as any).Swal;
-        if (Swal) {
-          await Swal.fire({
-            icon: 'error',
-            title: 'No Check-in Found',
-            text: 'Please check in first before checking out.',
-            timer: 3000,
-            showConfirmButton: false
-          });
-        }
-      }
-      return false;
-    }
-
-    // Calculate working hours
-    const workingTime = calculateWorkingHours(existingRecord.check_in_time, checkOutTime);
-
-    // Update record with check-out time and working hours
-    const { data: updatedRecord, error: updateError } = await supabase
-      .from('attendance')
-      .update({
-        check_out_time: checkOutTime,
-        working_hours: workingTime.hours + (workingTime.minutes / 60),
-        status: 'completed'
-      })
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .select()
-      .single();
-
-    if (updateError) {
-      console.error('Error updating attendance record:', updateError);
-      return false;
-    }
-
-    // Show success message with working hours
-    if (typeof window !== 'undefined') {
-      const Swal = (window as any).Swal;
-      if (Swal) {
-        await Swal.fire({
-          icon: 'success',
-          title: 'Check-out Successful',
-          html: `<div>
-            <p>Checked out at ${format(new Date(checkOutTime), 'HH:mm')}</p>
-            <p>Check-in time: ${format(new Date(existingRecord.check_in_time), 'HH:mm')}</p>
-            <p>Total working hours: ${workingTime.hours}h ${workingTime.minutes}m</p>
-          </div>`,
-          timer: 4000,
-          timerProgressBar: true,
-          showConfirmButton: false
-        });
-      }
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error during check-out:', error);
-    return false;
+    return 0;
   }
 }
 
-export async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
-  const MAX_RETRIES = 3;
+// Function to handle attendance check-in with retries and error handling
+export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
+  const maxRetries = 3;
   let retryCount = 0;
 
   const attemptCheckIn = async (): Promise<boolean> => {
@@ -450,8 +392,8 @@ const employee: Employee | null = await employeePromise.catch((error) => {
       }
       
       // Quick check-in process
-      const checkInTime = new Date().toISOString();
-      const lateDuration = calculateLateDuration(checkInTime);
+      const currentTime = new Date().toISOString();
+      const lateDuration = calculateLateDuration(currentTime);
       const isLate = lateDuration.totalMinutes > 0;
       
       // Prepare attendance record with all necessary data
@@ -627,30 +569,103 @@ const employee: Employee | null = await employeePromise.catch((error) => {
           });
         }
       }
+      // Show success message with working hours
+      if (typeof window !== 'undefined') {
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          await Swal.fire({
+            icon: 'success',
+            title: 'Check-in Successful',
+            html: `<div>
+              <p>Checked in at ${format(new Date(), 'HH:mm')}</p>
+            </div>`,
+            timer: 4000,
+            timerProgressBar: true,
+            showConfirmButton: false
+          });
+        }
+      }
       return true;
     } catch (error) {
-      console.error(`Attempt ${retryCount + 1} failed:`, error);
-      
-      // Check if we should retry
-      if (retryCount < MAX_RETRIES - 1) {
-        retryCount++;
-        console.log(`Retrying... Attempt ${retryCount + 1} of ${MAX_RETRIES}`);
-        
-        // Exponential backoff
-        const backoffTime = Math.min(1000 * Math.pow(2, retryCount), 5000);
-        await new Promise(resolve => setTimeout(resolve, backoffTime));
-        
-        return attemptCheckIn();
-      }
-      
-      toast({
-        title: "Check-in Failed",
-        description: "Multiple attempts failed. Please try again later or contact support.",
-        variant: "destructive"
-      });
+      console.error('Error during check-in:', error);
       return false;
     }
   };
+
+  try {
+    while (retryCount < maxRetries) {
+      try {
+        const result = await attemptCheckIn();
+        if (result) {
+          return true;
+        }
+      } catch (error) {
+        console.error(`Attempt ${retryCount + 1} failed:`, error);
+        
+        // Check if we should retry
+        if (retryCount < maxRetries - 1) {
+          retryCount++;
+          console.log(`Retrying... Attempt ${retryCount + 1} of ${maxRetries}`);
+          
+          // Exponential backoff
+          const backoffTime = Math.min(1000 * Math.pow(2, retryCount), 5000);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          continue;
+        }
+        break;
+      }
+    }
+    return false;
+  } catch (error) {
+    console.error('Error during check-in:', error);
+    return false;
+  }
+  return false;
+}
+
+// Calculate working hours between check-in and check-out times
+function calculateWorkingHours(checkInTime: string, checkOutTime: string): { hours: number; minutes: number } {
+  const checkIn = new Date(checkInTime);
+  const checkOut = new Date(checkOutTime);
+  const diffMs = checkOut.getTime() - checkIn.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  return { hours: diffHours, minutes: diffMinutes };
+}
+
+export async function recordAttendanceCheckOut(employeeId: string): Promise<boolean> {
+  try {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const checkOutTime = new Date().toISOString();
+
+    // Find existing check-in record
+    const { data: existingRecord, error: fetchError } = await supabase
+      .from('attendance')
+      .select('check_in_time')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('Error fetching attendance record:', fetchError);
+      return false;
+    }
+
+    if (!existingRecord) {
+      if (typeof window !== 'undefined') {
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          await Swal.fire({
+            icon: 'error',
+            title: 'No Check-in Found',
+            text: 'Please check in first before checking out.',
+            timer: 3000,
+            showConfirmButton: false
+          });
+        }
+      }
+      return false;
+    }
 
     // Calculate working hours
     const workingTime = calculateWorkingHours(existingRecord.check_in_time, checkOutTime);
@@ -699,72 +714,6 @@ const employee: Employee | null = await employeePromise.catch((error) => {
   }
 }
 
-export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
-  try {
-    const now = new Date();
-    const today = format(now, 'yyyy-MM-dd');
-    
-    // Format check-out time as ISO string for proper timestamp with timezone
-    const checkOutTime = now.toISOString();
-    
-    // Find today's attendance record - use maybeSingle() instead of single()
-    const { data, error } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .maybeSingle();
-    
-    if (error) {
-      console.error('Error fetching attendance record:', error);
-      return false;
-    }
-    
-    if (!data) {
-      console.log('No check-in record found for today');
-      toast({
-        title: "No Check-In Record",
-        description: "No check-in record found for today. Please check in first.",
-        variant: "destructive",
-      });
-      return false;
-    }
-    
-    if (data.check_out_time) {
-      console.log('Employee already checked out today');
-      toast({
-        title: "Already Checked Out",
-        description: "You have already checked out today.",
-      });
-      return false;
-    }
-    
-    // Calculate working duration
-    const workingDuration = calculateWorkingDuration(data.check_in_time, checkOutTime);
-    
-    // Update record with check-out time
-    const { error: updateError } = await supabase
-      .from('attendance')
-      .update({
-        check_out_time: checkOutTime
-      })
-      .eq('id', data.id);
-    
-    if (updateError) {
-      console.error('Error recording attendance check-out:', updateError);
-      return false;
-    }
-    
-    toast({
-      title: "Checked Out",
-      description: `Your check-out time has been recorded. Working duration: ${workingDuration.formatted}`,
-    });
-    return true;
-  } catch (error) {
-    console.error('Error in recordAttendanceCheckOut:', error);
-    return false;
-  }
-};
 
 // Implementation of addAttendanceRecord
 export const addAttendanceRecord = async (employeeId: string): Promise<Attendance | null> => {
