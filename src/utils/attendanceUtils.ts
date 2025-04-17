@@ -303,47 +303,16 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
           sessionError = refreshError;
         }
       }
-      
-      console.log('Session check result:', session ? 'Active session found' : 'No active session');
-      
-      if (!session || sessionError) {
-        console.error('No active session found');
-        return false;
-      }
-      
-      // Rest of the implementation remains the same
-      return true;
-    } catch (error) {
-      console.error('Error in attemptCheckIn:', error);
-      return false;
-    }
-  };
-
-  return attemptCheckIn();
-    try {
-      // Log the start of the operation
-      console.log(`Attempt ${retryCount + 1} - Starting attendance check-in for employee:`, employeeId);
-
-      // First check if we have an active session and refresh if needed
-      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      // If no session, try to refresh it
-      if (!session && !sessionError) {
-        console.log('No active session, attempting to refresh...');
-        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-        if (refreshData?.session) {
-          console.log('Session refreshed successfully');
-          session = refreshData.session;
-        } else {
-          console.error('Session refresh failed:', refreshError);
-          sessionError = refreshError;
-        }
-      }
 
       console.log('Session check result:', session ? 'Active session found' : 'No active session');
       
       if (!session || sessionError) {
         console.error('No active session found');
+        toast({
+          title: "Authentication Error",
+          description: "Please try logging in again.",
+          variant: "destructive"
+        });
         return false;
       }
 
@@ -393,210 +362,85 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
       const today = format(startOfDay(now), 'yyyy-MM-dd');
       const checkInTime = now.toISOString();
       
-      // Check for existing attendance with retry logic
-      let existingRecord: { id: string; check_in_time: string; status: string } | null = null;
-      try {
-        // Check for existing attendance record
-        const { data, error: checkError } = await supabase
-          .from('attendance')
-          .select('id, check_in_time, status')
-          .eq('employee_id', employeeId)
-          .eq('date', today)
-          .single();
+      // Check for existing attendance
+      const { data: existingRecord, error: checkError } = await supabase
+        .from('attendance')
+        .select('id, check_in_time, status')
+        .eq('employee_id', employeeId)
+        .eq('date', today)
+        .single();
 
-        if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is the 'not found' error
-          console.error('Error checking existing attendance:', checkError);
-          throw checkError;
-        }
-
-        existingRecord = data;
-
-        if (existingRecord) {
-          console.log('Attendance record already exists for today');
-          return true;
-        }
-
-        // Create new attendance record
-        const { error: insertError } = await supabase
-          .from('attendance')
-          .insert([
-            {
-              employee_id: employeeId,
-              date: today,
-              check_in_time: checkInTime,
-              status: 'present'
-            }
-          ]);
-
-        if (insertError) {
-          console.error('Error inserting attendance record:', insertError);
-          throw insertError;
-        }
-
-        console.log('Successfully recorded attendance check-in');
-        return true;
-      } catch (error) {
-        console.error('Error in attendance check-in:', error);
+      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is the 'not found' error
+        console.error('Error checking existing attendance:', checkError);
         toast({
-          title: "Error Checking Attendance",
-          description: "Failed to verify existing attendance. Retrying...",
+          title: "Check-in Failed",
+          description: "Error checking attendance record. Please try again.",
           variant: "destructive"
         });
         return false;
       }
 
       if (existingRecord) {
-        console.log('Found existing attendance record:', existingRecord);
+        console.log('Attendance record already exists for today');
         toast({
           title: "Already Checked In",
-          description: `You have already checked in today at ${format(new Date(existingRecord.check_in_time), 'HH:mm')}`,
-        });
-        return false;
-      }
-      
-      // Quick check-in process
-      const currentTime = new Date().toISOString();
-      const lateDuration = calculateLateDuration(currentTime);
-      const isLate = lateDuration.totalMinutes > 0;
-      
-      // Prepare attendance record with all necessary data
-      const attendanceRecord = {
-        employee_id: employeeId,
-        date: today,
-        check_in_time: checkInTime,
-        status: isLate ? 'late' : 'present',
-        late_duration: isLate ? lateDuration.totalMinutes : 0,
-        device_info: typeof window !== 'undefined' ? navigator.userAgent : 'Unknown',
-        check_in_location: 'office',
-        check_in_attempts: 1
-      };
-
-      console.log('Inserting attendance record:', attendanceRecord);
-      
-      // Verify database connection and check for existing record in a single query
-      try {
-        const { data: existingData, error: existingError } = await supabase
-          .from('attendance')
-          .select('id, check_in_time')
-          .eq('employee_id', employeeId)
-          .eq('date', today)
-          .maybeSingle();
-
-        if (existingError) {
-          console.error('Database check failed:', existingError);
-          toast({
-            title: "Connection Error",
-            description: "Unable to verify attendance status. Please try again.",
-            variant: "destructive"
-          });
-          return false;
-        }
-
-        if (existingData) {
-          console.log('Found existing attendance record:', existingData);
-          toast({
-            title: "Already Checked In",
-            description: `You have already checked in today at ${format(new Date(existingData.check_in_time), 'HH:mm')}`,
-          });
-          return false;
-        }
-
-        console.log('No existing attendance record found, proceeding with check-in');
-      } catch (error) {
-        console.error('Database check failed:', error);
-        toast({
-          title: "Error",
-          description: "Unable to verify attendance status. Please try again.",
+          description: "You have already checked in for today.",
           variant: "destructive"
         });
         return false;
       }
 
-      // Insert new record with timeout
-      const insertPromise = new Promise(async (resolve, reject) => {
-        const timeout = setTimeout(() => {
-          console.error('Insert operation timed out after 15 seconds');
-          reject(new Error('Insert timeout'));
-        }, 15000);
-        
-        try {
-          console.log('Attempting to insert attendance record...');
-          const { data, error } = await supabase
-            .from('attendance')
-            .insert([attendanceRecord])
-            .select('id, check_in_time, status')
-            .single();
-
-          clearTimeout(timeout);
-
-          if (error) {
-            console.error('Insert error:', error);
-            reject(error);
-            return;
-          }
-
-          if (!data) {
-            console.error('No data returned after insert');
-            reject(new Error('Failed to record attendance'));
-            return;
-          }
-
-          // Verify the insert was successful
-          const verifyData = await supabase
-            .from('attendance')
-            .select('id, check_in_time, status')
-            .eq('id', data.id)
-            .single();
-
-          if (verifyData.error || !verifyData.data) {
-            console.error('Verification failed after insert:', verifyData.error);
-            reject(new Error('Failed to verify attendance record'));
-            return;
-          }
-
-          resolve(data);
-        } catch (err) {
-          clearTimeout(timeout);
-          reject(err);
-        }
-      });
-
-      const insertedData = await insertPromise.catch(error => {
-        console.error('Error recording attendance check-in:', error);
-        console.error('Error details:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
+      // Create new attendance record
+      const { error: insertError } = await supabase
+        .from('attendance')
+        .insert({
+          employee_id: employeeId,
+          date: today,
+          check_in_time: checkInTime,
+          status: 'present',
+          created_at: checkInTime
         });
-        
-        // Check for specific database errors
-        if (error.code === '23505') {
-          toast({
-            title: "Already Checked In",
-            description: "You have already checked in today.",
-          });
-        } else if (error.code === '42501') {
-          toast({
-            title: "Permission Denied",
-            description: "You don't have permission to record attendance. Please contact admin.",
-          });
-        } else {
-          toast({
-            title: "Error",
-            description: "An unexpected error occurred. Please try again.",
-          });
-        }
-        return null;
-      });
 
-      if (!insertedData) return false;
+      if (insertError) {
+        console.error('Error creating attendance record:', insertError);
+        toast({
+          title: "Check-in Failed",
+          description: "Failed to record attendance. Please try again.",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      console.log('Attendance check-in successful');
+      toast({
+        title: "Check-in Successful",
+        description: `Welcome, ${verifiedEmployee.first_name}! Your attendance has been recorded.`,
+        variant: "default"
+      });
       return true;
-  } catch (error) {
-    console.error('Error in attemptCheckIn:', error);
-    return false;
+
+    } catch (error) {
+      console.error('Error in attemptCheckIn:', error);
+      toast({
+        title: "Check-in Failed",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive"
+      });
+      return false;
+    }
+  };
+
+  while (retryCount < maxRetries) {
+    const success = await attemptCheckIn();
+    if (success) return true;
+    retryCount++;
+    if (retryCount < maxRetries) {
+      console.log(`Retrying check-in (attempt ${retryCount + 1} of ${maxRetries})...`);
+      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
+    }
   }
-  return false; // Add default return for all code paths
+
+  return false;
 }
 
 async function checkAttendanceStatus(employeeId: string): Promise<boolean> {
@@ -690,37 +534,6 @@ async function checkAttendanceStatus(employeeId: string): Promise<boolean> {
     }
     return false;
   }
-
-
-// Get admin contact info with WhatsApp settings
-async function getAdminContactInfo(): Promise<AdminContactInfo> {
-  try {
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .select('*')
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        // No settings found, return defaults
-        return {
-          whatsappNumber: '',
-          isWhatsappShareEnabled: false
-        };
-      }
-      throw error;
-    }
-
-    return {
-      whatsappNumber: data.whatsapp_number || '',
-      isWhatsappShareEnabled: data.is_whatsapp_share_enabled || false
-    };
-  } catch (error) {
-    console.error('Error fetching admin contact info:', error);
-    throw error;
-  }
-}
-
 }
 
 // Get admin contact info with WhatsApp settings

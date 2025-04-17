@@ -31,7 +31,10 @@ export default function Attendance() {
   const handleSaveSettings = async () => {
     try {
       setIsLoading(true);
-      await saveAdminContactInfo(whatsappNumber, isWhatsappShareEnabled);
+      await saveAdminContactInfo({
+        whatsappNumber,
+        isWhatsappShareEnabled
+      });
       toast.success('WhatsApp settings saved successfully');
     } catch (error) {
       console.error('Error saving settings:', error);
