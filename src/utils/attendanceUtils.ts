@@ -280,17 +280,36 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
       // Log the start of the operation
       console.log(`Attempt ${retryCount + 1} - Starting attendance check-in for employee:`, employeeId);
 
-      // First check if we have an active session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      // First check if we have an active session and refresh if needed
+      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      // If no session, try to refresh it
+      if (!session && !sessionError) {
+        console.log('No active session, attempting to refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshData?.session) {
+          console.log('Session refreshed successfully');
+          session = refreshData.session;
+        } else {
+          console.error('Session refresh failed:', refreshError);
+          sessionError = refreshError;
+        }
+      }
+
       console.log('Session check result:', session ? 'Active session found' : 'No active session');
       
       if (!session || sessionError) {
         console.error('Authentication error:', sessionError);
         toast({
           title: "Authentication Required",
-          description: "Please log in to record attendance.",
+          description: "Please log in again to record attendance.",
           variant: "destructive"
         });
+        
+        // Redirect to login page
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
         return false;
       }
 
