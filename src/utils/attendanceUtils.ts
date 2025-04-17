@@ -270,180 +270,200 @@ export const getTotalEmployeeCount = async (): Promise<number> => {
   }
 };
 
-// Record attendance check-in
+// Record attendance check-in with improved error handling and retry logic
 export const recordAttendanceCheckIn = async (employeeId: string): Promise<boolean> => {
-  try {
-    // Log the start of the operation
-    console.log('Starting attendance check-in for employee:', employeeId);
+  const MAX_RETRIES = 3;
+  let retryCount = 0;
 
-    // First check if we have an active session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    console.log('Session check result:', session ? 'Active session found' : 'No active session', sessionError);
-    
-    if (!session || sessionError) {
-      console.error('Authentication error:', sessionError);
-      toast({
-        title: "Authentication Required",
-        description: "Please log in to record attendance.",
-        variant: "destructive"
-      });
-      return false;
-    }
+  const attemptCheckIn = async (): Promise<boolean> => {
+    try {
+      // Log the start of the operation
+      console.log(`Attempt ${retryCount + 1} - Starting attendance check-in for employee:`, employeeId);
 
-    // Verify employee exists first
-    console.log('Verifying employee existence...');
-    const { data: employee, error: employeeError } = await supabase
-      .from('employees')
-      .select('id, first_name, last_name')
-      .eq('id', employeeId)
-      .single();
-
-    if (employeeError) {
-      console.error('Employee verification error:', employeeError);
-      toast({
-        title: "Employee Not Found",
-        description: "Could not verify employee ID. Please try again or contact admin.",
-        variant: "destructive"
-      });
-      return false;
-    }
-
-    if (!employee) {
-      console.error('Employee not found:', employeeId);
-      toast({
-        title: "Invalid Employee",
-        description: "This employee ID is not registered in the system.",
-        variant: "destructive"
-      });
-      return false;
-    }
-
-    console.log('Employee verified:', employee.first_name, employee.last_name);
-
-    // Get current date/time in the correct format
-    const now = new Date();
-    const today = format(startOfDay(now), 'yyyy-MM-dd');
-    const checkInTime = now.toISOString();
-    
-    console.log('Checking for existing attendance record for date:', today);
-    
-    // Check if already checked in today
-    const { data: existingRecord, error: existingError } = await supabase
-      .from('attendance')
-      .select('id, check_in_time, status')
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .maybeSingle();
-    
-    if (existingError) {
-      console.error('Error checking existing attendance:', existingError);
-      toast({
-        title: "Error Checking Attendance",
-        description: "Failed to verify existing attendance. Please try again.",
-        variant: "destructive"
-      });
-      return false;
-    }
-    
-    if (existingRecord) {
-      console.log('Found existing attendance record:', existingRecord);
-      toast({
-        title: "Already Checked In",
-        description: `You have already checked in today at ${format(new Date(existingRecord.check_in_time), 'HH:mm')}`,
-      });
-      return false;
-    }
-    
-    // Determine if the employee is late
-    const lateDuration = calculateLateDuration(checkInTime);
-    const isLate = lateDuration.totalMinutes > 0;
-    console.log('Late status:', isLate ? `Late by ${lateDuration.formatted}` : 'On time');
-    
-    // Prepare attendance record
-    const attendanceRecord = {
-      employee_id: employeeId,
-      date: today,
-      check_in_time: checkInTime,
-      status: isLate ? 'late' : 'present'
-    };
-
-    console.log('Inserting attendance record:', attendanceRecord);
-    
-    // Insert new record
-    const { data: insertedData, error: insertError } = await supabase
-      .from('attendance')
-      .insert(attendanceRecord)
-      .select()
-      .single();
-    
-    if (insertError) {
-      console.error('Error recording attendance check-in:', insertError);
+      // First check if we have an active session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log('Session check result:', session ? 'Active session found' : 'No active session');
       
-      // Handle unique constraint violation
-      if (insertError.code === '23505') {
+      if (!session || sessionError) {
+        console.error('Authentication error:', sessionError);
+        toast({
+          title: "Authentication Required",
+          description: "Please log in to record attendance.",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      // Verify employee exists first with timeout
+      console.log('Verifying employee existence...');
+      const employeePromise = new Promise(async (resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Employee verification timeout')), 10000);
+        try {
+          const { data, error } = await supabase
+            .from('employees')
+            .select('id, first_name, last_name')
+            .eq('id', employeeId)
+            .single();
+          clearTimeout(timeout);
+          if (error) reject(error);
+          resolve(data);
+        } catch (err) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+
+      const employee = await employeePromise.catch(error => {
+        console.error('Employee verification error:', error);
+        toast({
+          title: "Employee Verification Failed",
+          description: "Could not verify employee ID. Please try again.",
+          variant: "destructive"
+        });
+        return null;
+      });
+
+      if (!employee) {
+        return false;
+      }
+
+      console.log('Employee verified:', employee.first_name, employee.last_name);
+
+      // Get current date/time in the correct format
+      const now = new Date();
+      const today = format(startOfDay(now), 'yyyy-MM-dd');
+      const checkInTime = now.toISOString();
+      
+      // Check for existing attendance with retry logic
+      const getExistingRecord = async () => {
+        const { data, error } = await supabase
+          .from('attendance')
+          .select('id, check_in_time, status')
+          .eq('employee_id', employeeId)
+          .eq('date', today)
+          .maybeSingle();
+
+        if (error) throw error;
+        return data;
+      };
+
+      const existingRecord = await getExistingRecord().catch(error => {
+        console.error('Error checking existing attendance:', error);
+        toast({
+          title: "Error Checking Attendance",
+          description: "Failed to verify existing attendance. Retrying...",
+          variant: "destructive"
+        });
+        return null;
+      });
+
+      if (existingRecord) {
+        console.log('Found existing attendance record:', existingRecord);
         toast({
           title: "Already Checked In",
-          description: "You have already checked in today.",
+          description: `You have already checked in today at ${format(new Date(existingRecord.check_in_time), 'HH:mm')}`,
         });
         return false;
       }
       
-      // Handle RLS violation
-      if (insertError.code === '42501') {
-        toast({
-          title: "Permission Denied",
-          description: "You don't have permission to record attendance. Please contact admin.",
-          variant: "destructive"
-        });
-        return false;
-      }
+      // Determine if the employee is late
+      const lateDuration = calculateLateDuration(checkInTime);
+      const isLate = lateDuration.totalMinutes > 0;
+      console.log('Late status:', isLate ? `Late by ${lateDuration.formatted}` : 'On time');
+      
+      // Prepare attendance record with additional metadata
+      const attendanceRecord = {
+        employee_id: employeeId,
+        date: today,
+        check_in_time: checkInTime,
+        status: isLate ? 'late' : 'present',
+        late_duration: isLate ? lateDuration.totalMinutes : 0,
+        device_info: typeof window !== 'undefined' ? navigator.userAgent : 'Unknown',
+        check_in_location: 'office' // You can make this dynamic if needed
+      };
 
-      // Handle foreign key violation
-      if (insertError.code === '23503') {
-        toast({
-          title: "Invalid Employee",
-          description: "This employee ID is not valid. Please contact admin.",
-          variant: "destructive"
-        });
+      console.log('Inserting attendance record:', attendanceRecord);
+      
+      // Insert new record with timeout
+      const insertPromise = new Promise(async (resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Insert timeout')), 15000);
+        try {
+          const { data, error } = await supabase
+            .from('attendance')
+            .insert(attendanceRecord)
+            .select()
+            .single();
+          clearTimeout(timeout);
+          if (error) reject(error);
+          resolve(data);
+        } catch (err) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+
+      const insertedData = await insertPromise.catch(error => {
+        console.error('Error recording attendance check-in:', error);
+        
+        if (error.code === '23505') {
+          toast({
+            title: "Already Checked In",
+            description: "You have already checked in today.",
+          });
+        } else if (error.code === '42501') {
+          toast({
+            title: "Permission Denied",
+            description: "You don't have permission to record attendance. Please contact admin.",
+            variant: "destructive"
+          });
+        } else if (error.code === '23503') {
+          toast({
+            title: "Invalid Employee",
+            description: "This employee ID is not valid. Please contact admin.",
+            variant: "destructive"
+          });
+        } else {
+          throw error; // Re-throw for retry
+        }
+        return null;
+      });
+
+      if (!insertedData) {
         return false;
+      }
+        console.log('Successfully recorded attendance:', insertedData);
+      toast({
+        title: isLate ? "Late Check-in Recorded" : "Check-in Successful",
+        description: isLate
+          ? `Checked in ${lateDuration.formatted} late. Expected time was ${lateDuration.expectedTime}`
+          : `Successfully checked in at ${format(new Date(checkInTime), 'HH:mm')}`
+      });
+      return true;
+    } catch (error) {
+      console.error(`Attempt ${retryCount + 1} failed:`, error);
+      
+      // Check if we should retry
+      if (retryCount < MAX_RETRIES - 1) {
+        retryCount++;
+        console.log(`Retrying... Attempt ${retryCount + 1} of ${MAX_RETRIES}`);
+        
+        // Exponential backoff
+        const backoffTime = Math.min(1000 * Math.pow(2, retryCount), 5000);
+        await new Promise(resolve => setTimeout(resolve, backoffTime));
+        
+        return attemptCheckIn();
       }
       
       toast({
         title: "Check-in Failed",
-        description: insertError.message || "Failed to record attendance. Please try again.",
+        description: "Multiple attempts failed. Please try again later or contact support.",
         variant: "destructive"
       });
       return false;
     }
-    
-    if (!insertedData) {
-      console.error('No data returned after insert');
-      toast({
-        title: "Check-in Failed",
-        description: "Failed to record attendance. Please try again.",
-        variant: "destructive"
-      });
-      return false;
-    }
-    
-    console.log('Successfully recorded attendance:', insertedData);
-    
-    toast({
-      title: isLate ? "Checked In (Late)" : "Checked In",
-      description: isLate 
-        ? `Your attendance has been recorded. You are ${lateDuration.formatted} late.`
-        : "Your attendance has been recorded.",
-    });
-    return true;
-  } catch (error) {
-    console.error('Unexpected error in recordAttendanceCheckIn:', error);
-    toast({
-      title: "Check-in Failed",
-      description: error instanceof Error ? error.message : "An unexpected error occurred. Please try again.",
-      variant: "destructive"
-    });
-    return false;
-  }
+  };
+
+  return attemptCheckIn();
 };
 
 // Record attendance check-out
