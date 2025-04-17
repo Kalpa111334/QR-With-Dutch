@@ -296,6 +296,45 @@ export const recordAttendanceCheckIn = async (employeeId: string): Promise<boole
           sessionError = refreshError;
         }
       }
+      
+      console.log('Session check result:', session ? 'Active session found' : 'No active session');
+      
+      if (!session || sessionError) {
+        // Silently redirect to login page without showing error message
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+        return false;
+      }
+      
+      // Rest of the implementation remains the same
+      return true;
+    } catch (error) {
+      console.error('Error in attemptCheckIn:', error);
+      return false;
+    }
+  };
+
+  return attemptCheckIn();
+    try {
+      // Log the start of the operation
+      console.log(`Attempt ${retryCount + 1} - Starting attendance check-in for employee:`, employeeId);
+
+      // First check if we have an active session and refresh if needed
+      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      // If no session, try to refresh it
+      if (!session && !sessionError) {
+        console.log('No active session, attempting to refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshData?.session) {
+          console.log('Session refreshed successfully');
+          session = refreshData.session;
+        } else {
+          console.error('Session refresh failed:', refreshError);
+          sessionError = refreshError;
+        }
+      }
 
       console.log('Session check result:', session ? 'Active session found' : 'No active session');
       
@@ -360,27 +399,56 @@ const employee: Employee | null = await employeePromise.catch((error) => {
       const checkInTime = now.toISOString();
       
       // Check for existing attendance with retry logic
-      const getExistingRecord = async () => {
-        const { data, error } = await supabase
+      let existingRecord: { id: string; check_in_time: string; status: string } | null = null;
+      try {
+        // Check for existing attendance record
+        const { data, error: checkError } = await supabase
           .from('attendance')
           .select('id, check_in_time, status')
           .eq('employee_id', employeeId)
           .eq('date', today)
-          .maybeSingle();
+          .single();
 
-        if (error) throw error;
-        return data;
-      };
+        if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is the 'not found' error
+          console.error('Error checking existing attendance:', checkError);
+          throw checkError;
+        }
 
-      const existingRecord = await getExistingRecord().catch(error => {
-        console.error('Error checking existing attendance:', error);
+        existingRecord = data;
+
+        if (existingRecord) {
+          console.log('Attendance record already exists for today');
+          return true;
+        }
+
+        // Create new attendance record
+        const { error: insertError } = await supabase
+          .from('attendance')
+          .insert([
+            {
+              employee_id: employeeId,
+              date: today,
+              check_in_time: checkInTime,
+              status: 'present'
+            }
+          ]);
+
+        if (insertError) {
+          console.error('Error inserting attendance record:', insertError);
+          throw insertError;
+        }
+
+        console.log('Successfully recorded attendance check-in');
+        return true;
+      } catch (error) {
+        console.error('Error in attendance check-in:', error);
         toast({
           title: "Error Checking Attendance",
           description: "Failed to verify existing attendance. Retrying...",
           variant: "destructive"
         });
-        return null;
-      });
+        return false;
+      }
 
       if (existingRecord) {
         console.log('Found existing attendance record:', existingRecord);
@@ -517,138 +585,196 @@ const employee: Employee | null = await employeePromise.catch((error) => {
           toast({
             title: "Permission Denied",
             description: "You don't have permission to record attendance. Please contact admin.",
-            variant: "destructive"
-          });
-        } else if (error.code === '23503') {
-          toast({
-            title: "Invalid Employee",
-            description: "This employee ID is not valid. Please contact admin.",
-            variant: "destructive"
-          });
-        } else if (error.code === '28P01') {
-          toast({
-            title: "Database Connection Error",
-            description: "Unable to connect to the database. Please try again.",
-            variant: "destructive"
-          });
-        } else if (error.code?.startsWith('08')) {
-          toast({
-            title: "Connection Error",
-            description: "Unable to connect to the server. Please check your internet connection.",
-            variant: "destructive"
           });
         } else {
-          console.error('Unhandled error during check-in:', error);
           toast({
-            title: "Check-in Failed",
+            title: "Error",
             description: "An unexpected error occurred. Please try again.",
-            variant: "destructive"
           });
-          throw error; // Re-throw for retry
         }
         return null;
       });
 
-      if (!insertedData) {
-        return false;
-      }
-
-      // Show success message with SweetAlert
-      if (typeof window !== 'undefined') {
-        const Swal = (window as any).Swal;
-        if (Swal) {
-          await Swal.fire({
-            icon: isLate ? 'warning' : 'success',
-            title: isLate ? 'Late Check-in' : 'Check-in Successful',
-            text: isLate
-              ? `You are ${lateDuration.formatted} late. Expected time was ${lateDuration.expectedTime}`
-              : `Successfully checked in at ${format(new Date(checkInTime), 'HH:mm')}`,
-            timer: 3000,
-            timerProgressBar: true,
-            showConfirmButton: false
-          });
-        }
-      }
-      // Show success message with working hours
-      if (typeof window !== 'undefined') {
-        const Swal = (window as any).Swal;
-        if (Swal) {
-          await Swal.fire({
-            icon: 'success',
-            title: 'Check-in Successful',
-            html: `<div>
-              <p>Checked in at ${format(new Date(), 'HH:mm')}</p>
-            </div>`,
-            timer: 4000,
-            timerProgressBar: true,
-            showConfirmButton: false
-          });
-        }
-      }
+      if (!insertedData) return false;
       return true;
-    } catch (error) {
-      console.error('Error during check-in:', error);
+  } catch (error) {
+    console.error('Error in attemptCheckIn:', error);
+    return false;
+  }
+  return false; // Add default return for all code paths
+}
+
+async function checkAttendanceStatus(employeeId: string) {
+  try {
+    const now = new Date();
+    const today = format(now, 'yyyy-MM-dd');
+
+    // Quick check for existing attendance
+    const { data: existingRecord, error: checkError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw new Error('Failed to check attendance status');
+    }
+
+    // If already checked in, show error
+    if (existingRecord) {
+      if (typeof window !== 'undefined') {
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          await Swal.fire({
+            icon: 'error',
+            title: 'Already Checked In',
+            text: 'You have already checked in for today.',
+            timer: 2000,
+            timerProgressBar: true,
+            showConfirmButton: false
+          });
+        }
+      }
       return false;
     }
-  };
 
-  try {
-    while (retryCount < maxRetries) {
-      try {
-        const result = await attemptCheckIn();
-        if (result) {
-          return true;
-        }
-      } catch (error) {
-        console.error(`Attempt ${retryCount + 1} failed:`, error);
-        
-        // Check if we should retry
-        if (retryCount < maxRetries - 1) {
-          retryCount++;
-          console.log(`Retrying... Attempt ${retryCount + 1} of ${maxRetries}`);
-          
-          // Exponential backoff
-          const backoffTime = Math.min(1000 * Math.pow(2, retryCount), 5000);
-          await new Promise(resolve => setTimeout(resolve, backoffTime));
-          continue;
-        }
-        break;
+    // Calculate late duration
+    const lateDuration = calculateLateDuration(now.toISOString());
+
+    // Insert attendance record
+    const { error: insertError } = await supabase
+      .from('attendance')
+      .insert({
+        employee_id: employeeId,
+        date: today,
+        check_in_time: now.toISOString(),
+        late_duration: lateDuration.totalMinutes,
+        status: lateDuration.totalMinutes > 0 ? 'late' : 'on_time'
+      });
+
+    if (insertError) {
+      throw new Error('Failed to record attendance');
+    }
+
+    // Show quick success message
+    if (typeof window !== 'undefined') {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        await Swal.fire({
+          icon: 'success',
+          title: 'Check-in Successful',
+          html: `<div>
+            <p>Checked in at ${format(now, 'HH:mm')}</p>
+            ${lateDuration.totalMinutes > 0 ? 
+              `<p class="text-warning">You are ${lateDuration.formatted} late</p>
+               <p class="text-sm">Expected arrival: ${lateDuration.expectedTime}</p>` : 
+              '<p class="text-success">You are on time!</p>'}
+          </div>`,
+          timer: 2000,
+          timerProgressBar: true,
+          showConfirmButton: false
+        });
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error('Error during check-in:', error);
+    if (typeof window !== 'undefined') {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        await Swal.fire({
+          icon: 'error',
+          title: 'Check-in Failed',
+          text: 'Please try again or contact support.',
+          timer: 2000,
+          timerProgressBar: true,
+          showConfirmButton: false
+        });
       }
     }
     return false;
-  } catch (error) {
-    console.error('Error during check-in:', error);
-    return false;
+  }
+
+  try {
+    // Get current time
+    const now = new Date();
+
+    // Calculate late duration
+    const lateDuration = calculateLateDuration(now.toISOString());
+
+    // Get today's date in YYYY-MM-DD format
+    const today = format(now, 'yyyy-MM-dd');
+
+    // Insert attendance record
+    const { error: insertError } = await supabase
+    .from('attendance')
+    .insert({
+      employee_id: employeeId,
+      date: today,
+      check_in_time: now.toISOString(),
+      late_duration: lateDuration.totalMinutes,
+      status: lateDuration.totalMinutes > 0 ? 'late' : 'on_time'
+    });
+
+  if (insertError) {
+    throw new Error('Failed to record attendance');
+  }
+
+  // Show quick success message
+  if (typeof window !== 'undefined') {
+    const Swal = (window as any).Swal;
+    if (Swal) {
+      await Swal.fire({
+        icon: 'success',
+        title: 'Check-in Successful',
+        html: `<div>
+          <p>Checked in at ${format(now, 'HH:mm')}</p>
+          ${lateDuration.totalMinutes > 0 ? 
+            `<p class="text-warning">You are ${lateDuration.formatted} late</p>
+             <p class="text-sm">Expected arrival: ${lateDuration.expectedTime}</p>` : 
+            '<p class="text-success">You are on time!</p>'}
+        </div>`,
+        timer: 2000,
+        timerProgressBar: true,
+        showConfirmButton: false
+      });
+    }
+  }
+  return true;
+} catch (error) {
+  console.error('Error during check-in:', error);
+  if (typeof window !== 'undefined') {
+    const Swal = (window as any).Swal;
+    if (Swal) {
+      await Swal.fire({
+        icon: 'error',
+        title: 'Check-in Failed',
+        text: 'Please try again or contact support.',
+        timer: 2000,
+        timerProgressBar: true,
+        showConfirmButton: false
+      });
+    }
   }
   return false;
 }
 
-// Calculate working hours between check-in and check-out times
-function calculateWorkingHours(checkInTime: string, checkOutTime: string): { hours: number; minutes: number } {
-  const checkIn = new Date(checkInTime);
-  const checkOut = new Date(checkOutTime);
-  const diffMs = checkOut.getTime() - checkIn.getTime();
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-  return { hours: diffHours, minutes: diffMinutes };
-}
-
-export async function recordAttendanceCheckOut(employeeId: string): Promise<boolean> {
+export const recordAttendanceCheckOut = async (employeeId: string): Promise<boolean> => {
   try {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const checkOutTime = new Date().toISOString();
+    const now = new Date();
+    const today = format(now, 'yyyy-MM-dd');
 
-    // Find existing check-in record
-    const { data: existingRecord, error: fetchError } = await supabase
+    // Get today's check-in record
+    const { data: existingRecord, error: checkError } = await supabase
       .from('attendance')
-      .select('check_in_time')
+      .select('*')
       .eq('employee_id', employeeId)
       .eq('date', today)
-      .maybeSingle();
+      .single();
 
-    if (fetchError) {
-      console.error('Error fetching attendance record:', fetchError);
-      return false;
+    if (checkError) {
+      throw new Error('Failed to find check-in record');
     }
 
     if (!existingRecord) {
@@ -658,8 +784,9 @@ export async function recordAttendanceCheckOut(employeeId: string): Promise<bool
           await Swal.fire({
             icon: 'error',
             title: 'No Check-in Found',
-            text: 'Please check in first before checking out.',
-            timer: 3000,
+            text: 'Please check-in first before checking out.',
+            timer: 2000,
+            timerProgressBar: true,
             showConfirmButton: false
           });
         }
@@ -667,28 +794,41 @@ export async function recordAttendanceCheckOut(employeeId: string): Promise<bool
       return false;
     }
 
-    // Calculate working hours
-    const workingTime = calculateWorkingHours(existingRecord.check_in_time, checkOutTime);
-
-    // Update record with check-out time and working hours
-    const { data: updatedRecord, error: updateError } = await supabase
-      .from('attendance')
-      .update({
-        check_out_time: checkOutTime,
-        working_hours: workingTime.hours + (workingTime.minutes / 60),
-        status: 'completed'
-      })
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .select()
-      .single();
-
-    if (updateError) {
-      console.error('Error updating attendance record:', updateError);
+    if (existingRecord.check_out_time) {
+      if (typeof window !== 'undefined') {
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          await Swal.fire({
+            icon: 'error',
+            title: 'Already Checked Out',
+            text: 'You have already checked out for today.',
+            timer: 2000,
+            timerProgressBar: true,
+            showConfirmButton: false
+          });
+        }
+      }
       return false;
     }
 
-    // Show success message with working hours
+    // Calculate working duration
+    const workingTime = calculateWorkingDuration(existingRecord.check_in_time, now.toISOString());
+
+    // Update record with check-out time and working hours
+    const { error: updateError } = await supabase
+      .from('attendance')
+      .update({
+        check_out_time: now.toISOString(),
+        working_hours: workingTime.hours + (workingTime.minutes / 60),
+        status: existingRecord.status === 'late' ? 'completed_late' : 'completed'
+      })
+      .eq('id', existingRecord.id);
+
+    if (updateError) {
+      throw new Error('Failed to record check-out');
+    }
+
+    // Show quick success message
     if (typeof window !== 'undefined') {
       const Swal = (window as any).Swal;
       if (Swal) {
@@ -696,32 +836,43 @@ export async function recordAttendanceCheckOut(employeeId: string): Promise<bool
           icon: 'success',
           title: 'Check-out Successful',
           html: `<div>
-            <p>Checked out at ${format(new Date(checkOutTime), 'HH:mm')}</p>
+            <p>Checked out at ${format(now, 'HH:mm')}</p>
             <p>Check-in time: ${format(new Date(existingRecord.check_in_time), 'HH:mm')}</p>
-            <p>Total working hours: ${workingTime.hours}h ${workingTime.minutes}m</p>
+            <p>Total working hours: ${workingTime.formatted}</p>
           </div>`,
-          timer: 4000,
+          timer: 2000,
           timerProgressBar: true,
           showConfirmButton: false
         });
       }
     }
-
     return true;
   } catch (error) {
     console.error('Error during check-out:', error);
+    if (typeof window !== 'undefined') {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        await Swal.fire({
+          icon: 'error',
+          title: 'Check-out Failed',
+          text: 'Please try again or contact support.',
+          timer: 2000,
+          timerProgressBar: true,
+          showConfirmButton: false
+        });
+      }
+    }
     return false;
   }
 }
 
-
-// Implementation of addAttendanceRecord
+// Implementation of quick addAttendanceRecord
 export const addAttendanceRecord = async (employeeId: string): Promise<Attendance | null> => {
   try {
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
     
-    // Check if employee already has an attendance record for today
+    // Quick check for existing record
     const { data: existingRecord } = await supabase
       .from('attendance')
       .select('*')
@@ -730,72 +881,148 @@ export const addAttendanceRecord = async (employeeId: string): Promise<Attendanc
       .single();
     
     if (existingRecord) {
-      // If record exists but no check-out time, update with check-out
+      // Handle check-out if no check-out time exists
       if (!existingRecord.check_out_time) {
         const checkOutTime = now.toISOString();
+        const workingTime = calculateWorkingDuration(existingRecord.check_in_time, checkOutTime);
+        
         const { data, error } = await supabase
           .from('attendance')
-          .update({ check_out_time: checkOutTime })
+          .update({
+            check_out_time: checkOutTime,
+            working_hours: workingTime.hours + (workingTime.minutes / 60),
+            status: existingRecord.status === 'late' ? 'completed_late' : 'completed'
+          })
           .eq('id', existingRecord.id)
           .select()
           .single();
         
         if (error) {
-          console.error('Error updating attendance record:', error);
-          return null;
+          throw new Error('Failed to update check-out record');
+        }
+
+        // Show quick success message for check-out
+        if (typeof window !== 'undefined') {
+          const Swal = (window as any).Swal;
+          if (Swal) {
+            await Swal.fire({
+              icon: 'success',
+              title: 'Check-out Successful',
+              html: `<div>
+                <p>Checked out at ${format(now, 'HH:mm')}</p>
+                <p>Check-in time: ${format(new Date(existingRecord.check_in_time), 'HH:mm')}</p>
+                <p>Total working hours: ${workingTime.formatted}</p>
+              </div>`,
+              timer: 2000,
+              timerProgressBar: true,
+              showConfirmButton: false
+            });
+          }
         }
         
         return {
           id: data.id,
           employeeId: data.employee_id,
-          employeeName: '',  // This will be populated by the calling function
+          employeeName: '',
           checkInTime: data.check_in_time,
           checkOutTime: data.check_out_time,
           date: format(new Date(data.date), 'yyyy-MM-dd'),
-          status: (data.status as 'present' | 'late' | 'absent')
+          status: data.status as 'present' | 'late' | 'absent',
+          workingHours: workingTime.hours + (workingTime.minutes / 60)
         };
+      }
+      
+      // Already checked out
+      if (typeof window !== 'undefined') {
+        const Swal = (window as any).Swal;
+        if (Swal) {
+          await Swal.fire({
+            icon: 'info',
+            title: 'Already Checked Out',
+            text: 'You have already completed your attendance for today.',
+            timer: 2000,
+            timerProgressBar: true,
+            showConfirmButton: false
+          });
+        }
       }
       
       return {
         id: existingRecord.id,
         employeeId: existingRecord.employee_id,
-        employeeName: '',  // Will be populated by the calling function
+        employeeName: '',
         checkInTime: existingRecord.check_in_time,
         checkOutTime: existingRecord.check_out_time,
         date: format(new Date(existingRecord.date), 'yyyy-MM-dd'),
-        status: (existingRecord.status as 'present' | 'late' | 'absent')
+        status: existingRecord.status as 'present' | 'late' | 'absent'
       };
     }
     
-    // If no record exists, create new check-in
+    // Create new check-in record
     const checkInTime = now.toISOString();
+    const lateDuration = calculateLateDuration(checkInTime);
+    
     const { data, error } = await supabase
       .from('attendance')
       .insert({
         employee_id: employeeId,
-        check_in_time: checkInTime,
         date: today,
-        status: 'present'
+        check_in_time: checkInTime,
+        late_duration: lateDuration.totalMinutes,
+        status: lateDuration.totalMinutes > 0 ? 'late' : 'on_time'
       })
       .select()
       .single();
     
     if (error) {
-      console.error('Error creating attendance record:', error);
-      return null;
+      throw new Error('Failed to create check-in record');
+    }
+    
+    // Show quick success message for check-in
+    if (typeof window !== 'undefined') {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        await Swal.fire({
+          icon: 'success',
+          title: 'Check-in Successful',
+          html: `<div>
+            <p>Checked in at ${format(now, 'HH:mm')}</p>
+            ${lateDuration.totalMinutes > 0 ? 
+              `<p class="text-warning">You are ${lateDuration.formatted} late</p>
+               <p class="text-sm">Expected arrival: ${lateDuration.expectedTime}</p>` : 
+              '<p class="text-success">You are on time!</p>'}
+          </div>`,
+          timer: 2000,
+          timerProgressBar: true,
+          showConfirmButton: false
+        });
+      }
     }
     
     return {
       id: data.id,
       employeeId: data.employee_id,
-      employeeName: '',  // Will be populated by the calling function
+      employeeName: '',
       checkInTime: data.check_in_time,
-      checkOutTime: data.check_out_time,
+      checkOutTime: null,
       date: format(new Date(data.date), 'yyyy-MM-dd'),
-      status: (data.status as 'present' | 'late' | 'absent')
+      status: data.status as 'present' | 'late' | 'absent'
     };
   } catch (error) {
     console.error('Error in addAttendanceRecord:', error);
+    if (typeof window !== 'undefined') {
+      const Swal = (window as any).Swal;
+      if (Swal) {
+        await Swal.fire({
+          icon: 'error',
+          title: 'Operation Failed',
+          text: 'Please try again or contact support.',
+          timer: 2000,
+          timerProgressBar: true,
+          showConfirmButton: false
+        });
+      }
+    }
     return null;
   }
 };
@@ -1318,3 +1545,4 @@ export const setupAutoReportScheduling = () => {
   
   console.log("Enhanced auto report scheduling setup complete");
 };
+
