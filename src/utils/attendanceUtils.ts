@@ -394,11 +394,18 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
       // Check for existing attendance with detailed error logging
       console.log('Checking for existing attendance record...');
       try {
-        // Ensure we have a valid session
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-        if (!currentSession) {
-          console.error('No valid session found');
-          throw new Error('Please log in again');
+        // Try to get current session
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        // If no session, try to sign in anonymously
+        if (!session) {
+          console.log('No session found, attempting anonymous sign in...');
+          const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+          if (anonError) {
+            console.error('Anonymous sign in failed:', anonError);
+          } else {
+            console.log('Anonymous sign in successful');
+          }
         }
 
         // Check for existing attendance
