@@ -35,7 +35,7 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
 export const generateEmployeeQRSVG = async (employee: Employee): Promise<string> => {
   // Create QR code data that includes employee ID and more reliable data
   // Using a specific format that's easier to parse when scanning
-  const qrCodeData = `EMP:${employee.id}:${employee.name || `${employee.firstName} ${employee.lastName}`}`;
+  const qrCodeData = `EMP:${employee.id}:${employee.name || `${employee.first_name} ${employee.last_name}`}`;
   
   return generateQRSVG(qrCodeData);
 };
@@ -199,13 +199,13 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
           const pngBlob = await svgToPng(svgData);
           
           // Add to ZIP file - use a sanitized name for the file
-          const safeFileName = (employee.name || `${employee.firstName}_${employee.lastName}`)
+          const safeFileName = (employee.name || `${employee.first_name}_${employee.last_name}`)
             .replace(/[^\w\s]/gi, '_').replace(/\s+/g, '_');
           zip.file(`${safeFileName}_QRCode.png`, pngBlob);
           processedCount++;
           progressElement.textContent = `Processing QR Codes: ${processedCount}/${totalEmployees}`;
         } catch (error) {
-          console.error(`Error generating QR code for ${employee.name || `${employee.firstName} ${employee.lastName}`}:`, error);
+          console.error(`Error generating QR code for ${employee.name || `${employee.first_name} ${employee.last_name}`}:`, error);
           // Continue with other employees even if one fails
         }
       })
