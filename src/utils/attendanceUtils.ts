@@ -510,7 +510,23 @@ async function checkAttendanceStatus(employeeId: string): Promise<boolean> {
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
 
-    // Quick check for existing attendance
+    // Verify employee exists first
+    const { data: employee, error: employeeError } = await supabase
+      .from('employees')
+      .select('id, first_name, last_name')
+      .eq('id', employeeId)
+      .single();
+
+    if (employeeError || !employee) {
+      toast({
+        title: "Employee Verification Failed",
+        description: "Could not verify employee ID. Please try again.",
+        variant: "destructive"
+      });
+      return false;
+    }
+
+    // Check for existing attendance
     const { data: existingRecord, error: checkError } = await supabase
       .from('attendance')
       .select('*')
@@ -524,19 +540,11 @@ async function checkAttendanceStatus(employeeId: string): Promise<boolean> {
 
     // If already checked in, show error
     if (existingRecord) {
-      if (typeof window !== 'undefined') {
-        const Swal = (window as any).Swal;
-        if (Swal) {
-          await Swal.fire({
-            icon: 'error',
-            title: 'Already Checked In',
-            text: 'You have already checked in for today.',
-            timer: 2000,
-            timerProgressBar: true,
-            showConfirmButton: false
-          });
-        }
-      }
+      toast({
+        title: "Already Checked In",
+        description: `You have already checked in today at ${format(new Date(existingRecord.check_in_time), 'HH:mm')}`,
+        variant: "destructive"
+      });
       return false;
     }
 
@@ -551,49 +559,32 @@ async function checkAttendanceStatus(employeeId: string): Promise<boolean> {
         date: today,
         check_in_time: now.toISOString(),
         late_duration: lateDuration.totalMinutes,
-        status: lateDuration.totalMinutes > 0 ? 'late' : 'on_time'
+        status: lateDuration.totalMinutes > 0 ? 'late' : 'present',
+        created_at: now.toISOString(),
+        updated_at: now.toISOString()
       });
 
     if (insertError) {
       throw new Error('Failed to record attendance');
     }
 
-    // Show quick success message
-    if (typeof window !== 'undefined') {
-      const Swal = (window as any).Swal;
-      if (Swal) {
-        await Swal.fire({
-          icon: 'success',
-          title: 'Check-in Successful',
-          html: `<div>
-            <p>Checked in at ${format(now, 'HH:mm')}</p>
-            ${lateDuration.totalMinutes > 0 ? 
-              `<p class="text-warning">You are ${lateDuration.formatted} late</p>
-               <p class="text-sm">Expected arrival: ${lateDuration.expectedTime}</p>` : 
-              '<p class="text-success">You are on time!</p>'}
-          </div>`,
-          timer: 2000,
-          timerProgressBar: true,
-          showConfirmButton: false
-        });
-      }
-    }
+    // Show success message
+    toast({
+      title: "Check-in Successful",
+      description: lateDuration.totalMinutes > 0 ?
+        `Welcome ${employee.first_name}! You are ${lateDuration.formatted} late (Expected: ${lateDuration.expectedTime})` :
+        `Welcome ${employee.first_name}! You are on time!`,
+      variant: lateDuration.totalMinutes > 0 ? "destructive" : "default"
+    });
+
     return true;
   } catch (error) {
     console.error('Error during check-in:', error);
-    if (typeof window !== 'undefined') {
-      const Swal = (window as any).Swal;
-      if (Swal) {
-        await Swal.fire({
-          icon: 'error',
-          title: 'Check-in Failed',
-          text: 'Please try again or contact support.',
-          timer: 2000,
-          timerProgressBar: true,
-          showConfirmButton: false
-        });
-      }
-    }
+    toast({
+      title: "Check-in Failed",
+      description: "An unexpected error occurred. Please try again.",
+      variant: "destructive"
+    });
     return false;
   }
 }
