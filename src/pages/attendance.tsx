@@ -146,27 +146,37 @@ export default function Attendance() {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        // Parse and validate QR code data
+        // Parse QR code data
         let employeeId: string;
+        const cleanData = data.trim();
+        
+        // Log the scanned data for debugging
+        console.log('Raw QR data:', cleanData);
         
         // Check if the QR code matches our format (EMP:id:name)
-        if (data.startsWith('EMP:')) {
-          const [prefix, id] = data.split(':');
-          if (!id) {
-            throw new Error('Invalid QR Code format');
+        if (cleanData.startsWith('EMP:')) {
+          const parts = cleanData.split(':');
+          if (parts.length >= 2) {
+            employeeId = parts[1]; // Get the ID part
+            console.log('Extracted employee ID:', employeeId);
+          } else {
+            throw new Error('Invalid QR code format');
           }
-          employeeId = id;
         } else {
-          // Try parsing as JSON for backward compatibility
+          // Try parsing as JSON
           try {
-            const parsedData = JSON.parse(data);
+            const parsedData = JSON.parse(cleanData);
             employeeId = parsedData.id || parsedData.employeeId;
-            if (!employeeId) {
-              throw new Error('Invalid QR Code format');
-            }
+            if (!employeeId) throw new Error();
           } catch (e) {
-            throw new Error('Invalid QR Code format. Please scan a valid employee QR code.');
+            // If both formats fail, use the raw data
+            employeeId = cleanData;
           }
+        }
+        
+        // Validate the extracted ID
+        if (!employeeId || employeeId.trim().length === 0) {
+          throw new Error('Could not extract valid employee ID from QR code');
         }
 
         // Try check-out first, if fails, try check-in
@@ -257,13 +267,15 @@ export default function Attendance() {
           <div className="space-y-4">
             <div className="max-w-md mx-auto">
               <QrScanner
-                delay={300}
+                delay={500}
                 onError={handleError}
                 onScan={handleScan}
-                style={{ width: '100%' }}
+                style={{ width: '100%', height: '300px' }}
                 constraints={{
-                  facingMode: 'environment'
+                  facingMode: 'environment',
+                  aspectRatio: 1
                 }}
+                className="border-2 border-gray-300 rounded-lg"
               />
               <p className="text-sm text-gray-500 text-center mt-2">
                 Position the QR code within the scanning area

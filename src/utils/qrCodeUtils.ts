@@ -12,16 +12,16 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
   
   // Generate SVG string directly using QRCode library with better settings
   try {
-    // Use QRCode.toString to generate SVG string with improved settings
+    // Use QRCode.toString to generate SVG string with optimized settings
     const svgString = await QRCode.toString(qrCodeData, {
       type: 'svg',
-      width: 300, // Increased size for better scanning
-      margin: 1,
+      width: 400, // Larger size for better scanning
+      margin: 2,  // Slightly larger margin
       color: {
         dark: '#000000',
         light: '#ffffff'
       },
-      errorCorrectionLevel: 'H' // Higher error correction for better scanning
+      errorCorrectionLevel: 'H' // Highest error correction
     });
     
     return svgString;
@@ -35,7 +35,10 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
 export const generateEmployeeQRSVG = async (employee: Employee): Promise<string> => {
   // Create QR code data that includes employee ID and more reliable data
   // Using a specific format that's easier to parse when scanning
-  const qrCodeData = `EMP:${employee.id}:${employee.name || `${employee.first_name} ${employee.last_name}`}`;
+  // Create a clean, consistent employee identifier
+  const employeeName = employee.name || `${employee.first_name} ${employee.last_name}`;
+  const qrCodeData = `EMP:${employee.id}:${employeeName.trim().replace(/[^a-zA-Z0-9 ]/g, '')}`;
+  console.log('Generated QR data:', qrCodeData);
   
   return generateQRSVG(qrCodeData);
 };
