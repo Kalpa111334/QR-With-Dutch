@@ -213,12 +213,14 @@ export const recordAttendanceCheckOut = async (qrData: string): Promise<WorkTime
       .select('*')
       .eq('employee_id', employeeId)
       .eq('date', now.toISOString().split('T')[0])
-      .single() as { data: AttendanceRecord | null, error: any };
+      .single();
+
+    const typedAttendanceData = attendanceData as AttendanceRecord;
 
     if (fetchError) throw fetchError;
-    if (!attendanceData) throw new Error('No check-in record found for today');
+    if (!typedAttendanceData) throw new Error('No check-in record found for today');
 
-    const checkInDate = new Date(attendanceData.check_in_time);
+    const checkInDate = new Date(typedAttendanceData.check_in_time);
     const totalHours = (now.getTime() - checkInDate.getTime()) / (1000 * 60 * 60);
 
     // Update the record with check-out information
@@ -229,15 +231,15 @@ export const recordAttendanceCheckOut = async (qrData: string): Promise<WorkTime
         status: 'checked-out',
         total_hours: totalHours
       })
-      .eq('id', attendanceData.id);
+      .eq('id', typedAttendanceData.id);
 
     if (error) throw error;
 
     return {
-      checkInTime: attendanceData.check_in_time,
+      checkInTime: typedAttendanceData.check_in_time,
       checkOutTime,
       totalHours,
-      lateMinutes: attendanceData.late_minutes,
+      lateMinutes: typedAttendanceData.late_minutes,
       status: 'checked-out'
     };
   } catch (error) {
