@@ -6,12 +6,32 @@ interface AdminContactInfo {
   isWhatsappShareEnabled: boolean;
 }
 
+interface WorkTimeInfo {
+  checkInTime: string;
+  checkOutTime?: string;
+  totalHours?: number;
+  lateMinutes?: number;
+  status: 'present' | 'checked-out';
+}
+
+interface AttendanceRecord {
+  id: string;
+  employee_id: string;
+  check_in_time: string;
+  check_out_time?: string;
+  date: string;
+  status: string;
+  late_minutes?: number;
+  total_hours?: number;
+  created_at: string;
+}
+
 /**
  * Records an attendance check-in using the provided QR code data
  * @param qrData - Data from the scanned QR code
  * @returns Promise<boolean> - True if check-in was successful
  */
-export const recordAttendanceCheckIn = async (qrData: string): Promise<boolean> => {
+export const recordAttendanceCheckIn = async (qrData: string): Promise<WorkTimeInfo> => {
   try {
     console.log('Attempting to validate employee:', qrData); // Debug log
 
@@ -51,18 +71,35 @@ export const recordAttendanceCheckIn = async (qrData: string): Promise<boolean> 
       throw new Error('Attendance already recorded for today');
     }
 
+    // Calculate late minutes (assuming work starts at 9:00 AM)
+    const now = new Date();
+    const workStartTime = new Date(now);
+    workStartTime.setHours(9, 0, 0, 0);
+    
+    const lateMinutes = now > workStartTime ? 
+      Math.floor((now.getTime() - workStartTime.getTime()) / (1000 * 60)) : 
+      0;
+
+    const checkInTime = now.toISOString();
+
     // If we get here, the employee exists and hasn't checked in today
     const { error } = await supabase
       .from('attendance')
       .insert({
         employee_id: employeeData.id,
-        check_in_time: new Date().toISOString(),
+        check_in_time: checkInTime,
         date: today,
-        status: 'present'
+        status: 'present',
+        late_minutes: lateMinutes
       });
 
     if (error) throw error;
-    return true;
+
+    return {
+      checkInTime,
+      lateMinutes,
+      status: 'present'
+    };
   } catch (error) {
     console.error('Error recording attendance:', error);
     throw new Error('Failed to record attendance');
@@ -162,23 +199,47 @@ export const deleteAttendance = async (attendanceId: string): Promise<boolean> =
  * @param qrData - Data from the scanned QR code
  * @returns Promise<boolean> - True if check-out was successful
  */
-export const recordAttendanceCheckOut = async (qrData: string): Promise<boolean> => {
+export const recordAttendanceCheckOut = async (qrData: string): Promise<WorkTimeInfo> => {
   try {
     // Extract employee ID from QR data
     const employeeId = qrData;
 
-    const { data, error } = await supabase
+    const now = new Date();
+    const checkOutTime = now.toISOString();
+
+    // Get the current day's attendance record
+    const { data: attendanceData, error: fetchError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', now.toISOString().split('T')[0])
+      .single() as { data: AttendanceRecord | null, error: any };
+
+    if (fetchError) throw fetchError;
+    if (!attendanceData) throw new Error('No check-in record found for today');
+
+    const checkInDate = new Date(attendanceData.check_in_time);
+    const totalHours = (now.getTime() - checkInDate.getTime()) / (1000 * 60 * 60);
+
+    // Update the record with check-out information
+    const { error } = await supabase
       .from('attendance')
       .update({
-        check_out_time: new Date().toISOString(),
-        status: 'checked-out'
+        check_out_time: checkOutTime,
+        status: 'checked-out',
+        total_hours: totalHours
       })
-      .eq('employee_id', employeeId)
-      .eq('date', new Date().toISOString().split('T')[0])
-      .is('check_out_time', null);
+      .eq('id', attendanceData.id);
 
     if (error) throw error;
-    return true;
+
+    return {
+      checkInTime: attendanceData.check_in_time,
+      checkOutTime,
+      totalHours,
+      lateMinutes: attendanceData.late_minutes,
+      status: 'checked-out'
+    };
   } catch (error) {
     console.error('Error recording check-out:', error);
     throw new Error('Failed to record check-out');

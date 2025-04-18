@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { getAdminContactInfo, saveAdminContactInfo, recordAttendanceCheckIn } from '../utils/attendanceUtils';
+import { getAdminContactInfo, saveAdminContactInfo, recordAttendanceCheckIn, recordAttendanceCheckOut } from '../utils/attendanceUtils';
+import Swal from 'sweetalert2';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -114,55 +115,94 @@ export default function Attendance() {
     window.open(whatsappUrl, '_blank');
   };
 
+  const formatTime = (date: string) => {
+    return new Date(date).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
+  const formatHours = (hours: number) => {
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    return `${h}h ${m}m`;
+  };
+
   const handleScan = async (data: string | null) => {
     if (data) {
-      console.log('Scanned QR code data:', data); // Debug log
+      console.log('Scanned QR code data:', data);
       setIsScanning(false);
       setIsLoading(true);
       try {
         // Try to ensure we have a session before proceeding
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-          // Try anonymous sign in
           const { error: signInError } = await supabase.auth.signInAnonymously();
           if (signInError) {
             console.error('Anonymous sign in failed:', signInError);
             throw new Error('Failed to initialize session');
           }
-          // Wait briefly for the session to be established
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        // Try to parse the QR code data
+        // Parse QR code data
         let employeeId = data;
         try {
-          // Check if the data is JSON
           const parsedData = JSON.parse(data);
           employeeId = parsedData.id || parsedData.employeeId || parsedData;
         } catch (e) {
-          // If not JSON, use the raw data
           employeeId = data.trim();
         }
 
-        const success = await recordAttendanceCheckIn(employeeId);
-        if (success) {
+        // Try check-out first, if fails, try check-in
+        try {
+          const checkOutInfo = await recordAttendanceCheckOut(employeeId);
           setLastScannedData(employeeId);
-          toast.success('Attendance recorded successfully');
+          
+          await Swal.fire({
+            icon: 'success',
+            title: 'Check-out Successful',
+            html: `
+              <div class="text-left">
+                <p>Check-in: ${formatTime(checkOutInfo.checkInTime)}</p>
+                <p>Check-out: ${formatTime(checkOutInfo.checkOutTime!)}</p>
+                <p>Total Hours: ${formatHours(checkOutInfo.totalHours!)}</p>
+              </div>
+            `,
+            showConfirmButton: true,
+            timer: 5000
+          });
+        } catch (checkOutError) {
+          // If check-out fails, try check-in
+          const checkInInfo = await recordAttendanceCheckIn(employeeId);
+          setLastScannedData(employeeId);
+
+          const lateText = checkInInfo.lateMinutes! > 0 
+            ? `<p class="text-warning">You are ${checkInInfo.lateMinutes} minutes late</p>` 
+            : '<p class="text-success">You are on time!</p>';
+
+          await Swal.fire({
+            icon: 'success',
+            title: 'Check-in Successful',
+            html: `
+              <div class="text-left">
+                <p>Check-in time: ${formatTime(checkInInfo.checkInTime)}</p>
+                ${lateText}
+              </div>
+            `,
+            showConfirmButton: true,
+            timer: 5000
+          });
         }
       } catch (error) {
         console.error('Error processing QR code:', error);
-        if (error instanceof Error && error.message === 'Invalid employee QR code') {
-          toast.error('Invalid QR Code\nPlease scan a valid employee QR code', {
-            duration: 3000,
-            style: {
-              background: '#ef4444',
-              color: '#fff',
-              padding: '16px'
-            }
-          });
-        } else {
-          toast.error('Failed to process QR code');
-        }
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: error instanceof Error ? error.message : 'Failed to process QR code',
+          timer: 3000
+        });
       } finally {
         setIsLoading(false);
         setIsScanning(true);
