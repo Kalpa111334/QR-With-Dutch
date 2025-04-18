@@ -201,24 +201,62 @@ export const deleteAttendance = async (attendanceId: string): Promise<boolean> =
  */
 export const recordAttendanceCheckOut = async (qrData: string): Promise<WorkTimeInfo> => {
   try {
-    // Extract employee ID from QR data
-    const employeeId = qrData;
+    // First, verify if the QR data corresponds to a valid employee
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('*')
+      .eq('id', qrData)
+      .single();
+
+    if (employeeError || !employeeData) {
+      console.error('Employee verification failed:', employeeError);
+      throw new Error('Employee not found. Please use a valid employee QR code.');
+    }
 
     const now = new Date();
+    const today = now.toISOString().split('T')[0];
+
+    // Check if employee has already checked in today
+    const { data: existingRecord, error: checkError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeData.id)
+      .eq('date', today)
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Error checking existing attendance:', checkError);
+      throw new Error('Failed to verify attendance status');
+    }
+
+    if (existingRecord) {
+      if (existingRecord.status === 'checked-out') {
+        throw new Error('You have already completed your shift for today.');
+      } else {
+        throw new Error('You are already checked in. Please use check-out instead.');
+      }
+    }
+
     const checkOutTime = now.toISOString();
 
     // Get the current day's attendance record
     const { data: attendanceData, error: fetchError } = await supabase
       .from('attendance')
       .select('*')
-      .eq('employee_id', employeeId)
-      .eq('date', now.toISOString().split('T')[0])
+      .eq('employee_id', employeeData.id)
+      .eq('date', today)
       .single();
 
-    const typedAttendanceData = attendanceData as AttendanceRecord;
+    if (fetchError) {
+      console.error('Error fetching attendance:', fetchError);
+      throw new Error('Failed to fetch attendance record');
+    }
 
-    if (fetchError) throw fetchError;
-    if (!typedAttendanceData) throw new Error('No check-in record found for today');
+    if (!attendanceData) {
+      throw new Error('No check-in record found for today. Please check-in first.');
+    }
+
+    const typedAttendanceData = attendanceData as AttendanceRecord;
 
     const checkInDate = new Date(typedAttendanceData.check_in_time);
     const totalHours = (now.getTime() - checkInDate.getTime()) / (1000 * 60 * 60);
