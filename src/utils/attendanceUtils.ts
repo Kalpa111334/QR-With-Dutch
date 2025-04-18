@@ -19,14 +19,19 @@ export const recordAttendanceCheckIn = async (qrData: string): Promise<boolean> 
     const { data: employeeData, error: employeeError } = await supabase
       .from('employees')
       .select('*')
-      .or(`id.eq.${qrData},employee_id.eq.${qrData}`)
-      .single();
+      .or(`id.eq.${qrData},employee_id.eq.${qrData},email.eq.${qrData}`)
+      .maybeSingle();
 
     console.log('Employee lookup result:', { employeeData, employeeError }); // Debug log
 
-    if (employeeError || !employeeData) {
+    if (!employeeData) {
       console.log('Employee validation failed'); // Debug log
       throw new Error('Invalid employee QR code');
+    }
+
+    if (employeeError) {
+      console.error('Database error during employee lookup:', employeeError);
+      throw new Error('Failed to validate employee');
     }
 
     // Check if attendance already recorded for today
@@ -74,9 +79,18 @@ export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
       .from('admin_settings')
       .select('whatsapp_number, is_whatsapp_share_enabled')
       .eq('setting_type', 'whatsapp')
-      .single();
+      .maybeSingle();
 
-    if (error) throw error;
+    // If no settings exist, create default settings
+    if (!data) {
+      await supabase
+        .from('admin_settings')
+        .insert({
+          setting_type: 'whatsapp',
+          whatsapp_number: '',
+          is_whatsapp_share_enabled: false
+        });
+    }
 
     return {
       whatsappNumber: data?.whatsapp_number || '',
