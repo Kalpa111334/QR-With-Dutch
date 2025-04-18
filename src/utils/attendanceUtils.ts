@@ -13,24 +13,46 @@ interface AdminContactInfo {
  */
 export const recordAttendanceCheckIn = async (qrData: string): Promise<boolean> => {
   try {
+    console.log('Attempting to validate employee:', qrData); // Debug log
+
     // First, verify if the QR data corresponds to a valid employee
     const { data: employeeData, error: employeeError } = await supabase
       .from('employees')
-      .select('id')
-      .eq('id', qrData)
+      .select('*')
+      .or(`id.eq.${qrData},employee_id.eq.${qrData}`)
       .single();
 
+    console.log('Employee lookup result:', { employeeData, employeeError }); // Debug log
+
     if (employeeError || !employeeData) {
+      console.log('Employee validation failed'); // Debug log
       throw new Error('Invalid employee QR code');
     }
 
-    // If we get here, the employee exists, so we can record attendance
+    // Check if attendance already recorded for today
+    const today = new Date().toISOString().split('T')[0];
+    const { data: existingAttendance, error: attendanceError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeData.id)
+      .eq('date', today)
+      .maybeSingle();
+
+    if (attendanceError) {
+      throw new Error('Failed to check existing attendance');
+    }
+
+    if (existingAttendance) {
+      throw new Error('Attendance already recorded for today');
+    }
+
+    // If we get here, the employee exists and hasn't checked in today
     const { error } = await supabase
       .from('attendance')
       .insert({
-        employee_id: qrData,
+        employee_id: employeeData.id,
         check_in_time: new Date().toISOString(),
-        date: new Date().toISOString().split('T')[0],
+        date: today,
         status: 'present'
       });
 

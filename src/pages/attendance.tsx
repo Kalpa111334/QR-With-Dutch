@@ -116,6 +116,7 @@ export default function Attendance() {
 
   const handleScan = async (data: string | null) => {
     if (data) {
+      console.log('Scanned QR code data:', data); // Debug log
       setIsScanning(false);
       setIsLoading(true);
       try {
@@ -132,9 +133,20 @@ export default function Attendance() {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        const success = await recordAttendanceCheckIn(data);
+        // Try to parse the QR code data
+        let employeeId = data;
+        try {
+          // Check if the data is JSON
+          const parsedData = JSON.parse(data);
+          employeeId = parsedData.id || parsedData.employeeId || parsedData;
+        } catch (e) {
+          // If not JSON, use the raw data
+          employeeId = data.trim();
+        }
+
+        const success = await recordAttendanceCheckIn(employeeId);
         if (success) {
-          setLastScannedData(data);
+          setLastScannedData(employeeId);
           toast.success('Attendance recorded successfully');
         }
       } catch (error) {
