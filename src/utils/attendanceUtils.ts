@@ -283,163 +283,105 @@ async function recordAttendanceCheckIn(employeeId: string): Promise<boolean> {
   const maxRetries = 3;
   let retryCount = 0;
 
-  const attemptCheckIn = async (): Promise<boolean> => {
+  while (retryCount < maxRetries) {
     try {
       // Log the start of the operation
       console.log(`Attempt ${retryCount + 1} - Starting attendance check-in for employee:`, employeeId);
 
       // First check if we have an active session and refresh if needed
-      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      console.log('Initial session check:', { session: !!session, error: sessionError });
-      
-      // Always try to refresh the session
-      console.log('Attempting to refresh session...');
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-      console.log('Session refresh result:', { success: !!refreshData?.session, error: refreshError });
-      
-      if (refreshData?.session) {
-        console.log('Session refreshed successfully');
-        session = refreshData.session;
-      } else {
+      if (!session || sessionError) {
         // Try to get a new session
-        console.log('Session refresh failed, attempting to get current session...');
-        const { data: currentData, error: currentError } = await supabase.auth.getSession();
+        console.log('No session found, attempting anonymous sign in...');
+        const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
         
-        if (currentData?.session) {
-          console.log('Got current session successfully');
-          session = currentData.session;
-        } else {
-          console.error('Failed to get current session:', { refreshError, currentError });
-          sessionError = currentError || refreshError;
-        }
-      }
-
-      if (!session) {
-        console.error('No active session found:', { error: sessionError });
-        
-        // Try to get a new session one last time
-        const { data: finalData } = await supabase.auth.getSession();
-        if (finalData?.session) {
-          console.log('Got session on final attempt');
-          session = finalData.session;
-        } else {
-          console.error('All session retrieval attempts failed');
-          // Clear any stale session data
-          await supabase.auth.signOut();
+        if (anonError || !anonData.session) {
+          console.error('Authentication failed:', anonError || 'No session created');
           toast({
             title: "Authentication Error",
             description: "Please refresh the page and log in again.",
             variant: "destructive"
           });
-          return false;
+          throw new Error('Authentication failed');
         }
       }
 
-      // Verify employee exists first with timeout
-      console.log('Verifying employee existence...');
-      const employeePromise = new Promise<Employee>(async (resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Employee verification timeout')), 10000);
-        try {
-          const { data, error } = await supabase
-            .from('employees')
-            .select('id, first_name, last_name')
-            .eq('id', employeeId)
-            .single();
-          
-          clearTimeout(timeout);
-          console.log('Employee lookup result:', { found: !!data, error });
-          
-          if (error) {
-            console.error('Employee lookup error:', error);
-            reject(error);
-            return;
-          }
-          if (!data) {
-            console.error('No employee data found for ID:', employeeId);
-            reject(new Error('No employee data found'));
-            return;
-          }
-          resolve(data as Employee);
-        } catch (err) {
-          clearTimeout(timeout);
-          console.error('Employee lookup exception:', err);
-          reject(err);
-        }
-      });
-
-      const employee: Employee | null = await employeePromise.catch((error) => {
-        console.error('Employee verification error:', error);
+      // Verify employee exists
+      const { data: employee, error: employeeError } = await supabase
+        .from('employees')
+        .select('id, first_name, last_name')
+        .eq('id', employeeId)
+        .single();
+      
+      if (employeeError || !employee) {
+        console.error('Employee verification error:', employeeError || 'No employee found');
         toast({
           title: "Employee Verification Failed",
-          description: "Could not verify employee ID. Please try again or contact support.",
+          description: "Could not verify employee ID. Please try again.",
           variant: "destructive"
         });
-        return null;
-      });
-
-      if (!employee) {
-        return false;
+        throw new Error('Employee verification failed');
       }
-
-      // At this point, employee is guaranteed to be of type Employee
-      const verifiedEmployee: Employee = employee;
-      console.log('Employee verified:', { id: verifiedEmployee.id, name: `${verifiedEmployee.first_name} ${verifiedEmployee.last_name}` });
-
-      // Get current date/time in the correct format
+      // Get current date/time and check for existing attendance
       const now = new Date();
       const today = format(startOfDay(now), 'yyyy-MM-dd');
       const checkInTime = now.toISOString();
       
-      // Check for existing attendance with detailed error logging
-      console.log('Checking for existing attendance record...');
-      try {
-        // Try to get current session
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        // If no session, try to sign in anonymously
-        if (!session) {
-          console.log('No session found, attempting anonymous sign in...');
-          const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
-          if (anonError) {
-            console.error('Anonymous sign in failed:', anonError);
-          } else {
-            console.log('Anonymous sign in successful');
+      // Check for existing attendance
+      const { data: existingRecord, error: attendanceError } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .eq('date', today)
+        .single();
+      
+      if (attendanceError && attendanceError.code !== 'PGRST116') {
+        console.error('Error checking attendance:', attendanceError);
+        throw new Error('Failed to check attendance status');
+      }
+      
+      if (existingRecord) {
+        toast({
+          title: "Already Checked In",
+          description: `You have already checked in today at ${format(new Date(existingRecord.check_in_time), 'HH:mm')}`,
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      // Calculate late duration
+      const lateDuration = calculateLateDuration(checkInTime);
+
+      // Create new attendance record
+      const { error: insertError } = await supabase
+        .from('attendance')
+        .insert([
+          {
+            employee_id: employeeId,
+            date: today,
+            check_in_time: checkInTime,
+            minutes_late: lateDuration.totalMinutes,
+            created_at: checkInTime,
+            updated_at: checkInTime
           }
-        }
+        ]);
 
-        // Check for existing attendance
-        const { data: existingRecord, error: checkError } = await supabase
-          .from('attendance')
-          .select('id, check_in_time, status')
-          .eq('employee_id', employeeId)
-          .eq('date', today)
-          .maybeSingle();
+      if (insertError) {
+        console.error('Error inserting attendance record:', insertError);
+        throw new Error('Failed to record attendance');
+      }
 
-        console.log('Existing attendance check result:', { found: !!existingRecord, error: checkError });
+      // Show success message
+      toast({
+        title: "Check-in Successful",
+        description: lateDuration.totalMinutes > 0 ?
+          `Welcome ${employee.first_name}! You are ${lateDuration.formatted} late (Expected: ${lateDuration.expectedTime})` :
+          `Welcome ${employee.first_name}! You are on time!`,
+        variant: lateDuration.totalMinutes > 0 ? "destructive" : "default"
+      });
 
-        if (checkError) {
-          console.error('Error checking existing attendance:', checkError);
-          throw new Error('Error checking attendance record');
-        }
-
-        if (existingRecord) {
-          console.log('Attendance record already exists:', existingRecord);
-          toast({
-            title: "Already Checked In",
-            description: `You have already checked in today at ${format(new Date(existingRecord.check_in_time), 'HH:mm')}`,
-            variant: "destructive"
-          });
-          return false;
-        }
-
-        // Create new attendance record
-        console.log('Creating new attendance record...');
-        const attendanceRecord = {
-          employee_id: employeeId,
-          date: today,
-          check_in_time: checkInTime,
-          status: 'present',
+      return true;
           created_at: checkInTime,
           updated_at: checkInTime
         };
@@ -841,4 +783,20 @@ async function recordAttendanceCheckOut(employeeId: string): Promise<boolean> {
   }
 }
 
-export { calculateLateDuration, calculateMinutesLate, calculateWorkingDuration, getAttendance, getAttendanceRecords, getAttendanceByDateRange, getTotalEmployeeCount, recordAttendanceCheckIn, recordAttendanceCheckOut, checkAttendanceStatus, getAdminContactInfo, saveAdminContactInfo, autoShareAttendanceSummary, getTodayAttendanceSummary, setupAutoReportScheduling };
+export {
+  calculateLateDuration,
+  calculateMinutesLate,
+  calculateWorkingDuration,
+  getAttendance,
+  getAttendanceRecords,
+  getAttendanceByDateRange,
+  getTotalEmployeeCount,
+  recordAttendanceCheckIn,
+  recordAttendanceCheckOut,
+  checkAttendanceStatus,
+  getAdminContactInfo,
+  saveAdminContactInfo,
+  autoShareAttendanceSummary,
+  getTodayAttendanceSummary,
+  setupAutoReportScheduling
+};
