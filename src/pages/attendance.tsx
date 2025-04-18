@@ -139,7 +139,18 @@ export default function Attendance() {
         }
       } catch (error) {
         console.error('Error processing QR code:', error);
-        toast.error(error instanceof Error ? error.message : 'Failed to process QR code');
+        if (error instanceof Error && error.message === 'Invalid employee QR code') {
+          toast.error('Invalid QR Code\nPlease scan a valid employee QR code', {
+            duration: 3000,
+            style: {
+              background: '#ef4444',
+              color: '#fff',
+              padding: '16px'
+            }
+          });
+        } else {
+          toast.error('Failed to process QR code');
+        }
       } finally {
         setIsLoading(false);
         setIsScanning(true);
@@ -149,7 +160,14 @@ export default function Attendance() {
 
   const handleError = (err: any) => {
     console.error('QR Scanner error:', err);
-    toast.error("Error accessing camera. Please check permissions.");
+    toast.error('Error accessing camera. Please check permissions.', {
+      duration: 3000,
+      style: {
+        background: '#ef4444',
+        color: '#fff',
+        padding: '16px'
+      }
+    });
   };
 
   if (isLoading) {
