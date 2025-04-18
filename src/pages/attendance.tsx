@@ -27,31 +27,25 @@ export default function Attendance() {
     const checkSession = async () => {
       try {
         // Try to refresh the session first
-        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
         
-        if (refreshData?.session) {
-          console.log('Session refreshed successfully');
-          setIsLoading(false);
-          loadSettings();
-          return;
+        if (!session) {
+          // Try anonymous sign in if no session
+          const { error: signInError } = await supabase.auth.signInAnonymously();
+          if (signInError) {
+            console.error('Anonymous sign in failed:', signInError);
+            toast.error("Failed to initialize session");
+            return;
+          }
         }
 
-        // If refresh failed, try to get current session
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (!session || error) {
-          console.error('No valid session found:', error);
-          toast.error("Session expired. Please log in again to continue.");
-          router.push('/login');
-          return;
-        }
-
+        // At this point we either have an existing session or a new anonymous session
+        console.log('Session initialized successfully');
         setIsLoading(false);
         loadSettings();
       } catch (error) {
-        console.error('Session check failed:', error);
-        toast.error("Authentication error. Please try logging in again.");
-        router.push('/login');
+        console.error('Session initialization failed:', error);
+        toast.error("Failed to initialize session");
       }
     };
 
@@ -129,7 +123,13 @@ export default function Attendance() {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
           // Try anonymous sign in
-          await supabase.auth.signInAnonymously();
+          const { error: signInError } = await supabase.auth.signInAnonymously();
+          if (signInError) {
+            console.error('Anonymous sign in failed:', signInError);
+            throw new Error('Failed to initialize session');
+          }
+          // Wait briefly for the session to be established
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
         const success = await recordAttendanceCheckIn(data);
@@ -139,7 +139,7 @@ export default function Attendance() {
         }
       } catch (error) {
         console.error('Error processing QR code:', error);
-        toast.error('Failed to process QR code. Please try again.');
+        toast.error(error instanceof Error ? error.message : 'Failed to process QR code');
       } finally {
         setIsLoading(false);
         setIsScanning(true);
