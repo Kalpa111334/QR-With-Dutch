@@ -13,14 +13,22 @@ interface AdminContactInfo {
  */
 export const recordAttendanceCheckIn = async (qrData: string): Promise<boolean> => {
   try {
-    // Extract employee ID from QR data
-    // Assuming QR data contains employee ID in some format
-    const employeeId = qrData; // You might need to parse this depending on QR format
+    // First, verify if the QR data corresponds to a valid employee
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('id')
+      .eq('id', qrData)
+      .single();
 
-    const { data, error } = await supabase
+    if (employeeError || !employeeData) {
+      throw new Error('Invalid employee QR code');
+    }
+
+    // If we get here, the employee exists, so we can record attendance
+    const { error } = await supabase
       .from('attendance')
       .insert({
-        employee_id: employeeId,
+        employee_id: qrData,
         check_in_time: new Date().toISOString(),
         date: new Date().toISOString().split('T')[0],
         status: 'present'
