@@ -146,13 +146,27 @@ export default function Attendance() {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        // Parse QR code data
-        let employeeId = data;
-        try {
-          const parsedData = JSON.parse(data);
-          employeeId = parsedData.id || parsedData.employeeId || parsedData;
-        } catch (e) {
-          employeeId = data.trim();
+        // Parse and validate QR code data
+        let employeeId: string;
+        
+        // Check if the QR code matches our format (EMP:id:name)
+        if (data.startsWith('EMP:')) {
+          const [prefix, id] = data.split(':');
+          if (!id) {
+            throw new Error('Invalid QR Code format');
+          }
+          employeeId = id;
+        } else {
+          // Try parsing as JSON for backward compatibility
+          try {
+            const parsedData = JSON.parse(data);
+            employeeId = parsedData.id || parsedData.employeeId;
+            if (!employeeId) {
+              throw new Error('Invalid QR Code format');
+            }
+          } catch (e) {
+            throw new Error('Invalid QR Code format. Please scan a valid employee QR code.');
+          }
         }
 
         // Try check-out first, if fails, try check-in
