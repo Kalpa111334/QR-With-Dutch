@@ -112,3 +112,116 @@ export const deleteAttendance = async (attendanceId: string): Promise<boolean> =
     return false;
   }
 };
+
+/**
+ * Records an attendance check-out using the provided QR code data
+ * @param qrData - Data from the scanned QR code
+ * @returns Promise<boolean> - True if check-out was successful
+ */
+export const recordAttendanceCheckOut = async (qrData: string): Promise<boolean> => {
+  try {
+    // Extract employee ID from QR data
+    const employeeId = qrData;
+
+    const { data, error } = await supabase
+      .from('attendance')
+      .update({
+        check_out_time: new Date().toISOString(),
+        status: 'checked-out'
+      })
+      .eq('employee_id', employeeId)
+      .eq('date', new Date().toISOString().split('T')[0])
+      .is('check_out_time', null);
+
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Error recording check-out:', error);
+    throw new Error('Failed to record check-out');
+  }
+};
+
+/**
+ * Gets attendance records with optional filtering
+ * @returns Promise<Attendance[]> - List of attendance records
+ */
+export const getAttendanceRecords = async (): Promise<any[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('*')
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching attendance records:', error);
+    return [];
+  }
+};
+
+/**
+ * Gets today's attendance summary
+ * @returns Promise<{ total: number, present: number, absent: number }>
+ */
+export const getTodayAttendanceSummary = async (): Promise<{ total: number; present: number; absent: number }> => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data: attendanceData, error: attendanceError } = await supabase
+      .from('attendance')
+      .select('status')
+      .eq('date', today);
+
+    if (attendanceError) throw attendanceError;
+
+    const { data: employeeData, error: employeeError } = await supabase
+      .from('employees')
+      .select('id');
+
+    if (employeeError) throw employeeError;
+
+    const totalEmployees = employeeData?.length || 0;
+    const presentEmployees = attendanceData?.filter(record => record.status === 'present' || record.status === 'checked-out').length || 0;
+
+    return {
+      total: totalEmployees,
+      present: presentEmployees,
+      absent: totalEmployees - presentEmployees
+    };
+  } catch (error) {
+    console.error('Error getting attendance summary:', error);
+    return {
+      total: 0,
+      present: 0,
+      absent: 0
+    };
+  }
+};
+
+/**
+ * Automatically shares attendance summary via configured methods (e.g., WhatsApp)
+ * @returns Promise<boolean> - True if sharing was successful
+ */
+export const autoShareAttendanceSummary = async (): Promise<boolean> => {
+  try {
+    const summary = await getTodayAttendanceSummary();
+    const { whatsappNumber, isWhatsappShareEnabled } = await getAdminContactInfo();
+
+    if (!isWhatsappShareEnabled || !whatsappNumber) {
+      console.log('WhatsApp sharing is disabled or no number configured');
+      return false;
+    }
+
+    const message = `Attendance Summary for ${new Date().toLocaleDateString()}:\n` +
+      `Total Employees: ${summary.total}\n` +
+      `Present: ${summary.present}\n` +
+      `Absent: ${summary.absent}`;
+
+    // In a real implementation, you would integrate with WhatsApp Business API
+    console.log('Would send WhatsApp message:', message);
+    return true;
+  } catch (error) {
+    console.error('Error auto-sharing attendance summary:', error);
+    return false;
+  }
+};

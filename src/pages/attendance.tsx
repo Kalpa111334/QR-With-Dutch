@@ -11,7 +11,7 @@ import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 
 // Dynamically import QR Scanner to avoid SSR issues
-const QrReader = dynamic(() => import('react-qr-reader'), {
+const QrScanner = dynamic(() => import('react-qr-scanner'), {
   ssr: false
 });
 
@@ -172,12 +172,14 @@ export default function Attendance() {
         <CardContent>
           <div className="space-y-4">
             <div className="max-w-md mx-auto">
-              <QrReader
+              <QrScanner
                 delay={300}
                 onError={handleError}
                 onScan={handleScan}
                 style={{ width: '100%' }}
-                facingMode="environment"
+                constraints={{
+                  facingMode: 'environment'
+                }}
               />
               <p className="text-sm text-gray-500 text-center mt-2">
                 Position the QR code within the scanning area
