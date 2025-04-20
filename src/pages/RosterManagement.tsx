@@ -1,122 +1,200 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Users, MoreVertical, Pencil, Trash } from 'lucide-react';
-import { DateRange } from 'react-day-picker';
-import { format, addDays } from 'date-fns';
-import { Button } from '@/components/ui/button';
+import { useState, useEffect } from 'react';
+import { format, isAfter, isBefore, isToday } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
-import { Employee } from '@/types';
-import { getEmployees } from '@/utils/employeeUtils';
-import { getRosters, createRoster, deleteRoster, updateRosterStatus, Roster } from '@/utils/rosterUtils';
+import { RosterService } from '@/services/RosterService';
+import { Roster, ShiftType } from '@/integrations/supabase/types';
+import { useEmployees } from '@/hooks/useEmployees';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Search,
+  Calendar as CalendarIcon,
+  Users,
+  Clock,
+  Filter,
+} from 'lucide-react';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import * as z from "zod";
+import { cn } from "@/lib/utils";
+import { supabase } from '../integrations/supabase/client';
+import Swal from 'sweetalert2';
 
-const RosterManagement: React.FC = () => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [rosters, setRosters] = useState<Roster[]>([]);
-  const [selectedEmployee, setSelectedEmployee] = useState<string>('');
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: new Date(),
-    to: addDays(new Date(), 6)
+const SHIFT_TYPES: ShiftType[] = ['morning', 'evening', 'night', 'off'];
+
+interface FormValues {
+  employee: string;
+  startDate: Date;
+  endDate: Date;
+  shift: ShiftType;
+}
+
+const getShiftColor = (shift: string) => {
+  const colors = {
+    morning: 'bg-blue-100 text-blue-800',
+    evening: 'bg-purple-100 text-purple-800',
+    night: 'bg-indigo-100 text-indigo-800',
+    off: 'bg-gray-100 text-gray-800',
+  };
+  return colors[shift as keyof typeof colors] || 'bg-gray-100 text-gray-800';
+};
+
+const getRosterStatus = (startDate: string, endDate: string) => {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const now = new Date();
+
+  if (isBefore(end, now)) return { label: 'Completed', color: 'bg-gray-100 text-gray-800' };
+  if (isAfter(start, now)) return { label: 'Upcoming', color: 'bg-yellow-100 text-yellow-800' };
+  if (isToday(start) || isToday(end) || (isBefore(start, now) && isAfter(end, now))) {
+    return { label: 'Active', color: 'bg-green-100 text-green-800' };
+  }
+  return { label: 'Unknown', color: 'bg-gray-100 text-gray-800' };
+};
+
+const formSchema = z.object({
+  employee: z.string().min(1, { message: "Employee is required" }),
+  startDate: z.date(),
+  endDate: z.date(),
+  shift: z.enum(['morning', 'evening', 'night', 'off'] as const),
+});
+
+export default function RosterManagement() {
+  const [formValues, setFormValues] = useState<FormValues>({
+    employee: '',
+    startDate: new Date(),
+    endDate: new Date(),
+    shift: 'morning'
   });
-  const [selectedShift, setSelectedShift] = useState<'morning' | 'evening' | 'night'>('morning');
+  const [rosters, setRosters] = useState<Roster[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterShift, setFilterShift] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const { toast } = useToast();
+  const { employees, loading: employeesLoading } = useEmployees();
+  const [error, setError] = useState<string | null>(null);
+
+  // Form state
+  const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedPosition, setSelectedPosition] = useState('');
+  const [selectedStartDate, setSelectedStartDate] = useState<Date>();
+  const [selectedEndDate, setSelectedEndDate] = useState<Date>();
+  const [selectedShift, setSelectedShift] = useState<ShiftType>('morning');
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      employee: '',
+      startDate: new Date(),
+      endDate: new Date(),
+      shift: 'morning'
+    }
+  });
 
   useEffect(() => {
-    // Load employees and rosters from the database
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        
-        // Fetch employees
-        const employeesData = await getEmployees();
-        setEmployees(employeesData);
-        
-        // Fetch rosters
-        const rostersData = await getRosters();
-        setRosters(rostersData);
-        
-        setLoading(false);
+    loadRosters();
+  }, []);
+
+  // Auto-fill department and position when employee is selected
+  useEffect(() => {
+    if (selectedEmployee) {
+      const employee = employees.find(emp => emp.id === selectedEmployee);
+      if (employee) {
+        setSelectedDepartment(employee.department);
+        setSelectedPosition(employee.position);
+      }
+    }
+  }, [selectedEmployee, employees]);
+
+  const loadRosters = async () => {
+    try {
+      const data = await RosterService.getRosters();
+      setRosters(data);
       } catch (error) {
-        console.error('Error fetching data:', error);
         toast({
           title: 'Error',
-          description: 'Failed to load roster data',
+        description: 'Failed to load rosters',
           variant: 'destructive',
         });
+    } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
-  }, [toast]);
-
-  const handleCreateRoster = async () => {
-    if (!selectedEmployee || !dateRange?.from || !dateRange?.to) {
-      toast({
-        title: 'Missing Information',
-        description: 'Please select an employee and date range',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    // Find the selected employee to get the name
-    const employee = employees.find(emp => emp.id === selectedEmployee);
-    
-    if (!employee) {
-      toast({
-        title: 'Error',
-        description: 'Selected employee not found',
-        variant: 'destructive',
-      });
-      return;
-    }
-
+  const onSubmit = async (data: FormValues) => {
     try {
       setLoading(true);
+      setError(null);
       
-      // Create a new roster
-      const newRoster = await createRoster({
-        employeeId: selectedEmployee,
-        startDate: format(dateRange.from, 'yyyy-MM-dd'),
-        endDate: format(dateRange.to || dateRange.from, 'yyyy-MM-dd'),
-        shift: selectedShift,
-        status: 'active'
+      const newRoster: Omit<Roster, 'id' | 'created_at' | 'updated_at'> = {
+        employee_id: data.employee,
+        start_date: format(data.startDate, 'yyyy-MM-dd'),
+        end_date: format(data.endDate, 'yyyy-MM-dd'),
+        shift: data.shift as ShiftType,
+        status: 'active' as const,
+      };
+
+      console.log('Creating roster with data:', newRoster);
+      const result = await RosterService.createRoster(newRoster);
+      console.log('Roster creation result:', result);
+      
+      setIsCreateDialogOpen(false);
+      resetForm();
+      form.reset();
+      await loadRosters();
+      
+      await Swal.fire({
+        icon: 'success',
+        title: 'Success!',
+        text: 'Roster has been created successfully',
+        showConfirmButton: false,
+        timer: 1500
       });
-      
-      if (newRoster) {
-        // Add to rosters state
-        setRosters(prev => [newRoster, ...prev]);
-        
-        toast({
-          title: 'Roster Created',
-          description: `Schedule created for ${employee.first_name} ${employee.last_name}`,
-        });
-        
-        // Reset form
-        setSelectedEmployee('');
-        setDateRange({
-          from: new Date(),
-          to: addDays(new Date(), 6)
-        });
-        setSelectedShift('morning');
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Failed to create roster',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      console.error('Error creating roster:', error);
-      toast({
-        title: 'Error',
-        description: 'An unexpected error occurred',
-        variant: 'destructive',
+    } catch (err) {
+      console.error('Error creating roster:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred');
+      await Swal.fire({
+        icon: 'error',
+        title: 'Oops...',
+        text: err instanceof Error ? err.message : 'An error occurred while creating the roster',
       });
     } finally {
       setLoading(false);
@@ -125,311 +203,393 @@ const RosterManagement: React.FC = () => {
 
   const handleDeleteRoster = async (id: string) => {
     try {
-      setLoading(true);
-      const success = await deleteRoster(id);
-      
-      if (success) {
-        setRosters(rosters.filter(roster => roster.id !== id));
-        
-        toast({
-          title: 'Roster Deleted',
-          description: 'The schedule has been removed',
-        });
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Failed to delete roster',
-          variant: 'destructive',
-        });
-      }
+      await RosterService.deleteRoster(id);
+      loadRosters();
+      toast({
+        title: 'Success',
+        description: 'Roster deleted successfully',
+      });
     } catch (error) {
-      console.error('Error deleting roster:', error);
       toast({
         title: 'Error',
-        description: 'An unexpected error occurred',
+        description: 'Failed to delete roster',
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleUpdateStatus = async (id: string, status: 'active' | 'pending' | 'completed') => {
-    try {
-      setLoading(true);
-      const success = await updateRosterStatus(id, status);
-      
-      if (success) {
-        // Update roster in state
-        setRosters(prev => 
-          prev.map(roster => 
-            roster.id === id ? { ...roster, status } : roster
-          )
-        );
-        
-        toast({
-          title: 'Status Updated',
-          description: `Roster status changed to ${status}`,
-        });
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Failed to update roster status',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      console.error('Error updating roster status:', error);
-      toast({
-        title: 'Error',
-        description: 'An unexpected error occurred',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
+  const resetForm = () => {
+    setSelectedEmployee('');
+    setSelectedDepartment('');
+    setSelectedPosition('');
+    setSelectedStartDate(undefined);
+    setSelectedEndDate(undefined);
+    setSelectedShift('morning');
   };
 
-  // Filter rosters by status
-  const activeRosters = rosters.filter(roster => roster.status !== 'completed');
-  const completedRosters = rosters.filter(roster => roster.status === 'completed');
+  const filteredRosters = rosters.filter((roster) => {
+    const employee = employees.find((e) => e.id === roster.employee_id);
+    
+    // Handle search matching
+    const matchesSearch = employee?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      roster.shift.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Handle shift filtering
+    const matchesShift = filterShift === 'all' || roster.shift === filterShift;
+
+    // Handle date filtering
+    if (!selectedStartDate) return matchesSearch && matchesShift;
+
+    const rosterStart = new Date(roster.start_date);
+    const rosterEnd = new Date(roster.end_date);
+    const filterStartDate = new Date(selectedStartDate);
+    
+    const matchesDate = rosterEnd >= filterStartDate && 
+      rosterStart <= filterStartDate;
+
+    return matchesSearch && matchesShift && matchesDate;
+  });
+
+  const stats = {
+    total: rosters.length,
+    active: rosters.filter(r => getRosterStatus(r.start_date, r.end_date).label === 'Active').length,
+    upcoming: rosters.filter(r => getRosterStatus(r.start_date, r.end_date).label === 'Upcoming').length,
+    completed: rosters.filter(r => getRosterStatus(r.start_date, r.end_date).label === 'Completed').length,
+  };
+
+  const renderShiftCell = (shift: ShiftType) => {
+    return (
+      <div className="p-2 border">
+        {shift}
+      </div>
+    );
+  };
 
   return (
-    <div className="container mx-auto py-6 space-y-8">
-      <div className="flex flex-col md:flex-row gap-6">
-        {/* Roster Creation Form */}
-        <Card className="flex-1">
-          <CardHeader>
-            <CardTitle>Create New Roster</CardTitle>
-            <CardDescription>Schedule shifts for your employees</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Employee Selection */}
-            <div className="space-y-2">
-              <label htmlFor="employee-select" className="text-sm font-medium">Select Employee</label>
-              <select 
-                id="employee-select"
-                className="w-full border rounded-md p-2 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                value={selectedEmployee}
-                onChange={(e) => setSelectedEmployee(e.target.value)}
-                disabled={loading}
-                aria-label="Select employee"
-              >
-                <option value="">Select an employee</option>
-                {employees.map(employee => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.first_name} {employee.last_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            {/* Date Range Selection */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Select Date Range</label>
-              <div className="grid gap-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="w-full justify-start text-left font-normal"
-                      disabled={loading}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {dateRange?.from ? (
-                        dateRange.to ? (
-                          <>
-                            {format(dateRange.from, "LLL dd, y")} -{" "}
-                            {format(dateRange.to, "LLL dd, y")}
-                          </>
-                        ) : (
-                          format(dateRange.from, "LLL dd, y")
-                        )
-                      ) : (
-                        <span>Pick a date range</span>
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      initialFocus
-                      mode="range"
-                      defaultMonth={dateRange?.from}
-                      selected={dateRange}
-                      onSelect={setDateRange}
-                      numberOfMonths={2}
-                    />
-                  </PopoverContent>
-                </Popover>
+    <div className="container mx-auto px-4 py-6 max-w-7xl">
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">Roster Management</h1>
+            <p className="text-gray-500 mt-1">Manage employee schedules and shifts</p>
+          </div>
+          <Button
+            onClick={() => setIsCreateDialogOpen(true)}
+            className="whitespace-nowrap"
+            size="lg"
+          >
+            Create New Roster
+          </Button>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardContent className="flex items-center p-4">
+              <div className="rounded-full p-3 bg-blue-100">
+                <Users className="h-6 w-6 text-blue-700" />
               </div>
-            </div>
-            
-            {/* Shift Selection */}
-            <div className="space-y-2">
-              <label htmlFor="shift-select" className="text-sm font-medium">Select Shift</label>
-              <select 
-                id="shift-select"
-                className="w-full border rounded-md p-2"
-                value={selectedShift}
-                onChange={(e) => setSelectedShift(e.target.value as 'morning' | 'evening' | 'night')}
-                disabled={loading}
-                aria-label="Select shift"
-              >
-                <option value="morning">Morning Shift (6AM - 2PM)</option>
-                <option value="evening">Evening Shift (2PM - 10PM)</option>
-                <option value="night">Night Shift (10PM - 6AM)</option>
-              </select>
-            </div>
-            
-            <Button 
-              className="w-full" 
-              onClick={handleCreateRoster}
-              disabled={!selectedEmployee || !dateRange?.from || loading}
-            >
-              {loading ? 'Creating...' : 'Create Roster'}
-            </Button>
-          </CardContent>
-        </Card>
-        
-        {/* Active Rosters */}
-        <Card className="flex-1">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Active Rosters</CardTitle>
-              <CardDescription>Current and upcoming employee schedules</CardDescription>
-            </div>
-            <Users className="h-5 w-5 text-muted-foreground" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Total Rosters</p>
+                <p className="text-2xl font-bold">{stats.total}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center p-4">
+              <div className="rounded-full p-3 bg-green-100">
+                <Clock className="h-6 w-6 text-green-700" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Active</p>
+                <p className="text-2xl font-bold">{stats.active}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center p-4">
+              <div className="rounded-full p-3 bg-yellow-100">
+                <CalendarIcon className="h-6 w-6 text-yellow-700" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Upcoming</p>
+                <p className="text-2xl font-bold">{stats.upcoming}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center p-4">
+              <div className="rounded-full p-3 bg-gray-100">
+                <Filter className="h-6 w-6 text-gray-700" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Completed</p>
+                <p className="text-2xl font-bold">{stats.completed}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Roster List</CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="flex flex-col sm:flex-row gap-4 mb-6">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Input
+                  placeholder="Search by employee or shift..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <Select value={filterShift} onValueChange={setFilterShift}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by shift" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Shifts</SelectItem>
+                  {SHIFT_TYPES.map((shift) => (
+                    <SelectItem key={shift} value={shift}>
+                      {shift.charAt(0).toUpperCase() + shift.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="upcoming">Upcoming</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {loading ? (
-              <div className="py-10 text-center">Loading roster data...</div>
+              <div className="flex justify-center items-center min-h-[200px]">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+              </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Period</TableHead>
-                    <TableHead>Shift</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-[80px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activeRosters.length > 0 ? (
-                    activeRosters.map(roster => (
-                      <TableRow key={roster.id}>
-                        <TableCell className="font-medium">{roster.employeeName}</TableCell>
-                        <TableCell>
-                          {format(new Date(roster.startDate), 'MMM d')} - {format(new Date(roster.endDate), 'MMM d, yyyy')}
-                        </TableCell>
-                        <TableCell>
-                          <span className={`capitalize ${
-                            roster.shift === 'morning' ? 'text-blue-600' :
-                            roster.shift === 'evening' ? 'text-orange-600' : 'text-purple-600'
-                          }`}>
-                            {roster.shift}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            roster.status === 'active' ? 'bg-green-100 text-green-800' :
-                            roster.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
-                          }`}>
-                            {roster.status}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className="h-8 w-8 p-0">
-                                <span className="sr-only">Open menu</span>
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleUpdateStatus(roster.id, 'completed')}>
-                                <Pencil className="mr-2 h-4 w-4" />
-                                <span>Mark Completed</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleDeleteRoster(roster.id)}>
-                                <Trash className="mr-2 h-4 w-4" />
-                                <span>Delete</span>
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
-                        No active rosters found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredRosters.map((roster) => {
+                  const status = getRosterStatus(roster.start_date, roster.end_date);
+                  return (
+                    <Card key={roster.id} className="overflow-hidden">
+                      <CardContent className="p-4">
+                        <div className="flex flex-col gap-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h3 className="font-semibold">
+                                {employees.find(emp => emp.id === roster.employee_id)?.name || roster.employee_id}
+                              </h3>
+                              <p className="text-sm text-gray-500">
+                                {format(new Date(roster.start_date), 'PP')} - {format(new Date(roster.end_date), 'PP')}
+                              </p>
+                            </div>
+                            <div className="flex flex-col gap-2 items-end">
+                              <Badge className={getShiftColor(roster.shift)}>
+                                {roster.shift.charAt(0).toUpperCase() + roster.shift.slice(1)}
+                              </Badge>
+                              <Badge className={status.color}>
+                                {status.label}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="flex justify-end mt-2">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDeleteRoster(roster.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
       </div>
-      
-      {/* Historical Rosters */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Roster History</CardTitle>
-          <CardDescription>Past employee schedules</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="py-10 text-center">Loading roster data...</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Period</TableHead>
-                  <TableHead>Shift</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {completedRosters.length > 0 ? (
-                  completedRosters.map(roster => (
-                    <TableRow key={roster.id}>
-                      <TableCell className="font-medium">{roster.employeeName}</TableCell>
-                      <TableCell>
-                        {format(new Date(roster.startDate), 'MMM d')} - {format(new Date(roster.endDate), 'MMM d, yyyy')}
-                      </TableCell>
-                      <TableCell>
-                        <span className={`capitalize ${
-                          roster.shift === 'morning' ? 'text-blue-600' :
-                          roster.shift === 'evening' ? 'text-orange-600' : 'text-purple-600'
-                        }`}>
-                          {roster.shift}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
-                          {roster.status}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center py-4 text-muted-foreground">
-                      No historical rosters found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Create New Roster</DialogTitle>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <Accordion type="single" collapsible defaultValue="employee">
+                <AccordionItem value="employee">
+                  <AccordionTrigger className="text-lg font-semibold">
+                    Employee Details
+                  </AccordionTrigger>
+                  <AccordionContent className="pt-4 pb-2">
+                    <div className="grid gap-4">
+                      <FormField
+                        control={form.control}
+                        name="employee"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Employee</FormLabel>
+                            <Select
+                              value={field.value}
+                              onValueChange={(value) => {
+                                field.onChange(value);
+                                setSelectedEmployee(value);
+                              }}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select employee" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {employees.map((employee) => (
+                                  <SelectItem key={employee.id} value={employee.id}>
+                                    {employee.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className="grid grid-cols-2 gap-4">
+                        <FormItem>
+                          <FormLabel>Department</FormLabel>
+                          <Input value={selectedDepartment} readOnly disabled />
+                        </FormItem>
+                        <FormItem>
+                          <FormLabel>Position</FormLabel>
+                          <Input value={selectedPosition} readOnly disabled />
+                        </FormItem>
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="schedule">
+                  <AccordionTrigger className="text-lg font-semibold">
+                    Schedule Details
+                  </AccordionTrigger>
+                  <AccordionContent className="pt-4 pb-2">
+                    <div className="grid gap-6">
+                      <div className="grid sm:grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="startDate"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Start Date</FormLabel>
+                              <div className="border rounded-md p-2">
+                                <Calendar
+                                  mode="single"
+                                  selected={field.value}
+                                  onSelect={(date) => {
+                                    field.onChange(date);
+                                    setSelectedStartDate(date);
+                                  }}
+                                  disabled={(date) =>
+                                    date < new Date() || (form.watch("endDate") && date > form.watch("endDate"))
+                                  }
+                                  className="rounded-md border"
+                                />
+                              </div>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="endDate"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>End Date</FormLabel>
+                              <div className="border rounded-md p-2">
+                                <Calendar
+                                  mode="single"
+                                  selected={field.value}
+                                  onSelect={(date) => {
+                                    field.onChange(date);
+                                    setSelectedEndDate(date);
+                                  }}
+                                  disabled={(date) =>
+                                    date < (form.watch("startDate") || new Date())
+                                  }
+                                  className="rounded-md border"
+                                />
+                              </div>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="shift"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Shift Type</FormLabel>
+                            <Select
+                              value={field.value}
+                              onValueChange={(value) => {
+                                field.onChange(value);
+                                setSelectedShift(value as ShiftType);
+                              }}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select shift type" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {SHIFT_TYPES.map((shift) => (
+                                  <SelectItem key={shift} value={shift}>
+                                    <div className="flex items-center gap-2">
+                                      <Badge className={cn("w-2 h-2 rounded-full", getShiftColor(shift))} />
+                                      {shift.charAt(0).toUpperCase() + shift.slice(1)}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsCreateDialogOpen(false);
+                    resetForm();
+                    form.reset();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">Create Roster</Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
-};
-
-export default RosterManagement;
+} 

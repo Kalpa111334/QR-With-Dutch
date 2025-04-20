@@ -64,7 +64,8 @@ const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'settings'>('overview');
   
   // WhatsApp settings state
-  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [whatsappNumbers, setWhatsappNumbers] = useState<string[]>([]);
+  const [newWhatsappNumber, setNewWhatsappNumber] = useState('');
   const [isWhatsappShareEnabled, setIsWhatsappShareEnabled] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -92,7 +93,9 @@ const Dashboard: React.FC = () => {
         
         // Set WhatsApp settings
         if (adminSettings) {
-          setWhatsappNumber(adminSettings.whatsappNumber || '');
+          // Split the stored numbers if they exist
+          const numbers = adminSettings.whatsappNumber ? adminSettings.whatsappNumber.split('|').map(n => n.trim()) : [];
+          setWhatsappNumbers(numbers);
           setIsWhatsappShareEnabled(adminSettings.isWhatsappShareEnabled || false);
         }
       } catch (error) {
@@ -116,64 +119,103 @@ const Dashboard: React.FC = () => {
   
   // Calculate stats from attendance records
   const stats = React.useMemo(() => {
-    if (!summary || !employees.length) {
+    if (!summary) {
       return {
         totalEmployees: 0,
-        activeEmployees: 0,
         present: 0,
         late: 0,
         absent: 0,
         checkedOut: 0,
+        onTime: 0,
+        stillWorking: 0,
         lateRate: '0',
-        absentRate: '0',
-        summary: {
-          present: 0,
-          late: 0,
-          absent: 0,
-          checkedOut: 0,
-          onTime: 0,
-          stillWorking: 0,
-          totalEmployees: 0,
-          activeEmployees: 0,
-          presentCount: 0,
-          lateCount: 0,
-          absentCount: 0,
-          checkedOutCount: 0,
-          onTimeCount: 0,
-          stillWorkingCount: 0,
-          lateRate: '0',
-          absentRate: '0'
-        }
+        absentRate: '0'
       };
     }
 
     return {
       totalEmployees: summary.totalEmployees,
-      activeEmployees: summary.totalEmployees,
       present: summary.presentCount,
       late: summary.lateCount,
       absent: summary.absentCount,
       checkedOut: summary.checkedOutCount,
+      onTime: summary.onTime,
+      stillWorking: summary.stillWorking,
       lateRate: summary.lateRate,
-      absentRate: summary.absentRate,
-      summary: summary
+      absentRate: summary.absentRate
     };
-  }, [summary, employees]);
+  }, [summary]);
+
+  // Format WhatsApp number
+  const formatWhatsAppNumber = (number: string): string => {
+    let formatted = number.replace(/\D/g, '');
+    if (formatted.startsWith('0')) {
+      formatted = '94' + formatted.substring(1);
+    } else if (!formatted.startsWith('94')) {
+      formatted = '94' + formatted;
+    }
+    return formatted;
+  };
+
+  // Handle adding new WhatsApp number
+  const handleAddNumber = () => {
+    if (!newWhatsappNumber) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a WhatsApp number',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const formatted = formatWhatsAppNumber(newWhatsappNumber);
+    if (formatted.length < 11) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a valid WhatsApp number (minimum 11 digits)',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (whatsappNumbers.includes(formatted)) {
+      toast({
+        title: 'Validation Error',
+        description: 'This number is already added',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setWhatsappNumbers([...whatsappNumbers, formatted]);
+    setNewWhatsappNumber('');
+  };
+
+  // Handle removing WhatsApp number
+  const handleRemoveNumber = (numberToRemove: string) => {
+    setWhatsappNumbers(whatsappNumbers.filter(num => num !== numberToRemove));
+  };
 
   // Handle saving WhatsApp settings
   const handleSaveSettings = async () => {
     setIsSaving(true);
     try {
-      if (isWhatsappShareEnabled && !whatsappNumber) {
+      if (isWhatsappShareEnabled && whatsappNumbers.length === 0) {
         toast({
           title: 'Validation Error',
-          description: 'Please enter a WhatsApp number',
+          description: 'Please add at least one WhatsApp number',
           variant: 'destructive',
         });
         return;
       }
 
-      await saveAdminContactInfo(whatsappNumber, isWhatsappShareEnabled);
+      const info = {
+        whatsappNumber: whatsappNumbers.join(' | '),
+        isWhatsappShareEnabled
+      };
+      
+      await saveAdminContactInfo(whatsappNumbers.join(' | '), isWhatsappShareEnabled, info);
+      
       toast({
         title: 'Success',
         description: 'Settings saved successfully',
@@ -192,29 +234,18 @@ const Dashboard: React.FC = () => {
 
   // Handle WhatsApp sharing
   const handleShareNow = async () => {
-    if (!whatsappNumber) {
+    if (!whatsappNumbers.length) {
       toast({
         title: 'Validation Error',
-        description: 'Please enter a WhatsApp number',
+        description: 'Please add at least one WhatsApp number',
         variant: 'destructive',
       });
       return;
     }
 
-    // Validate number format
-    const cleanNumber = whatsappNumber.replace(/\D/g, '');
-    if (cleanNumber.length < 10) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please enter a valid WhatsApp number',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
     setIsSharing(true);
     try {
-      const result = await autoShareAttendanceSummary('evening');
+      const result = await autoShareAttendanceSummary();
       
       if (result) {
         toast({
@@ -298,16 +329,20 @@ const Dashboard: React.FC = () => {
                   <UserCheck className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats.present}</div>
+                  <div className="text-2xl font-bold">{stats.present + stats.late}</div>
                   <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">
-                      {stats.summary.present}
-                    </p>
                     <div className="text-xs">
-                      <span className="text-green-600">On Time: {stats.summary.onTime}</span>
+                      <span className="text-green-600">On Time: {stats.onTime}</span>
                       <br />
-                      <span className="text-amber-600">Late: {stats.summary.late}</span>
+                      <span className="text-amber-600">Late: {stats.late}</span>
+                      <br />
+                      <span className="text-blue-600">Checked Out: {stats.checkedOut}</span>
                     </div>
+                    {stats.late > 0 && (
+                      <p className="text-xs text-amber-600">
+                        Late Rate: {stats.lateRate}%
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -321,10 +356,7 @@ const Dashboard: React.FC = () => {
                   <div className="text-2xl font-bold">{stats.checkedOut}</div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">
-                      {stats.summary.checkedOut}
-                    </p>
-                    <p className="text-xs">
-                      Still Working: {stats.summary.stillWorking}
+                      Still Working: {stats.stillWorking}
                     </p>
                   </div>
                 </CardContent>
@@ -337,9 +369,11 @@ const Dashboard: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats.absent}</div>
-                  <p className="text-xs text-muted-foreground">
-                    {stats.summary.absent}
-                  </p>
+                  {stats.absent > 0 && (
+                    <p className="text-xs text-red-600">
+                      Absence Rate: {stats.absentRate}%
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -355,7 +389,7 @@ const Dashboard: React.FC = () => {
                 <CardContent>
                   <div className="text-xl font-bold text-red-700 dark:text-red-300">{stats.absent}</div>
                   <p className="text-xs text-red-600/80 dark:text-red-400/80">
-                    {stats.absent > 0 && stats.activeEmployees > 0
+                    {stats.absent > 0 && stats.totalEmployees > 0
                       ? `${stats.absentRate}% absence rate today`
                       : 'All employees present today!'}
                   </p>
@@ -380,7 +414,7 @@ const Dashboard: React.FC = () => {
                   WhatsApp Attendance Reports
                 </CardTitle>
                 <CardDescription>
-                  Configure how attendance reports are shared via WhatsApp
+                  Configure super admin WhatsApp numbers for attendance reports
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -389,12 +423,7 @@ const Dashboard: React.FC = () => {
                     <Switch
                       id="whatsapp-share"
                       checked={isWhatsappShareEnabled}
-                      onCheckedChange={(checked) => {
-                        setIsWhatsappShareEnabled(checked);
-                        if (!checked) {
-                          setWhatsappNumber('');
-                        }
-                      }}
+                      onCheckedChange={setIsWhatsappShareEnabled}
                     />
                     <Label htmlFor="whatsapp-share" className="font-medium">
                       Enable WhatsApp Sharing
@@ -402,34 +431,64 @@ const Dashboard: React.FC = () => {
                   </div>
 
                   {isWhatsappShareEnabled && (
-                    <div className="space-y-2">
-                      <Label htmlFor="whatsapp-number">WhatsApp Number</Label>
-                      <div className="relative">
-                        <Input
-                          id="whatsapp-number"
-                          type="tel"
-                          value={whatsappNumber}
-                          onChange={(e) => {
-                            const value = e.target.value.replace(/[^0-9]/g, '');
-                            setWhatsappNumber(value);
-                          }}
-                          placeholder="Enter WhatsApp number (e.g., 081234567890)"
-                          className="pl-8"
-                        />
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
-                          +
-                        </span>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Super Admin WhatsApp Numbers</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {whatsappNumbers.map((number, index) => (
+                            <div key={index} className="flex items-center gap-2 bg-green-100 dark:bg-green-900/40 rounded-full px-3 py-1">
+                              <span className="text-sm">+{number}</span>
+                              <button
+                                onClick={() => handleRemoveNumber(number)}
+                                className="text-red-500 hover:text-red-700"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <p className="text-sm text-gray-500">
-                        Enter number with country code (e.g., 081234567890)
-                      </p>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="whatsapp-number">Add New Number</Label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              id="whatsapp-number"
+                              type="tel"
+                              value={newWhatsappNumber}
+                              onChange={(e) => {
+                                const value = e.target.value.replace(/\D/g, '');
+                                if (value.length <= 15) {
+                                  setNewWhatsappNumber(value);
+                                }
+                              }}
+                              placeholder="Enter WhatsApp number (e.g., 94741233252)"
+                              className="pl-8"
+                            />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+                              +
+                            </span>
+                          </div>
+                          <Button
+                            onClick={handleAddNumber}
+                            variant="outline"
+                            className="border-green-600 text-green-600"
+                          >
+                            Add
+                          </Button>
+                        </div>
+                        <p className="text-sm text-gray-500">
+                          Enter number with or without country code (e.g., 0741233252 or 94741233252)
+                        </p>
+                      </div>
                     </div>
                   )}
 
                   <div className="flex flex-col sm:flex-row gap-2 pt-2">
                     <Button
                       onClick={handleSaveSettings}
-                      disabled={isSaving || (isWhatsappShareEnabled && !whatsappNumber)}
+                      disabled={isSaving || (isWhatsappShareEnabled && whatsappNumbers.length === 0)}
                       className={cn(
                         "flex-1 transition-all duration-200",
                         isSaving 
@@ -446,7 +505,7 @@ const Dashboard: React.FC = () => {
                         'Save Settings'
                       )}
                     </Button>
-                    {isWhatsappShareEnabled && whatsappNumber && (
+                    {isWhatsappShareEnabled && whatsappNumbers.length > 0 && (
                       <Button
                         variant="outline"
                         onClick={handleShareNow}

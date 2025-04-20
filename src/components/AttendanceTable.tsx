@@ -19,13 +19,51 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Attendance } from '@/types';
-import { Calendar, Download, Search, Clock, Timer } from 'lucide-react';
+import { Calendar, Download, Search, Clock, Timer, FileText } from 'lucide-react';
 import { getAttendanceRecords } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
+import { Document, Page, Text, View, StyleSheet, PDFDownloadLink } from '@react-pdf/renderer';
 
 interface AttendanceTableProps {
   attendanceRecords?: Attendance[] | Promise<Attendance[]>;
 }
+
+// Define styles for PDF
+const styles = StyleSheet.create({
+  page: {
+    padding: 30,
+  },
+  title: {
+    fontSize: 20,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  table: {
+    display: 'flex',
+    width: 'auto',
+    borderStyle: 'solid',
+    borderWidth: 1,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+  },
+  tableRow: {
+    margin: 'auto',
+    flexDirection: 'row',
+  },
+  tableHeader: {
+    backgroundColor: '#f0f0f0',
+    fontWeight: 'bold',
+  },
+  tableCell: {
+    width: '14.28%',
+    borderStyle: 'solid',
+    borderWidth: 1,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+    padding: 5,
+    fontSize: 10,
+  },
+});
 
 const AttendanceTable: React.FC<AttendanceTableProps> = ({ 
   attendanceRecords: propAttendanceRecords
@@ -103,15 +141,91 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     document.body.removeChild(link);
   };
 
+  const exportToPdf = () => {
+    if (filteredRecords.length === 0) return;
+
+    const AttendancePDF = () => (
+      <Document>
+        <Page size="A4" style={styles.page}>
+          <Text style={styles.title}>Attendance Records</Text>
+          <View style={styles.table}>
+            {/* Table Header */}
+            <View style={[styles.tableRow, styles.tableHeader]}>
+              <Text style={styles.tableCell}>Date</Text>
+              <Text style={styles.tableCell}>Employee Name</Text>
+              <Text style={styles.tableCell}>Check In</Text>
+              <Text style={styles.tableCell}>Check Out</Text>
+              <Text style={styles.tableCell}>Status</Text>
+              <Text style={styles.tableCell}>Minutes Late</Text>
+              <Text style={styles.tableCell}>Working Duration</Text>
+            </View>
+            
+            {/* Table Body */}
+            {filteredRecords.map((record, index) => (
+              <View key={index} style={styles.tableRow}>
+                <Text style={styles.tableCell}>{new Date(record.date).toLocaleDateString()}</Text>
+                <Text style={styles.tableCell}>{record.employeeName}</Text>
+                <Text style={styles.tableCell}>
+                  {record.checkInTime ? new Date(record.checkInTime).toLocaleTimeString() : '-'}
+                </Text>
+                <Text style={styles.tableCell}>
+                  {record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString() : '-'}
+                </Text>
+                <Text style={styles.tableCell}>{record.status}</Text>
+                <Text style={styles.tableCell}>
+                  {record.checkInTime ? (() => {
+                    const checkIn = new Date(record.checkInTime);
+                    const workStart = new Date(checkIn);
+                    workStart.setHours(9, 0, 0, 0);
+                    
+                    if (checkIn > workStart) {
+                      const lateMinutes = Math.round((checkIn.getTime() - workStart.getTime()) / (1000 * 60));
+                      const hours = Math.floor(lateMinutes / 60);
+                      const minutes = lateMinutes % 60;
+                      
+                      if (hours > 0) {
+                        return `${hours}h ${minutes}m late`;
+                      }
+                      return `${minutes}m late`;
+                    }
+                    return '0';
+                  })() : '0'}
+                </Text>
+                <Text style={styles.tableCell}>{record.workingDuration || '-'}</Text>
+              </View>
+            ))}
+          </View>
+        </Page>
+      </Document>
+    );
+
+    return (
+      <PDFDownloadLink
+        document={<AttendancePDF />}
+        fileName={`attendance_${startDate}_to_${endDate}.pdf`}
+      >
+        {({ loading }) => (
+          <Button disabled={loading}>
+            <FileText className="mr-2 h-4 w-4" />
+            Export to PDF
+          </Button>
+        )}
+      </PDFDownloadLink>
+    );
+  };
+
   return (
     <Card className="w-full">
       <CardHeader>
         <CardTitle className="flex justify-between items-center">
           <span>Attendance Records</span>
-          <Button onClick={exportToCsv} disabled={filteredRecords.length === 0}>
-            <Download className="mr-2 h-4 w-4" />
-            Export to CSV
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={exportToCsv} disabled={filteredRecords.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              Export to CSV
+            </Button>
+            {filteredRecords.length > 0 && exportToPdf()}
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -221,49 +335,73 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                     <TableRow key={record.id}>
                       <TableCell>{new Date(record.date).toLocaleDateString()}</TableCell>
                       <TableCell className="font-medium">{record.employeeName}</TableCell>
-                      <TableCell>{new Date(record.checkInTime).toLocaleTimeString()}</TableCell>
                       <TableCell>
-                        {record.checkOutTime 
-                          ? new Date(record.checkOutTime).toLocaleTimeString() 
-                          : '-'
-                        }
+                        {record.checkInTime ? new Date(record.checkInTime).toLocaleTimeString() : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString() : '-'}
                       </TableCell>
                       <TableCell>
                         <Badge 
                           variant={
                             record.status === 'present' 
                               ? 'default' 
-                              : record.status === 'late' 
-                                ? 'destructive' 
-                                : 'secondary'
+                              : record.status === 'checked-out' 
+                                ? 'secondary'
+                                : 'destructive'
                           }
                         >
                           {record.status}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {record.status === 'late' ? (
-                          <div className="text-destructive">
-                            <div className="font-medium">
-                              {record.lateDuration}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Expected: {record.expectedTime}
-                              <br />
-                              Actual: {new Date(record.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </div>
+                        {record.checkInTime ? (
+                          <div>
+                            {(() => {
+                              const checkIn = new Date(record.checkInTime);
+                              const workStart = new Date(checkIn);
+                              workStart.setHours(9, 0, 0, 0);
+                              
+                              if (checkIn > workStart) {
+                                const lateMinutes = Math.round((checkIn.getTime() - workStart.getTime()) / (1000 * 60));
+                                const hours = Math.floor(lateMinutes / 60);
+                                const minutes = lateMinutes % 60;
+                                
+                                let lateText = '';
+                                if (hours > 0) {
+                                  lateText = `${hours}h ${minutes}m late`;
+                                } else {
+                                  lateText = `${minutes}m late`;
+                                }
+                                
+                                return (
+                                  <div>
+                                    <div className="text-red-600 font-medium">
+                                      {lateText}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      Expected: 9:00 AM
+                                    </div>
+                                  </div>
+                                );
+                              } else {
+                                return (
+                                  <div className="text-green-600 font-medium">
+                                    On time
+                                  </div>
+                                );
+                              }
+                            })()}
                           </div>
-                        ) : (
-                          <span className="text-muted-foreground">On time</span>
-                        )}
+                        ) : '-'}
                       </TableCell>
                       <TableCell>
                         <div>
                           <div className="font-medium whitespace-nowrap">
-                            {record.workingDuration || 'Calculating...'}
+                            {record.workingDuration}
                           </div>
                           <div className="text-xs text-muted-foreground whitespace-nowrap">
-                            {record.fullTimeRange || '-'}
+                            {record.fullTimeRange}
                           </div>
                         </div>
                       </TableCell>

@@ -50,14 +50,8 @@ const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({ employee }) => {
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
   };
 
-  // Create QR code data that includes employee ID
-  const qrCodeData = JSON.stringify({
-    id: employee.id,
-    type: 'employee',
-    name: employee.name,
-    department: employee.department,
-    status: employee.status
-  });
+  // Create QR code data that includes employee ID using the standardized format
+  const qrCodeData = `EMP:${employee.id}:${employee.name.replace(/[^a-zA-Z0-9 ]/g, '')}`;
 
   return (
     <Card className="w-full max-w-md mx-auto">

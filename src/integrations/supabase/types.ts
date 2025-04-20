@@ -45,6 +45,8 @@ export interface Database {
           employee_id: string
           id: string
           status: string
+          total_hours: number | null
+          late_duration: number | null
         }
         Insert: {
           check_in_time?: string
@@ -54,6 +56,8 @@ export interface Database {
           employee_id: string
           id?: string
           status?: string
+          total_hours?: number | null
+          late_duration?: number | null
         }
         Update: {
           check_in_time?: string
@@ -63,6 +67,8 @@ export interface Database {
           employee_id?: string
           id?: string
           status?: string
+          total_hours?: number | null
+          late_duration?: number | null
         }
         Relationships: [
           {
@@ -567,3 +573,21 @@ export type CompositeTypes<
   : PublicCompositeTypeNameOrOptions extends keyof PublicSchema["CompositeTypes"]
     ? PublicSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
     : never
+
+export type ShiftType = 'morning' | 'evening' | 'night' | 'off';
+
+export interface DailyShift {
+  date: string;
+  shift: ShiftType;
+}
+
+export interface Roster {
+  id: string;
+  employee_id: string;
+  start_date: string;
+  end_date: string;
+  shift: ShiftType;
+  status: 'active' | 'completed';
+  created_at: string;
+  updated_at: string;
+}

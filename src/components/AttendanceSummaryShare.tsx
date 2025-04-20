@@ -7,11 +7,9 @@ import { toast as sonnerToast } from "sonner";
 import { Attendance } from '@/types';
 import { 
   getAttendanceRecords, 
-  generateAttendanceSummaryHTML,
   getAdminContactInfo,
   saveAdminContactInfo,
-  autoShareAttendanceSummary,
-  AdminContactInfo
+  autoShareAttendanceSummary
 } from '@/utils/attendanceUtils';
 import { CalendarIcon, Send, MessageSquare, Clock, Save, Check, AlertTriangle, Mail, Share2, Settings } from 'lucide-react';
 import { format } from 'date-fns';
@@ -89,7 +87,7 @@ const AttendanceSummaryShare: React.FC = () => {
       // Send report at 6 PM (18:00)
       if (hour === 18 && minute >= 0 && minute < 5) {
         if (emailShareEnabled && email) {
-          autoShareAttendanceSummary('evening')
+          autoShareAttendanceSummary()
             .then(success => {
               if (success) {
                 sonnerToast.success('Auto-Share Success', {
@@ -182,7 +180,11 @@ const AttendanceSummaryShare: React.FC = () => {
         }
       }
 
-      await saveAdminContactInfo(email, emailShareEnabled);
+      const info = {
+        whatsappNumber: email,
+        isWhatsappShareEnabled: emailShareEnabled
+      };
+      await saveAdminContactInfo(email, emailShareEnabled, info);
       setSettingsSaved(true);
       toast({
         title: 'Settings Saved',
