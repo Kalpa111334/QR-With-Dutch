@@ -146,18 +146,24 @@ export default function RosterManagement() {
 
   const loadRosters = async () => {
     try {
+      setLoading(true);
       const data = await RosterService.getRosters();
-      setRosters(data);
-      } catch (error) {
-        toast({
-          title: 'Error',
-        description: 'Failed to load rosters',
-          variant: 'destructive',
-        });
-    } finally {
-        setLoading(false);
+      if (!data) {
+        throw new Error('No roster data received');
       }
-    };
+      setRosters(data);
+    } catch (error) {
+      console.error('Error loading rosters:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to load rosters',
+        variant: 'destructive',
+      });
+      setRosters([]); // Set empty array on error to prevent undefined state
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const onSubmit = async (data: FormValues) => {
     try {
@@ -166,19 +172,28 @@ export default function RosterManagement() {
       
       const newRoster: Omit<Roster, 'id' | 'created_at' | 'updated_at'> = {
         employee_id: data.employee,
+        department: selectedDepartment,
+        position: selectedPosition,
         start_date: format(data.startDate, 'yyyy-MM-dd'),
         end_date: format(data.endDate, 'yyyy-MM-dd'),
-        shift: data.shift as ShiftType,
+        shift_pattern: [{
+          date: format(data.startDate, 'yyyy-MM-dd'),
+          shift: data.shift
+        }],
         status: 'active' as const,
       };
 
-      console.log('Creating roster with data:', newRoster);
       const result = await RosterService.createRoster(newRoster);
       console.log('Roster creation result:', result);
+      
+      // Update local state immediately with the new roster
+      setRosters(prevRosters => [...prevRosters, result]);
       
       setIsCreateDialogOpen(false);
       resetForm();
       form.reset();
+      
+      // Refresh the roster list to ensure we have the latest data
       await loadRosters();
       
       await Swal.fire({
@@ -227,15 +242,18 @@ export default function RosterManagement() {
     setSelectedShift('morning');
   };
 
-  const filteredRosters = rosters.filter((roster) => {
-    const employee = employees.find((e) => e.id === roster.employee_id);
+  const filteredRosters = rosters.filter(roster => {
+    // Get the first shift from the shift pattern
+    const currentShift = roster.shift_pattern?.[0]?.shift || 'off';
     
-    // Handle search matching
-    const matchesSearch = employee?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      roster.shift.toLowerCase().includes(searchTerm.toLowerCase());
+    // Handle search filtering
+    const matchesSearch = 
+      (employees.find(emp => emp.id === roster.employee_id)?.name || '')
+        .toLowerCase().includes(searchTerm.toLowerCase()) ||
+      currentShift.toLowerCase().includes(searchTerm.toLowerCase());
     
     // Handle shift filtering
-    const matchesShift = filterShift === 'all' || roster.shift === filterShift;
+    const matchesShift = filterShift === 'all' || currentShift === filterShift;
 
     // Handle date filtering
     if (!selectedStartDate) return matchesSearch && matchesShift;
@@ -378,6 +396,7 @@ export default function RosterManagement() {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredRosters.map((roster) => {
                   const status = getRosterStatus(roster.start_date, roster.end_date);
+                  const currentShift = roster.shift_pattern?.[0]?.shift || 'off';
                   return (
                     <Card key={roster.id} className="overflow-hidden">
                       <CardContent className="p-4">
@@ -392,8 +411,8 @@ export default function RosterManagement() {
                               </p>
                             </div>
                             <div className="flex flex-col gap-2 items-end">
-                              <Badge className={getShiftColor(roster.shift)}>
-                                {roster.shift.charAt(0).toUpperCase() + roster.shift.slice(1)}
+                              <Badge className={getShiftColor(currentShift)}>
+                                {currentShift.charAt(0).toUpperCase() + currentShift.slice(1)}
                               </Badge>
                               <Badge className={status.color}>
                                 {status.label}

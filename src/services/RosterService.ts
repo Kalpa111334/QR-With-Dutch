@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { Roster, ShiftType } from '@/integrations/supabase/types';
+import { Roster, DailyShift } from '@/integrations/supabase/types';
 
 export class RosterService {
   static async checkTableExists() {
@@ -13,6 +13,7 @@ export class RosterService {
     status?: string;
     startDate?: string;
     endDate?: string;
+    department?: string;
   }): Promise<Roster[]> {
     await this.checkTableExists();
     let query = supabase.from('rosters').select('*');
@@ -26,14 +27,13 @@ export class RosterService {
     if (filters?.endDate) {
       query = query.lte('end_date', filters.endDate);
     }
+    if (filters?.department) {
+      query = query.eq('department', filters.department);
+    }
 
     const { data, error } = await query;
     if (error) throw error;
-    return (data || []).map(roster => ({
-      ...roster,
-      shift: roster.shift as ShiftType,
-      status: roster.status as 'active' | 'completed'
-    }));
+    return data || [];
   }
 
   static async getRosterById(id: string): Promise<Roster | null> {
@@ -45,23 +45,44 @@ export class RosterService {
       .single();
 
     if (error) throw error;
-    return data ? {
-      ...data,
-      shift: data.shift as ShiftType,
-      status: data.status as 'active' | 'completed'
-    } : null;
+    return data;
   }
 
   static async createRoster(roster: Omit<Roster, 'id' | 'created_at' | 'updated_at'>): Promise<Roster> {
     await this.checkTableExists();
+
+    // Ensure shift_pattern is never null by providing a default empty array
+    const shiftPattern = roster.shift_pattern || [];
+
+    // If start_date and end_date are provided but shift_pattern is empty,
+    // create a default pattern with 'off' shifts for each day
+    if (roster.start_date && roster.end_date && shiftPattern.length === 0) {
+      const startDate = new Date(roster.start_date);
+      const endDate = new Date(roster.end_date);
+      const currentDate = new Date(startDate);
+
+      while (currentDate <= endDate) {
+        shiftPattern.push({
+          date: currentDate.toISOString().split('T')[0],
+          shift: 'off'
+        });
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+    }
+
     const { data, error } = await supabase
       .from('rosters')
       .insert([{
         employee_id: roster.employee_id,
+        department: roster.department || 'Unassigned',
+        position: roster.position || 'Unassigned',
         start_date: roster.start_date,
         end_date: roster.end_date,
-        shift: roster.shift,
-        status: roster.status
+        shift_pattern: shiftPattern,
+        notes: roster.notes,
+        status: roster.status || 'active',
+        created_by: roster.created_by,
+        updated_by: roster.updated_by
       }])
       .select()
       .single();
@@ -75,28 +96,29 @@ export class RosterService {
       throw new Error('No data returned from roster creation');
     }
 
-    return {
-      ...data,
-      shift: data.shift as ShiftType,
-      status: data.status as 'active' | 'completed'
-    };
+    return data;
   }
 
-  static async updateRoster(id: string, updates: Partial<Roster>): Promise<Roster> {
+  static async updateRoster(id: string, updates: Partial<Omit<Roster, 'id' | 'created_at'>>): Promise<Roster> {
     await this.checkTableExists();
+
+    // Ensure shift_pattern is never null when updating
+    if (updates.shift_pattern === null) {
+      updates.shift_pattern = [];
+    }
+
     const { data, error } = await supabase
       .from('rosters')
-      .update(updates)
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
-    return {
-      ...data,
-      shift: data.shift as ShiftType,
-      status: data.status as 'active' | 'completed'
-    };
+    return data;
   }
 
   static async deleteRoster(id: string): Promise<void> {

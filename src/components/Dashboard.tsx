@@ -330,20 +330,11 @@ const Dashboard: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats.present + stats.late}</div>
-                  <div className="space-y-1">
-                    <div className="text-xs">
-                      <span className="text-green-600">On Time: {stats.onTime}</span>
-                      <br />
-                      <span className="text-amber-600">Late: {stats.late}</span>
-                      <br />
-                      <span className="text-blue-600">Checked Out: {stats.checkedOut}</span>
-                    </div>
-                    {stats.late > 0 && (
-                      <p className="text-xs text-amber-600">
-                        Late Rate: {stats.lateRate}%
-                      </p>
-                    )}
-                  </div>
+                  {stats.totalEmployees > 0 && (
+                    <p className="text-xs text-green-600">
+                      Present Rate: {((stats.present + stats.late) / stats.totalEmployees * 100).toFixed(1)}%
+                    </p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -369,11 +360,33 @@ const Dashboard: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats.absent}</div>
-                  {stats.absent > 0 && (
+                  <div className="space-y-1">
                     <p className="text-xs text-red-600">
                       Absence Rate: {stats.absentRate}%
                     </p>
-                  )}
+                    <p className="text-xs text-muted-foreground">
+                      Out of {stats.totalEmployees} total employees
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="mt-6">
+              <Card className="border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-800">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2 text-green-700 dark:text-green-300">
+                    <UserCheck size={16} className="text-green-500" />
+                    Present Employees
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xl font-bold text-green-700 dark:text-green-300">{stats.present + stats.late}</div>
+                  <p className="text-xs text-green-600/80 dark:text-green-400/80">
+                    {stats.totalEmployees > 0
+                      ? `${((stats.present + stats.late) / stats.totalEmployees * 100).toFixed(1)}% present today`
+                      : 'No employees in the system'}
+                  </p>
                 </CardContent>
               </Card>
             </div>
@@ -389,9 +402,9 @@ const Dashboard: React.FC = () => {
                 <CardContent>
                   <div className="text-xl font-bold text-red-700 dark:text-red-300">{stats.absent}</div>
                   <p className="text-xs text-red-600/80 dark:text-red-400/80">
-                    {stats.absent > 0 && stats.totalEmployees > 0
-                      ? `${stats.absentRate}% absence rate today`
-                      : 'All employees present today!'}
+                    {stats.totalEmployees > 0
+                      ? `${stats.absentRate}% absence rate today (${stats.absent} out of ${stats.totalEmployees} employees)`
+                      : 'No employees in the system'}
                   </p>
                 </CardContent>
               </Card>

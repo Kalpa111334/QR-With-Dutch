@@ -286,51 +286,50 @@ export interface Database {
       }
       rosters: {
         Row: {
-          created_at: string
-          employee_id: string
-          end_date: string
-          id: string
-          shift: string
-          start_date: string
-          status: string
-          updated_at: string
-        }
+          id: string;
+          employee_id: string;
+          department: string;
+          position: string;
+          start_date: string;
+          end_date: string;
+          shift_pattern: DailyShift[];
+          notes?: string;
+          status: string;
+          created_at: string;
+          updated_at: string;
+          created_by?: string;
+          updated_by?: string;
+        };
         Insert: {
-          created_at?: string
-          employee_id: string
-          end_date: string
-          id?: string
-          shift: string
-          start_date: string
-          status: string
-          updated_at?: string
-        }
+          id?: string;
+          employee_id: string;
+          department: string;
+          position: string;
+          start_date: string;
+          end_date: string;
+          shift_pattern: DailyShift[];
+          notes?: string;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string;
+          updated_by?: string;
+        };
         Update: {
-          created_at?: string
-          employee_id?: string
-          end_date?: string
-          id?: string
-          shift?: string
-          start_date?: string
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "rosters_employee_id_fkey"
-            columns: ["employee_id"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "rosters_employee_id_fkey"
-            columns: ["employee_id"]
-            isOneToOne: false
-            referencedRelation: "employees_view"
-            referencedColumns: ["id"]
-          },
-        ]
+          id?: string;
+          employee_id?: string;
+          department?: string;
+          position?: string;
+          start_date?: string;
+          end_date?: string;
+          shift_pattern?: DailyShift[];
+          notes?: string;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string;
+          updated_by?: string;
+        };
       }
     }
     Views: {
@@ -584,10 +583,15 @@ export interface DailyShift {
 export interface Roster {
   id: string;
   employee_id: string;
+  department: string;
+  position: string;
   start_date: string;
   end_date: string;
-  shift: ShiftType;
+  shift_pattern: DailyShift[];
+  notes?: string;
   status: 'active' | 'completed';
   created_at: string;
   updated_at: string;
+  created_by?: string;
+  updated_by?: string;
 }

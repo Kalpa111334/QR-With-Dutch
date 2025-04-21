@@ -383,12 +383,16 @@ export const getTodayAttendanceSummary = async () => {
       record.check_out_time !== null
     ).length || 0;
     
+    // Calculate total present (including present, late, and checked out)
     const totalPresent = presentCount + lateCount + checkedOutCount;
-    const absentCount = totalEmployees - totalPresent;
+    
+    // Calculate absent as total employees minus all types of present employees
+    const absentCount = Math.max(0, totalEmployees - totalPresent);
 
     // Calculate rates
     const lateRate = totalPresent > 0 ? ((lateCount / totalPresent) * 100).toFixed(1) : '0';
     const absentRate = totalEmployees > 0 ? ((absentCount / totalEmployees) * 100).toFixed(1) : '0';
+    const presentRate = totalEmployees > 0 ? ((totalPresent / totalEmployees) * 100).toFixed(1) : '0';
 
     return {
       totalEmployees,
@@ -399,7 +403,8 @@ export const getTodayAttendanceSummary = async () => {
       onTime: presentCount,
       stillWorking: presentCount + lateCount,
       lateRate,
-      absentRate
+      absentRate,
+      presentRate
     };
   } catch (error) {
     console.error('Error getting attendance summary:', error);
@@ -412,7 +417,8 @@ export const getTodayAttendanceSummary = async () => {
       onTime: 0,
       stillWorking: 0,
       lateRate: '0',
-      absentRate: '0'
+      absentRate: '0',
+      presentRate: '0'
     };
   }
 };
