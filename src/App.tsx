@@ -1,4 +1,3 @@
-
 import React from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -7,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
 import RosterManagement from "./pages/RosterManagement";
 import GatePass from "./pages/GatePass";
+import AttendanceBotDashboard from "./pages/AttendanceBotDashboard";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
 import { toast } from "@/components/ui/use-toast";
 import SplashScreen from "./components/SplashScreen";
@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
       refetchOnWindowFocus: false, // Don't refetch when window gets focus
       refetchOnReconnect: true, // Do refetch when reconnecting
       meta: {
-        onError: (error) => {
+        onError: (error: unknown) => {
           toast({
             title: "Error",
             description: error instanceof Error ? error.message : "An unexpected error occurred",
@@ -95,6 +95,7 @@ const App: React.FC = () => {
               <Route path="/" element={<Index />} />
               <Route path="/roster" element={<RosterManagement />} />
               <Route path="/gate-pass" element={<GatePass />} />
+              <Route path="/bot" element={<AttendanceBotDashboard />} />
               <Route path="/home" element={<Navigate to="/" replace />} />
               {/* Redirect all unknown routes to home */}
               <Route path="*" element={<Navigate to="/" replace />} />

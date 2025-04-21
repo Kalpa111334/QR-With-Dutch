@@ -64,8 +64,7 @@ const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'settings'>('overview');
   
   // WhatsApp settings state
-  const [whatsappNumbers, setWhatsappNumbers] = useState<string[]>([]);
-  const [newWhatsappNumber, setNewWhatsappNumber] = useState('');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
   const [isWhatsappShareEnabled, setIsWhatsappShareEnabled] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -93,9 +92,6 @@ const Dashboard: React.FC = () => {
         
         // Set WhatsApp settings
         if (adminSettings) {
-          // Split the stored numbers if they exist
-          const numbers = adminSettings.whatsappNumber ? adminSettings.whatsappNumber.split('|').map(n => n.trim()) : [];
-          setWhatsappNumbers(numbers);
           setIsWhatsappShareEnabled(adminSettings.isWhatsappShareEnabled || false);
         }
       } catch (error) {
@@ -157,64 +153,35 @@ const Dashboard: React.FC = () => {
     return formatted;
   };
 
-  // Handle adding new WhatsApp number
-  const handleAddNumber = () => {
-    if (!newWhatsappNumber) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please enter a WhatsApp number',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    const formatted = formatWhatsAppNumber(newWhatsappNumber);
-    if (formatted.length < 11) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please enter a valid WhatsApp number (minimum 11 digits)',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (whatsappNumbers.includes(formatted)) {
-      toast({
-        title: 'Validation Error',
-        description: 'This number is already added',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setWhatsappNumbers([...whatsappNumbers, formatted]);
-    setNewWhatsappNumber('');
-  };
-
-  // Handle removing WhatsApp number
-  const handleRemoveNumber = (numberToRemove: string) => {
-    setWhatsappNumbers(whatsappNumbers.filter(num => num !== numberToRemove));
-  };
-
   // Handle saving WhatsApp settings
   const handleSaveSettings = async () => {
     setIsSaving(true);
     try {
-      if (isWhatsappShareEnabled && whatsappNumbers.length === 0) {
+      if (isWhatsappShareEnabled && !whatsappNumber) {
         toast({
           title: 'Validation Error',
-          description: 'Please add at least one WhatsApp number',
+          description: 'Please add a WhatsApp number',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const formatted = formatWhatsAppNumber(whatsappNumber);
+      if (formatted.length < 11) {
+        toast({
+          title: 'Validation Error',
+          description: 'Please enter a valid WhatsApp number (minimum 11 digits)',
           variant: 'destructive',
         });
         return;
       }
 
       const info = {
-        whatsappNumber: whatsappNumbers.join(' | '),
+        whatsappNumber: formatted,
         isWhatsappShareEnabled
       };
       
-      await saveAdminContactInfo(whatsappNumbers.join(' | '), isWhatsappShareEnabled, info);
+      await saveAdminContactInfo(formatted, isWhatsappShareEnabled, info);
       
       toast({
         title: 'Success',
@@ -224,7 +191,7 @@ const Dashboard: React.FC = () => {
       console.error('Error saving settings:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save settings. Please try again.',
+        description: error instanceof Error ? error.message : 'Failed to save settings. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -234,10 +201,10 @@ const Dashboard: React.FC = () => {
 
   // Handle WhatsApp sharing
   const handleShareNow = async () => {
-    if (!whatsappNumbers.length) {
+    if (!whatsappNumber) {
       toast({
         title: 'Validation Error',
-        description: 'Please add at least one WhatsApp number',
+        description: 'Please add a WhatsApp number',
         variant: 'destructive',
       });
       return;
@@ -245,9 +212,11 @@ const Dashboard: React.FC = () => {
 
     setIsSharing(true);
     try {
-      const result = await autoShareAttendanceSummary();
+      const whatsappUrl = await autoShareAttendanceSummary();
       
-      if (result) {
+      if (whatsappUrl) {
+        // Open the WhatsApp URL in a new window
+        window.open(whatsappUrl, '_blank');
         toast({
           title: 'Success',
           description: 'Opening WhatsApp to share the report...',
@@ -263,11 +232,10 @@ const Dashboard: React.FC = () => {
       console.error('Error sharing report:', error);
       toast({
         title: 'Error',
-        description: 'An unexpected error occurred while sharing',
+        description: error instanceof Error ? error.message : 'An unexpected error occurred while sharing',
         variant: 'destructive',
       });
     } finally {
-      // Short delay before resetting sharing state to show the loading state
       setTimeout(() => setIsSharing(false), 1000);
     }
   };
@@ -427,7 +395,7 @@ const Dashboard: React.FC = () => {
                   WhatsApp Attendance Reports
                 </CardTitle>
                 <CardDescription>
-                  Configure super admin WhatsApp numbers for attendance reports
+                  Configure super admin WhatsApp number for attendance reports
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -446,90 +414,63 @@ const Dashboard: React.FC = () => {
                   {isWhatsappShareEnabled && (
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Super Admin WhatsApp Numbers</Label>
-                        <div className="flex flex-wrap gap-2">
-                          {whatsappNumbers.map((number, index) => (
-                            <div key={index} className="flex items-center gap-2 bg-green-100 dark:bg-green-900/40 rounded-full px-3 py-1">
-                              <span className="text-sm">+{number}</span>
-                              <button
-                                onClick={() => handleRemoveNumber(number)}
-                                className="text-red-500 hover:text-red-700"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="whatsapp-number">Add New Number</Label>
-                        <div className="flex gap-2">
-                          <div className="relative flex-1">
-                            <Input
-                              id="whatsapp-number"
-                              type="tel"
-                              value={newWhatsappNumber}
-                              onChange={(e) => {
-                                const value = e.target.value.replace(/\D/g, '');
-                                if (value.length <= 15) {
-                                  setNewWhatsappNumber(value);
-                                }
-                              }}
-                              placeholder="Enter WhatsApp number (e.g., 94741233252)"
-                              className="pl-8"
-                            />
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
-                              +
-                            </span>
-                          </div>
-                          <Button
-                            onClick={handleAddNumber}
-                            variant="outline"
-                            className="border-green-600 text-green-600"
-                          >
-                            Add
-                          </Button>
+                        <Label>WhatsApp Number</Label>
+                        <div className="relative">
+                          <Input
+                            type="tel"
+                            value={whatsappNumber}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/\D/g, '');
+                              if (value.length <= 15) {
+                                setWhatsappNumber(value);
+                              }
+                            }}
+                            placeholder="Enter WhatsApp number (e.g., 0741233252)"
+                            className="pl-8"
+                          />
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+                            +
+                          </span>
                         </div>
                         <p className="text-sm text-gray-500">
                           Enter number with or without country code (e.g., 0741233252 or 94741233252)
                         </p>
                       </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                        <Button
+                          onClick={handleSaveSettings}
+                          disabled={isSaving || !whatsappNumber}
+                          className={cn(
+                            "flex-1 transition-all duration-200",
+                            isSaving 
+                              ? "bg-gray-400"
+                              : "bg-green-600 hover:bg-green-700"
+                          )}
+                        >
+                          {isSaving ? (
+                            <>
+                              <span className="animate-spin mr-2">⏳</span>
+                              Saving...
+                            </>
+                          ) : (
+                            'Save Settings'
+                          )}
+                        </Button>
+                        {whatsappNumber && (
+                          <Button
+                            variant="outline"
+                            onClick={handleShareNow}
+                            disabled={isSharing}
+                            className="flex-1 border-green-600 text-green-600 hover:bg-green-50 flex items-center justify-center gap-2"
+                          >
+                            <Share2 className="h-4 w-4" />
+                            {isSharing ? 'Opening WhatsApp...' : 'Share Now'}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   )}
-
-                  <div className="flex flex-col sm:flex-row gap-2 pt-2">
-                    <Button
-                      onClick={handleSaveSettings}
-                      disabled={isSaving || (isWhatsappShareEnabled && whatsappNumbers.length === 0)}
-                      className={cn(
-                        "flex-1 transition-all duration-200",
-                        isSaving 
-                          ? "bg-gray-400"
-                          : "bg-green-600 hover:bg-green-700"
-                      )}
-                    >
-                      {isSaving ? (
-                        <>
-                          <span className="animate-spin mr-2">⏳</span>
-                          Saving...
-                        </>
-                      ) : (
-                        'Save Settings'
-                      )}
-                    </Button>
-                    {isWhatsappShareEnabled && whatsappNumbers.length > 0 && (
-                      <Button
-                        variant="outline"
-                        onClick={handleShareNow}
-                        disabled={isSharing}
-                        className="flex-1 border-green-600 text-green-600 hover:bg-green-50 flex items-center justify-center gap-2"
-                      >
-                        <Share2 className="h-4 w-4" />
-                        {isSharing ? 'Opening WhatsApp...' : 'Share Now'}
-                      </Button>
-                    )}
-                  </div>
                 </div>
 
                 <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -550,10 +491,6 @@ const Dashboard: React.FC = () => {
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="h-4 w-4 text-green-600 mt-0.5" />
                       <p>Get insights into late arrivals and absence rates</p>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <Share2 className="h-4 w-4 text-green-600 mt-0.5" />
-                      <p>Messages are sent directly to your WhatsApp</p>
                     </div>
                   </div>
                 </div>

@@ -26,6 +26,16 @@ interface AttendanceRecord {
   created_at: string;
 }
 
+interface DetailedAttendanceCount {
+  onTime: number;
+  lateArrivals: number;
+  veryLate: number;
+  halfDay: number;
+  earlyDepartures: number;
+  overtime: number;
+  regularHours: number;
+}
+
 /**
  * Records an attendance check-in using the provided QR code data
  * @param qrData - Data from the scanned QR code
@@ -149,15 +159,28 @@ export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
 
 /**
  * Saves the admin contact information for WhatsApp sharing
- * @param info - Admin contact information
+ * @param whatsappNumber - WhatsApp number(s) separated by |
+ * @param isWhatsappShareEnabled - Whether WhatsApp sharing is enabled
+ * @param info - Additional admin contact information
  * @returns Promise<void>
  */
 export const saveAdminContactInfo = async (whatsappNumber: string, isWhatsappShareEnabled: boolean, info: AdminContactInfo): Promise<void> => {
   try {
-    // Format WhatsApp number - remove non-digits and ensure proper format
-    let formattedNumber = whatsappNumber.replace(/\D/g, '');
+    // Format WhatsApp number
+    let formattedNumber = whatsappNumber.trim().replace(/\D/g, '');
+    
+    // Add country code if needed
     if (formattedNumber.startsWith('0')) {
-      formattedNumber = '62' + formattedNumber.substring(1);
+      formattedNumber = '94' + formattedNumber.substring(1);
+    } else if (!formattedNumber.startsWith('94')) {
+      formattedNumber = '94' + formattedNumber;
+    }
+
+    // Validate number if WhatsApp sharing is enabled
+    if (isWhatsappShareEnabled) {
+      if (formattedNumber.length < 11) {
+        throw new Error('Please enter a valid WhatsApp number (minimum 11 digits)');
+      }
     }
 
     const { error } = await supabase
@@ -171,7 +194,7 @@ export const saveAdminContactInfo = async (whatsappNumber: string, isWhatsappSha
     if (error) throw error;
   } catch (error) {
     console.error('Error saving admin contact info:', error);
-    throw new Error('Failed to save WhatsApp settings');
+    throw error instanceof Error ? error : new Error('Failed to save WhatsApp settings');
   }
 };
 
@@ -345,8 +368,7 @@ export const getAttendanceRecords = async (): Promise<any[]> => {
 };
 
 /**
- * Gets today's attendance summary
- * @returns Promise<{ totalEmployees: number, presentCount: number, lateCount: number, absentCount: number, checkedOutCount: number }>
+ * Gets today's attendance summary with detailed counting
  */
 export const getTodayAttendanceSummary = async () => {
   try {
@@ -370,41 +392,127 @@ export const getTodayAttendanceSummary = async () => {
 
     const totalEmployees = employeeData?.length || 0;
     
-    // Count different attendance statuses
-    const presentCount = attendanceData?.filter(record => 
-      record.status === 'present' && !record.check_out_time
-    ).length || 0;
-    
-    const lateCount = attendanceData?.filter(record => 
-      record.late_duration && record.late_duration > 0
-    ).length || 0;
-    
-    const checkedOutCount = attendanceData?.filter(record => 
-      record.check_out_time !== null
-    ).length || 0;
-    
-    // Calculate total present (including present, late, and checked out)
-    const totalPresent = presentCount + lateCount + checkedOutCount;
-    
-    // Calculate absent as total employees minus all types of present employees
-    const absentCount = Math.max(0, totalEmployees - totalPresent);
+    // Calculate presence status one by one
+    const presenceStatus = {
+      currentlyPresent: attendanceData?.filter(record => 
+        record.status === 'present' && !record.check_out_time
+      ).length || 0,
+      
+      lateButPresent: attendanceData?.filter(record => 
+        record.status === 'present' && 
+        record.late_duration && 
+        record.late_duration > 0 && 
+        !record.check_out_time
+      ).length || 0,
+      
+      checkedOut: attendanceData?.filter(record => 
+        record.check_out_time !== null
+      ).length || 0,
+      
+      onTimeArrivals: attendanceData?.filter(record => 
+        record.late_duration === 0
+      ).length || 0
+    };
+
+    // Calculate total present (all types of presence)
+    const totalPresent = presenceStatus.currentlyPresent + 
+                        presenceStatus.lateButPresent + 
+                        presenceStatus.checkedOut;
 
     // Calculate rates
-    const lateRate = totalPresent > 0 ? ((lateCount / totalPresent) * 100).toFixed(1) : '0';
-    const absentRate = totalEmployees > 0 ? ((absentCount / totalEmployees) * 100).toFixed(1) : '0';
-    const presentRate = totalEmployees > 0 ? ((totalPresent / totalEmployees) * 100).toFixed(1) : '0';
+    const rates = {
+      currentPresenceRate: totalEmployees > 0 ? 
+        ((presenceStatus.currentlyPresent / totalEmployees) * 100).toFixed(1) : '0',
+      
+      totalPresentRate: totalEmployees > 0 ? 
+        ((totalPresent / totalEmployees) * 100).toFixed(1) : '0',
+      
+      onTimeRate: totalPresent > 0 ? 
+        ((presenceStatus.onTimeArrivals / totalPresent) * 100).toFixed(1) : '0',
+      
+      lateRate: totalPresent > 0 ? 
+        ((presenceStatus.lateButPresent / totalPresent) * 100).toFixed(1) : '0'
+    };
+
+    // Calculate absent count
+    const absentCount = Math.max(0, totalEmployees - totalPresent);
+    const absentRate = totalEmployees > 0 ? 
+      ((absentCount / totalEmployees) * 100).toFixed(1) : '0';
+
+    // Detailed counting for time-based categories
+    const detailed: DetailedAttendanceCount = {
+      onTime: presenceStatus.onTimeArrivals,
+      lateArrivals: 0,
+      veryLate: 0,
+      halfDay: 0,
+      earlyDepartures: 0,
+      overtime: 0,
+      regularHours: 0
+    };
+
+    // Process each attendance record for detailed time-based counting
+    attendanceData?.forEach(record => {
+      if (record.late_duration > 0) {
+        if (record.late_duration <= 30) {
+          detailed.lateArrivals++;
+        } else if (record.late_duration <= 240) {
+          detailed.veryLate++;
+        } else {
+          detailed.halfDay++;
+        }
+      }
+
+      if (record.check_out_time) {
+        const checkIn = new Date(record.check_in_time);
+        const checkOut = new Date(record.check_out_time);
+        const workEnd = new Date(checkOut);
+        workEnd.setHours(17, 0, 0, 0);
+        
+        const workingHours = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
+        
+        if (checkOut < workEnd) {
+          detailed.earlyDepartures++;
+        } else if (workingHours > 9) {
+          detailed.overtime++;
+        } else {
+          detailed.regularHours++;
+        }
+      }
+    });
 
     return {
+      // Standard summary with detailed presence breakdown
       totalEmployees,
-      presentCount,
-      lateCount,
+      presentCount: presenceStatus.currentlyPresent,
+      lateCount: presenceStatus.lateButPresent,
       absentCount,
-      checkedOutCount,
-      onTime: presentCount,
-      stillWorking: presentCount + lateCount,
-      lateRate,
+      checkedOutCount: presenceStatus.checkedOut,
+      onTime: detailed.onTime,
+      stillWorking: presenceStatus.currentlyPresent + presenceStatus.lateButPresent,
+      
+      // Detailed rates
+      currentPresenceRate: rates.currentPresenceRate,
+      totalPresentRate: rates.totalPresentRate,
+      onTimeRate: rates.onTimeRate,
+      lateRate: rates.lateRate,
       absentRate,
-      presentRate
+      
+      // Detailed counts
+      detailed: {
+        ...detailed,
+        attendanceRate: rates.totalPresentRate,
+        efficiencyRate: ((detailed.regularHours + detailed.overtime) / totalPresent * 100).toFixed(1),
+        punctualityRate: rates.onTimeRate
+      },
+      
+      // Presence breakdown
+      presenceBreakdown: {
+        currentlyPresent: presenceStatus.currentlyPresent,
+        lateButPresent: presenceStatus.lateButPresent,
+        checkedOut: presenceStatus.checkedOut,
+        onTimeArrivals: presenceStatus.onTimeArrivals,
+        absent: absentCount
+      }
     };
   } catch (error) {
     console.error('Error getting attendance summary:', error);
@@ -416,18 +524,39 @@ export const getTodayAttendanceSummary = async () => {
       checkedOutCount: 0,
       onTime: 0,
       stillWorking: 0,
+      currentPresenceRate: '0',
+      totalPresentRate: '0',
+      onTimeRate: '0',
       lateRate: '0',
       absentRate: '0',
-      presentRate: '0'
+      detailed: {
+        onTime: 0,
+        lateArrivals: 0,
+        veryLate: 0,
+        halfDay: 0,
+        earlyDepartures: 0,
+        overtime: 0,
+        regularHours: 0,
+        attendanceRate: '0',
+        efficiencyRate: '0',
+        punctualityRate: '0'
+      },
+      presenceBreakdown: {
+        currentlyPresent: 0,
+        lateButPresent: 0,
+        checkedOut: 0,
+        onTimeArrivals: 0,
+        absent: 0
+      }
     };
   }
 };
 
 /**
  * Automatically shares attendance summary via configured methods (e.g., WhatsApp)
- * @returns Promise<boolean> - True if sharing was successful
+ * @returns Promise<string | false> - WhatsApp URL if sharing was successful, false otherwise
  */
-export const autoShareAttendanceSummary = async (): Promise<boolean> => {
+export const autoShareAttendanceSummary = async (): Promise<string | false> => {
   try {
     const summary = await getTodayAttendanceSummary();
     const { whatsappNumber, isWhatsappShareEnabled } = await getAdminContactInfo();
@@ -442,65 +571,81 @@ export const autoShareAttendanceSummary = async (): Promise<boolean> => {
       weekday: 'long', 
       year: 'numeric', 
       month: 'long', 
-      day: 'numeric' 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
     };
     const formattedDate = new Date().toLocaleDateString('en-US', dateOptions);
 
-    // Create a well-formatted message with proper spacing and formatting
+    // Calculate percentages for better readability
+    const onTimePercentage = (100 - parseFloat(summary.lateRate)).toFixed(1);
+    const latePercentage = summary.lateRate;
+    const absentPercentage = summary.absentRate;
+    const efficiencyRate = summary.detailed.efficiencyRate;
+
+    // Create a well-formatted message with proper spacing, emojis, and sections
     const message = 
-`🏢 *DAILY ATTENDANCE REPORT*
-───────────────────
-📅 Date: ${formattedDate}
-───────────────────
+`🏢 *DETAILED ATTENDANCE REPORT*
+━━━━━━━━━━━━━━━━━━━━━
+📅 Generated: ${formattedDate}
+━━━━━━━━━━━━━━━━━━━━━
 
-📊 *SUMMARY*
+📊 *CURRENT STATUS*
 • Total Employees: ${summary.totalEmployees}
-• Present: ${summary.presentCount} ✅
-• Late: ${summary.lateCount} ⏰
+• Currently Present: ${summary.presenceBreakdown.currentlyPresent} 👥
+• Late but Working: ${summary.presenceBreakdown.lateButPresent} ⏰
+• Checked Out: ${summary.presenceBreakdown.checkedOut} 🏃
 • Absent: ${summary.absentCount} ❌
-• Checked Out: ${summary.checkedOutCount} 🏃
 
-📈 *STATISTICS*
-• On Time Rate: ${(100 - parseFloat(summary.lateRate)).toFixed(1)}%
-• Late Rate: ${summary.lateRate}%
-• Absence Rate: ${summary.absentRate}%
+⏱ *PUNCTUALITY BREAKDOWN*
+• On Time Arrivals: ${summary.presenceBreakdown.onTimeArrivals} (${onTimePercentage}%) ✅
+• Late Arrivals: ${summary.lateCount} (${latePercentage}%) ⚠️
+• Very Late: ${summary.detailed.veryLate} ⛔
+• Half Day: ${summary.detailed.halfDay} 📅
 
-👥 *CURRENT STATUS*
-• Still Working: ${summary.stillWorking}
-• Checked Out: ${summary.checkedOutCount}
+💼 *WORK PATTERNS*
+• Regular Hours: ${summary.detailed.regularHours} 📝
+• Overtime: ${summary.detailed.overtime} 💪
+• Early Departures: ${summary.detailed.earlyDepartures} 🚶
 
-Generated by QR Check-In System
-─────────────────────────`;
+📈 *KEY METRICS*
+• Attendance Rate: ${summary.totalPresentRate}% 📊
+• Efficiency Rate: ${efficiencyRate}% ⚡
+• Current Presence: ${summary.currentPresenceRate}% 🎯
+• Absence Rate: ${absentPercentage}% 📉
 
-    try {
-      // Split the WhatsApp numbers
-      const numbers = whatsappNumber.split('|').map(n => n.trim());
-      
-      // Open WhatsApp for each number
-      for (const number of numbers) {
-        // Clean and format the WhatsApp number
-        const cleanNumber = number.replace(/\D/g, '');
-        if (!cleanNumber) {
-          console.error('Invalid WhatsApp number format:', number);
-          continue;
-        }
+👥 *WORKFORCE INSIGHTS*
+• Still Working: ${summary.stillWorking} employees
+• Total Present Today: ${summary.presentCount}/${summary.totalEmployees}
+• Expected Return: ${summary.presenceBreakdown.lateButPresent} employees
 
-        // Create the WhatsApp URL with proper encoding
-        const encodedMessage = encodeURIComponent(message);
-        const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanNumber}&text=${encodedMessage}`;
+━━━━━━━━━━━━━━━━━━━━━
+🤖 Generated by QR Check-In System
+🕒 Auto-updates every 30 seconds
+📱 Contact admin for any queries`;
 
-        // Open in a new window
-        window.open(whatsappUrl, '_blank');
-        
-        // Add a small delay between opening multiple windows to prevent blocking
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error opening WhatsApp:', error);
-      throw new Error('Failed to open WhatsApp. Please check your browser settings and try again.');
+    // Process the WhatsApp number
+    const number = whatsappNumber.trim().replace(/\D/g, '');
+    
+    // Ensure proper number format
+    let formattedNumber = number;
+    if (formattedNumber.startsWith('0')) {
+      formattedNumber = '94' + formattedNumber.substring(1);
+    } else if (!formattedNumber.startsWith('94')) {
+      formattedNumber = '94' + formattedNumber;
     }
+
+    // Validate number
+    if (formattedNumber.length < 11) {
+      console.error('Invalid WhatsApp number format');
+      return false;
+    }
+
+    // Create WhatsApp URL using the api.whatsapp.com format
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${formattedNumber}&text=${encodedMessage}`;
+    
+    return whatsappUrl;
   } catch (error) {
     console.error('Error in autoShareAttendanceSummary:', error);
     return false;

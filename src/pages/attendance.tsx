@@ -78,10 +78,14 @@ export default function Attendance() {
   const handleSaveSettings = async () => {
     try {
       setIsLoading(true);
-      await saveAdminContactInfo({
+      await saveAdminContactInfo(
         whatsappNumber,
-        isWhatsappShareEnabled
-      });
+        isWhatsappShareEnabled,
+        {
+          whatsappNumber,
+          isWhatsappShareEnabled
+        }
+      );
       toast.success('WhatsApp settings saved successfully');
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -202,8 +206,8 @@ export default function Attendance() {
           const checkInInfo = await recordAttendanceCheckIn(employeeId);
           setLastScannedData(employeeId);
 
-          const lateText = checkInInfo.lateMinutes! > 0 
-            ? `<p class="text-warning">You are ${checkInInfo.lateMinutes} minutes late</p>` 
+          const lateText = checkInInfo.late_duration! > 0 
+            ? `<p class="text-warning">You are ${checkInInfo.late_duration} minutes late</p>` 
             : '<p class="text-success">You are on time!</p>';
 
           await Swal.fire({

@@ -220,7 +220,7 @@ export default function RosterManagement() {
     try {
       await RosterService.deleteRoster(id);
       loadRosters();
-      toast({
+        toast({
         title: 'Success',
         description: 'Roster deleted successfully',
       });
@@ -298,8 +298,8 @@ export default function RosterManagement() {
           >
             Create New Roster
           </Button>
-        </div>
-
+            </div>
+            
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardContent className="flex items-center p-4">
@@ -338,13 +338,13 @@ export default function RosterManagement() {
             <CardContent className="flex items-center p-4">
               <div className="rounded-full p-3 bg-gray-100">
                 <Filter className="h-6 w-6 text-gray-700" />
-              </div>
+            </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-500">Completed</p>
                 <p className="text-2xl font-bold">{stats.completed}</p>
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </CardContent>
+        </Card>
         </div>
 
         <Card>
@@ -426,7 +426,7 @@ export default function RosterManagement() {
                               onClick={() => handleDeleteRoster(roster.id)}
                             >
                               Delete
-                            </Button>
+                              </Button>
                           </div>
                         </div>
                       </CardContent>
@@ -438,7 +438,7 @@ export default function RosterManagement() {
           </CardContent>
         </Card>
       </div>
-
+      
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
