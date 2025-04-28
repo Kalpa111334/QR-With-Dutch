@@ -153,24 +153,41 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
 
       if (attendanceRecord.data && !attendanceRecord.data.check_out_time) {
         // Check-out flow
-        const checkOutResult = await recordAttendanceCheckOut(employeeId);
-        if (!checkOutResult || checkOutResult.status !== 'checked-out') {
-          throw new Error('Check-out failed');
+        try {
+          const checkOutResult = await recordAttendanceCheckOut(employeeId);
+          if (!checkOutResult || checkOutResult.status !== 'checked-out') {
+            throw new Error('Check-out failed');
+          }
+
+          // Immediate success feedback
+          Swal.fire({
+            title: 'Checked Out',
+            text: `Goodbye, ${employee.first_name} ${employee.last_name}!`,
+            icon: 'success',
+            timer: 1500,
+            showConfirmButton: false,
+            position: 'top-end',
+            toast: true
+          });
+
+          new Audio('/success.mp3').play().catch(() => {});
+          return;
+        } catch (error) {
+          // Check if it's the 5-minute cooldown error
+          if (error instanceof Error && error.message.includes('Please wait at least 5 minutes')) {
+            Swal.fire({
+              title: 'Error',
+              text: 'Please wait at least 5 minutes after logging in before logging out. Please come back after your work hours and check again.',
+              icon: 'error',
+              confirmButtonText: 'OK',
+              confirmButtonColor: '#3085d6',
+              showCloseButton: true,
+              timer: 5000
+            });
+            return;
+          }
+          throw error;
         }
-
-        // Immediate success feedback
-        Swal.fire({
-          title: 'Checked Out',
-          text: `Goodbye, ${employee.first_name} ${employee.last_name}!`,
-          icon: 'success',
-          timer: 1500,
-          showConfirmButton: false,
-          position: 'top-end',
-          toast: true
-        });
-
-        new Audio('/success.mp3').play().catch(() => {});
-        return;
       }
 
       if (attendanceRecord.data?.check_out_time) {

@@ -277,7 +277,14 @@ export const recordAttendanceCheckOut = async (qrData: string): Promise<WorkTime
       throw new Error('You have already checked out for today.');
     }
 
+    // Check if 5 minutes have passed since check-in
     const checkInDate = new Date(attendanceData.check_in_time);
+    const minutesSinceCheckIn = (now.getTime() - checkInDate.getTime()) / (1000 * 60);
+    
+    if (minutesSinceCheckIn < 5) {
+      throw new Error('Please wait at least 5 minutes after check-in before checking out. Please come back after your work hours and check out again.');
+    }
+
     const totalHours = (now.getTime() - checkInDate.getTime()) / (1000 * 60 * 60);
     const checkOutTime = now.toISOString();
 
