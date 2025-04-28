@@ -10,10 +10,6 @@ import AttendanceBotDashboard from "./pages/AttendanceBotDashboard";
 import { setupAutoReportScheduling } from "./utils/attendanceUtils";
 import { toast } from "@/components/ui/use-toast";
 import SplashScreen from "./components/SplashScreen";
-import CheckInOut from './components/CheckInOut';
-import Dashboard from './components/Dashboard';
-import { checkInOutService } from './services/checkInOutService';
-import './App.css';
 
 // Create a new QueryClient with better configuration
 const queryClient = new QueryClient({
@@ -86,14 +82,6 @@ const App: React.FC = () => {
     setShowSplash(false);
   };
 
-  const handleScan = async (data: string, type: 'check-in' | 'check-out', hasGatePass: boolean) => {
-    try {
-      await checkInOutService.recordAccess(data, type, hasGatePass);
-    } catch (error) {
-      console.error('Error recording access:', error);
-    }
-  };
-
   return (
     <QueryClientProvider client={queryClient}>
       {showSplash ? (
@@ -109,8 +97,6 @@ const App: React.FC = () => {
               <Route path="/gate-pass" element={<GatePass />} />
               <Route path="/bot" element={<AttendanceBotDashboard />} />
               <Route path="/home" element={<Navigate to="/" replace />} />
-              <Route path="/check-in-out" element={<CheckInOut onScan={handleScan} />} />
-              <Route path="/dashboard" element={<Dashboard />} />
               {/* Redirect all unknown routes to home */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
