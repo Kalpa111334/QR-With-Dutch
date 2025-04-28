@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
+import { checkInOutService, CheckInOutRecord } from '../services/checkInOutService';
 
 // Error boundary component
 class ErrorBoundary extends React.Component<
@@ -74,6 +75,9 @@ const Dashboard: React.FC = () => {
   
   const today = new Date().toISOString().split('T')[0];
   
+  // Check-in/check-out records
+  const [records, setRecords] = useState<CheckInOutRecord[]>([]);
+  
   // Fetch initial data
   useEffect(() => {
     const fetchData = async () => {
@@ -111,6 +115,18 @@ const Dashboard: React.FC = () => {
     // Refresh data every 2 minutes
     const intervalId = setInterval(fetchData, 2 * 60 * 1000);
     return () => clearInterval(intervalId);
+  }, []);
+  
+  useEffect(() => {
+    const fetchRecords = async () => {
+      const data = await checkInOutService.getRecords();
+      setRecords(data);
+    };
+
+    fetchRecords();
+    const interval = setInterval(fetchRecords, 5000); // Refresh every 5 seconds
+
+    return () => clearInterval(interval);
   }, []);
   
   // Calculate stats from attendance records
@@ -238,6 +254,13 @@ const Dashboard: React.FC = () => {
     } finally {
       setTimeout(() => setIsSharing(false), 1000);
     }
+  };
+
+  const getStatusColor = (record: CheckInOutRecord) => {
+    if (record.hasGatePass) {
+      return 'bg-blue-100 border-blue-500';
+    }
+    return record.type === 'check-in' ? 'bg-green-100 border-green-500' : 'bg-red-100 border-red-500';
   };
 
   if (loading) {
@@ -498,6 +521,68 @@ const Dashboard: React.FC = () => {
             </Card>
           </TabsContent>
         </Tabs>
+
+        <div className="mt-6">
+          <h2 className="text-2xl font-bold mb-4">Access Dashboard</h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <div className="bg-white p-4 rounded-lg shadow">
+              <h3 className="text-lg font-semibold mb-2">Current Status</h3>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+                  <span>Gate Pass Active</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 rounded-full bg-green-500"></div>
+                  <span>Checked In</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 rounded-full bg-red-500"></div>
+                  <span>Checked Out</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-lg shadow">
+              <h3 className="text-lg font-semibold mb-2">Statistics</h3>
+              <div className="space-y-2">
+                <p>Total Records: {records.length}</p>
+                <p>Gate Passes: {records.filter(r => r.hasGatePass).length}</p>
+                <p>Regular Access: {records.filter(r => !r.hasGatePass).length}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <h3 className="text-lg font-semibold p-4 border-b">Recent Activity</h3>
+            <div className="divide-y">
+              {records.map((record) => (
+                <div
+                  key={record.id}
+                  className={`p-4 flex items-center justify-between ${getStatusColor(record)}`}
+                >
+                  <div>
+                    <p className="font-medium">{record.userId}</p>
+                    <p className="text-sm text-gray-600">
+                      {record.timestamp.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="px-3 py-1 rounded-full text-sm font-medium capitalize">
+                      {record.type}
+                    </span>
+                    {record.hasGatePass && (
+                      <span className="px-3 py-1 rounded-full bg-blue-500 text-white text-sm">
+                        Gate Pass
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </ErrorBoundary>
   );
