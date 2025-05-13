@@ -82,7 +82,8 @@ export class RosterService {
         notes: roster.notes,
         status: roster.status || 'active',
         created_by: roster.created_by,
-        updated_by: roster.updated_by
+        updated_by: roster.updated_by,
+        assignment_time: new Date().toISOString()
       }])
       .select()
       .single();

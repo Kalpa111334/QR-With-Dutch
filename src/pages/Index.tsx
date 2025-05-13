@@ -213,7 +213,7 @@ const Index = () => {
         </TabsContent>
         
         <TabsContent value="scan" className="space-y-4">
-          <QRScanner />
+          <QRScanner onScan={(data) => handleScanComplete({ type: 'employee', id: data.id })} />
         </TabsContent>
         
         <TabsContent value="employees" className="space-y-4">

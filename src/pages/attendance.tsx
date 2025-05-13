@@ -273,7 +273,7 @@ export default function Attendance() {
               <QrScanner
                 delay={500}
                 onError={handleError}
-                onScan={handleScan}
+                onScan={(data: string | null) => handleScan(data)}
                 style={{ width: '100%', height: '300px' }}
                 constraints={{
                   facingMode: 'environment',

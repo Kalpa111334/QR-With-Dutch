@@ -299,6 +299,8 @@ export interface Database {
           updated_at: string;
           created_by?: string;
           updated_by?: string;
+          assignment_time?: string;
+          completion_time?: string;
         };
         Insert: {
           id?: string;
@@ -314,6 +316,8 @@ export interface Database {
           updated_at?: string;
           created_by?: string;
           updated_by?: string;
+          assignment_time?: string;
+          completion_time?: string;
         };
         Update: {
           id?: string;
@@ -329,6 +333,8 @@ export interface Database {
           updated_at?: string;
           created_by?: string;
           updated_by?: string;
+          assignment_time?: string;
+          completion_time?: string;
         };
       }
     }
@@ -594,4 +600,6 @@ export interface Roster {
   updated_at: string;
   created_by?: string;
   updated_by?: string;
+  assignment_time?: string;
+  completion_time?: string;
 }

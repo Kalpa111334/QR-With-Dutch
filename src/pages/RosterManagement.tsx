@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { RosterService } from '@/services/RosterService';
+import { RosterReportService } from '@/services/RosterReportService';
 import { Roster, ShiftType } from '@/integrations/supabase/types';
 import { useEmployees } from '@/hooks/useEmployees';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,6 +32,8 @@ import {
   Users,
   Clock,
   Filter,
+  Download,
+  Share2,
 } from 'lucide-react';
 import {
   Accordion,
@@ -118,6 +121,7 @@ export default function RosterManagement() {
   const [selectedStartDate, setSelectedStartDate] = useState<Date>();
   const [selectedEndDate, setSelectedEndDate] = useState<Date>();
   const [selectedShift, setSelectedShift] = useState<ShiftType>('morning');
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -283,6 +287,35 @@ export default function RosterManagement() {
     );
   };
 
+  const handleDownloadReport = async (rosterId: string) => {
+    try {
+      setGeneratingPdf(true);
+      const pdfBase64 = await RosterReportService.generateRosterReport(rosterId);
+      
+      // Create a link element and trigger download
+      const link = document.createElement('a');
+      link.href = pdfBase64;
+      link.download = `roster-report-${rosterId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error downloading report:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to download roster report',
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  const handleShareViaWhatsApp = (rosterId: string, employeeName: string) => {
+    const shareLink = RosterReportService.getWhatsAppShareLink(rosterId, employeeName);
+    window.open(shareLink, '_blank');
+  };
+
   return (
     <div className="container mx-auto px-4 py-6 max-w-7xl">
       <div className="space-y-6">
@@ -397,6 +430,8 @@ export default function RosterManagement() {
                 {filteredRosters.map((roster) => {
                   const status = getRosterStatus(roster.start_date, roster.end_date);
                   const currentShift = roster.shift_pattern?.[0]?.shift || 'off';
+                  const employee = employees.find(emp => emp.id === roster.employee_id);
+                  
                   return (
                     <Card key={roster.id} className="overflow-hidden">
                       <CardContent className="p-4">
@@ -404,11 +439,21 @@ export default function RosterManagement() {
                           <div className="flex justify-between items-start">
                             <div>
                               <h3 className="font-semibold">
-                                {employees.find(emp => emp.id === roster.employee_id)?.name || roster.employee_id}
+                                {employee?.name || roster.employee_id}
                               </h3>
                               <p className="text-sm text-gray-500">
                                 {format(new Date(roster.start_date), 'PP')} - {format(new Date(roster.end_date), 'PP')}
                               </p>
+                              {roster.assignment_time && (
+                                <p className="text-xs text-gray-400">
+                                  Assigned: {format(new Date(roster.assignment_time), 'PPp')}
+                                </p>
+                              )}
+                              {roster.completion_time && (
+                                <p className="text-xs text-gray-400">
+                                  Completed: {format(new Date(roster.completion_time), 'PPp')}
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-col gap-2 items-end">
                               <Badge className={getShiftColor(currentShift)}>
@@ -419,14 +464,35 @@ export default function RosterManagement() {
                               </Badge>
                             </div>
                           </div>
-                          <div className="flex justify-end mt-2">
+                          <div className="flex justify-end gap-2">
+                            {status.label === 'Completed' && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDownloadReport(roster.id)}
+                                  disabled={generatingPdf}
+                                >
+                                  <Download className="h-4 w-4 mr-1" />
+                                  PDF
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleShareViaWhatsApp(roster.id, employee?.name || roster.employee_id)}
+                                >
+                                  <Share2 className="h-4 w-4 mr-1" />
+                                  Share
+                                </Button>
+                              </>
+                            )}
                             <Button
                               variant="destructive"
                               size="sm"
                               onClick={() => handleDeleteRoster(roster.id)}
                             >
                               Delete
-                              </Button>
+                            </Button>
                           </div>
                         </div>
                       </CardContent>
