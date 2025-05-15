@@ -581,9 +581,15 @@ export type CompositeTypes<
 
 export type ShiftType = 'morning' | 'evening' | 'night' | 'off';
 
+export interface TimeSlot {
+  start_time: string;  // Format: "HH:mm"
+  end_time: string;    // Format: "HH:mm"
+}
+
 export interface DailyShift {
   date: string;
   shift: ShiftType;
+  time_slot?: TimeSlot;  // Optional to maintain backward compatibility
 }
 
 export interface Roster {

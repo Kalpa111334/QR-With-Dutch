@@ -65,6 +65,8 @@ interface FormValues {
   startDate: Date;
   endDate: Date;
   shift: ShiftType;
+  startTime?: string;
+  endTime?: string;
 }
 
 const getShiftColor = (shift: string) => {
@@ -95,6 +97,12 @@ const formSchema = z.object({
   startDate: z.date(),
   endDate: z.date(),
   shift: z.enum(['morning', 'evening', 'night', 'off'] as const),
+  startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: "Please enter a valid time in 24-hour format (HH:mm)",
+  }).optional(),
+  endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
+    message: "Please enter a valid time in 24-hour format (HH:mm)",
+  }).optional(),
 });
 
 export default function RosterManagement() {
@@ -174,6 +182,11 @@ export default function RosterManagement() {
       setLoading(true);
       setError(null);
       
+      const timeSlot = data.shift !== 'off' && data.startTime && data.endTime ? {
+        start_time: data.startTime,
+        end_time: data.endTime
+      } : undefined;
+
       const newRoster: Omit<Roster, 'id' | 'created_at' | 'updated_at'> = {
         employee_id: data.employee,
         department: selectedDepartment,
@@ -182,7 +195,8 @@ export default function RosterManagement() {
         end_date: format(data.endDate, 'yyyy-MM-dd'),
         shift_pattern: [{
           date: format(data.startDate, 'yyyy-MM-dd'),
-          shift: data.shift
+          shift: data.shift,
+          time_slot: timeSlot
         }],
         status: 'active' as const,
       };
@@ -430,6 +444,7 @@ export default function RosterManagement() {
                 {filteredRosters.map((roster) => {
                   const status = getRosterStatus(roster.start_date, roster.end_date);
                   const currentShift = roster.shift_pattern?.[0]?.shift || 'off';
+                  const timeSlot = roster.shift_pattern?.[0]?.time_slot;
                   const employee = employees.find(emp => emp.id === roster.employee_id);
                   
                   return (
@@ -444,6 +459,11 @@ export default function RosterManagement() {
                               <p className="text-sm text-gray-500">
                                 {format(new Date(roster.start_date), 'PP')} - {format(new Date(roster.end_date), 'PP')}
                               </p>
+                              {timeSlot && (
+                                <p className="text-sm text-gray-600">
+                                  Time: {timeSlot.start_time} - {timeSlot.end_time}
+                                </p>
+                              )}
                               {roster.assignment_time && (
                                 <p className="text-xs text-gray-400">
                                   Assigned: {format(new Date(roster.assignment_time), 'PPp')}
@@ -652,6 +672,51 @@ export default function RosterManagement() {
                           </FormItem>
                         )}
                       />
+                      
+                      {form.watch("shift") !== "off" && (
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="startTime"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Start Time</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type="time"
+                                    {...field}
+                                    placeholder="HH:mm"
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  24-hour format (e.g., 09:00)
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="endTime"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>End Time</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type="time"
+                                    {...field}
+                                    placeholder="HH:mm"
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  24-hour format (e.g., 17:00)
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      )}
                     </div>
                   </AccordionContent>
                 </AccordionItem>
