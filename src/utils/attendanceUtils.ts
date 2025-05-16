@@ -12,6 +12,7 @@ interface WorkTimeInfo {
   totalHours?: number;
   late_duration?: number;
   status: 'present' | 'checked-out';
+  sequence_number: number;
 }
 
 interface AttendanceRecord {
@@ -24,6 +25,7 @@ interface AttendanceRecord {
   late_duration?: number;
   total_hours?: number;
   created_at: string;
+  sequence_number: number;
 }
 
 interface DetailedAttendanceCount {
@@ -43,7 +45,7 @@ interface DetailedAttendanceCount {
  */
 export const recordAttendanceCheckIn = async (qrData: string): Promise<WorkTimeInfo> => {
   try {
-    console.log('Attempting to validate employee:', qrData); // Debug log
+    console.log('Attempting to validate employee:', qrData);
 
     // First, verify if the QR data corresponds to a valid employee
     const { data: employeeData, error: employeeError } = await supabase
@@ -52,7 +54,7 @@ export const recordAttendanceCheckIn = async (qrData: string): Promise<WorkTimeI
       .or('id.eq.' + qrData + ',email.eq.' + qrData)
       .maybeSingle();
 
-    console.log('Employee lookup result:', { employeeData, employeeError }); // Debug log
+    console.log('Employee lookup result:', { employeeData, employeeError });
 
     if (employeeError) {
       console.error('Database error during employee lookup:', employeeError);
@@ -60,40 +62,56 @@ export const recordAttendanceCheckIn = async (qrData: string): Promise<WorkTimeI
     }
 
     if (!employeeData) {
-      console.log('Employee validation failed'); // Debug log
+      console.log('Employee validation failed');
       throw new Error('Invalid or unregistered employee QR code');
     }
 
-    // Check if attendance already recorded for today
+    // Check existing attendance records for today
     const today = new Date().toISOString().split('T')[0];
     const { data: existingAttendance, error: attendanceError } = await supabase
       .from('attendance')
       .select('*')
       .eq('employee_id', employeeData.id)
       .eq('date', today)
-      .maybeSingle();
+      .order('sequence_number', { ascending: false })
+      .limit(1);
 
     if (attendanceError) {
       console.error('Error checking existing attendance:', attendanceError);
       throw new Error(`Failed to check existing attendance: ${attendanceError.message}`);
     }
 
-    if (existingAttendance) {
-      throw new Error('Attendance has already been recorded for today');
+    const lastRecord = existingAttendance?.[0];
+    let sequenceNumber = 1;
+
+    if (lastRecord) {
+      // If last record exists and is not checked out, throw error
+      if (!lastRecord.check_out_time) {
+        throw new Error('Please check out from your previous session first');
+      }
+      
+      // If last record is sequence 2, throw error as max 2 check-ins per day
+      if (lastRecord.sequence_number === 2) {
+        throw new Error('Maximum check-ins for today reached (2)');
+      }
+      
+      // If we get here, we're doing the second check-in
+      sequenceNumber = 2;
     }
 
-    // Calculate late minutes (assuming work starts at 9:00 AM)
+    // Calculate late minutes (assuming work starts at 9:00 AM for first check-in)
     const now = new Date();
     const workStartTime = new Date(now);
     workStartTime.setHours(9, 0, 0, 0);
     
-    const lateMinutes = now > workStartTime ? 
+    // Only calculate late minutes for first check-in
+    const lateMinutes = sequenceNumber === 1 && now > workStartTime ? 
       Math.floor((now.getTime() - workStartTime.getTime()) / (1000 * 60)) : 
       0;
 
     const checkInTime = now.toISOString();
 
-    // If we get here, the employee exists and hasn't checked in today
+    // Insert new attendance record
     const { error: insertError } = await supabase
       .from('attendance')
       .insert({
@@ -101,7 +119,8 @@ export const recordAttendanceCheckIn = async (qrData: string): Promise<WorkTimeI
         check_in_time: checkInTime,
         date: today,
         status: 'present',
-        late_duration: lateMinutes
+        late_duration: lateMinutes,
+        sequence_number: sequenceNumber
       });
 
     if (insertError) {
@@ -112,11 +131,11 @@ export const recordAttendanceCheckIn = async (qrData: string): Promise<WorkTimeI
     return {
       checkInTime,
       late_duration: lateMinutes,
-      status: 'present'
+      status: 'present',
+      sequence_number: sequenceNumber
     };
   } catch (error) {
     console.error('Error recording attendance:', error);
-    // Preserve the original error message if it's our custom error
     throw error instanceof Error ? error : new Error('Failed to record attendance');
   }
 };
@@ -256,59 +275,62 @@ export const recordAttendanceCheckOut = async (qrData: string): Promise<WorkTime
     const now = new Date();
     const today = now.toISOString().split('T')[0];
 
-    // Get today's attendance record
+    // Get today's latest attendance record
     const { data: attendanceData, error: fetchError } = await supabase
       .from('attendance')
       .select('*')
       .eq('employee_id', employeeData.id)
       .eq('date', today)
-      .maybeSingle() as { data: AttendanceRecord | null, error: any };
+      .order('sequence_number', { ascending: false })
+      .limit(1);
 
     if (fetchError) {
       console.error('Error fetching attendance:', fetchError);
       throw new Error('Failed to fetch attendance record');
     }
 
-    if (!attendanceData) {
+    const lastRecord = attendanceData?.[0];
+
+    if (!lastRecord) {
       throw new Error('No check-in record found for today. Please check-in first.');
     }
 
-    if (attendanceData.status === 'checked-out') {
-      throw new Error('You have already checked out for today.');
+    if (lastRecord.check_out_time) {
+      throw new Error('You have already checked out from your current session.');
     }
 
     // Check if 5 minutes have passed since check-in
-    const checkInDate = new Date(attendanceData.check_in_time);
+    const checkInDate = new Date(lastRecord.check_in_time);
     const minutesSinceCheckIn = (now.getTime() - checkInDate.getTime()) / (1000 * 60);
-    
+
     if (minutesSinceCheckIn < 5) {
-      throw new Error('Please wait at least 5 minutes after check-in before checking out. Please come back after your work hours and check out again.');
+      throw new Error('Please wait at least 5 minutes after logging in before logging out.');
     }
 
-    const totalHours = (now.getTime() - checkInDate.getTime()) / (1000 * 60 * 60);
-    const checkOutTime = now.toISOString();
+    // Calculate total hours worked
+    const totalHours = minutesSinceCheckIn / 60;
 
-    // Update the record with check-out information
+    // Update the attendance record with check-out time
     const { error: updateError } = await supabase
       .from('attendance')
       .update({
-        check_out_time: checkOutTime,
-        status: 'checked-out',
-        total_hours: totalHours
+        check_out_time: now.toISOString(),
+        total_hours: totalHours,
+        status: 'checked-out'
       })
-      .eq('id', attendanceData.id);
+      .eq('id', lastRecord.id);
 
     if (updateError) {
       console.error('Error updating attendance record:', updateError);
-      throw new Error(`Failed to save check-out: ${updateError.message}`);
+      throw new Error('Failed to update attendance record');
     }
 
     return {
-      checkInTime: attendanceData.check_in_time,
-      checkOutTime,
+      checkInTime: lastRecord.check_in_time,
+      checkOutTime: now.toISOString(),
       totalHours,
-      late_duration: attendanceData.late_duration,
-      status: 'checked-out'
+      status: 'checked-out',
+      sequence_number: lastRecord.sequence_number
     };
   } catch (error) {
     console.error('Error recording check-out:', error);

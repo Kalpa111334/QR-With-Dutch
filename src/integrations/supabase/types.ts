@@ -47,6 +47,7 @@ export interface Database {
           status: string
           total_hours: number | null
           late_duration: number | null
+          sequence_number: number
         }
         Insert: {
           check_in_time?: string
@@ -58,6 +59,7 @@ export interface Database {
           status?: string
           total_hours?: number | null
           late_duration?: number | null
+          sequence_number?: number
         }
         Update: {
           check_in_time?: string
@@ -69,6 +71,7 @@ export interface Database {
           status?: string
           total_hours?: number | null
           late_duration?: number | null
+          sequence_number?: number
         }
         Relationships: [
           {

@@ -31,6 +31,7 @@ export interface Attendance {
   workingDurationMinutes?: number;
   workingHours?: number;
   fullTimeRange?: string;
+  sequence_number: number;
 }
 
 export interface GatePass {
