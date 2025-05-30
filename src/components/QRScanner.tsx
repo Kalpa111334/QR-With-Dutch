@@ -1,98 +1,235 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Webcam from 'react-webcam';
 import jsQR from 'jsqr';
 import Swal from 'sweetalert2';
+import 'sweetalert2/dist/sweetalert2.min.css';
+import 'animate.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { getEmployeeById } from '@/utils/employeeUtils';
-import { SwitchCamera, Loader2, Camera, Power, Scan } from 'lucide-react';
+import { SwitchCamera, Loader2, Camera, Power, Scan, Volume2, VolumeX } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { verifyGatePass } from '@/utils/gatePassUtils';
-import { recordAttendanceCheckIn, recordAttendanceCheckOut } from '@/utils/attendanceUtils';
+import { singleScanAttendance } from '@/utils/attendanceUtils';
 import { Employee } from '@/types';
+
+// Performance optimized settings
+const SCAN_INTERVAL = 100; // Scan every 100ms for better performance
+const PROCESS_TIMEOUT = 2000;
+const ALERT_DURATION = 2000;
+const SCAN_RESOLUTION = { width: 480, height: 360 }; // Reduced resolution for faster processing
+const SCAN_QUALITY = 0.6; // Reduced quality for better performance
+
+// Cache settings
+const CACHE_DURATION = 30 * 1000; // 30 seconds cache
+const employeeCache = new Map<string, { data: EmployeeData; timestamp: number }>();
+
+// Speech synthesis settings
+const SPEECH_SETTINGS = {
+  lang: 'en-US',
+  pitch: 1,
+  rate: 0.8,
+  volume: 1,
+  voice: null as SpeechSynthesisVoice | null
+};
+
+// Optimized QR processing worker setup
+const qrWorker = new Worker(
+  URL.createObjectURL(
+    new Blob([
+      `
+      importScripts('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js');
+      
+      self.onmessage = function(e) {
+        const { data, width, height } = e.data;
+        const code = jsQR(data, width, height, {
+          inversionAttempts: 'dontInvert'
+        });
+        self.postMessage(code ? code.data : null);
+      };
+      `
+    ], { type: 'text/javascript' })
+  )
+);
 
 // Types
 interface QRScannerProps {
-  onScan: (data: { id: string; name?: string }) => void;
+  onScan: (data: { 
+    id: string; 
+    name?: string; 
+    type?: 'check-in' | 'check-out' 
+  }) => void;
   onError?: (error: Error) => void;
   className?: string;
   mode?: 'attendance' | 'gatepass';
 }
 
-interface ScanResult {
+interface AttendanceResult {
+  check_in_time: string;
+  check_out_time?: string;
+  action: 'check-in' | 'check-out';
+}
+
+interface EmployeeData {
+  first_name: string;
+  last_name: string;
   id: string;
-  name?: string;
-  type?: string;
 }
 
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendance' }) => {
-  // Performance optimized refs
   const webcamRef = useRef<Webcam>(null);
-  const rafId = useRef<number | null>(null);
-  const lastScanTime = useRef<number>(0);
-  const processingTimeout = useRef<NodeJS.Timeout | null>(null);
-  const scanAttempts = useRef<number>(0);
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessedData = useRef<string | null>(null);
+  const processingLock = useRef<boolean>(false);
+  const speechSynthesis = useRef<SpeechSynthesis | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  // State management
   const [scanning, setScanning] = useState(true);
-  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCamera, setSelectedCamera] = useState<string>('');
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const { toast } = useToast();
-  const scanCooldown = 100; // Reduced cooldown for faster scanning
-  const maxScanAttempts = 3; // Maximum attempts to scan the same QR code
 
-  // Initialize camera with optimal settings
+  // Initialize canvas once
   useEffect(() => {
-    const initializeCameras = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        setCameras(videoDevices);
+    const canvas = document.createElement('canvas');
+    canvas.width = SCAN_RESOLUTION.width;
+    canvas.height = SCAN_RESOLUTION.height;
+    canvasRef.current = canvas;
+    
+    const ctx = canvas.getContext('2d', {
+      willReadFrequently: true,
+      alpha: false,
+      desynchronized: true
+    });
+    ctxRef.current = ctx;
+  }, []);
 
-        // Prioritize back camera for better scanning
-        const backCamera = videoDevices.find(device => 
-          device.label.toLowerCase().includes('back') || 
-          device.label.toLowerCase().includes('rear')
+  // Initialize speech synthesis with preferred voice
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      speechSynthesis.current = window.speechSynthesis;
+      
+      // Wait for voices to be loaded
+      const setVoice = () => {
+        const voices = speechSynthesis.current?.getVoices() || [];
+        // Try to find a clear, natural-sounding voice
+        const preferredVoice = voices.find(voice => 
+          voice.name.includes('Daniel') || // Windows
+          voice.name.includes('Samantha') || // macOS
+          voice.name.includes('Google US English') || // Chrome
+          voice.lang === 'en-US'
         );
-        
-        if (backCamera) {
-          setSelectedCamera(backCamera.deviceId);
-          setFacingMode('environment');
-        } else if (videoDevices.length > 0) {
-          setSelectedCamera(videoDevices[0].deviceId);
-        } else {
-          setCameraError('No cameras found');
+        if (preferredVoice) {
+          SPEECH_SETTINGS.voice = preferredVoice;
         }
-      } catch (error) {
-        console.error('Camera initialization error:', error);
-        setCameraError('Camera access error');
+      };
+
+      // Chrome requires this event
+      speechSynthesis.current.addEventListener('voiceschanged', setVoice);
+      setVoice(); // Initial attempt
+
+      return () => {
+        speechSynthesis.current?.removeEventListener('voiceschanged', setVoice);
+      };
+    }
+  }, []);
+
+  // Speak function with pause between sentences
+  const speak = useCallback((text: string) => {
+    if (!isSpeechEnabled || !speechSynthesis.current) return;
+
+    // Cancel any ongoing speech
+    speechSynthesis.current.cancel();
+
+    // Split text into sentences and add pauses
+    const sentences = text.split(/[.!?]/).filter(Boolean);
+    
+    sentences.forEach((sentence, index) => {
+      setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(sentence.trim() + '.');
+        Object.assign(utterance, SPEECH_SETTINGS);
+        speechSynthesis.current?.speak(utterance);
+      }, index * 1000); // 1 second pause between sentences
+    });
+  }, [isSpeechEnabled]);
+
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+    if (processingTimeoutRef.current) clearTimeout(processingTimeoutRef.current);
+    if (speechSynthesis.current) speechSynthesis.current.cancel();
+    scanIntervalRef.current = null;
+    processingTimeoutRef.current = null;
+    lastProcessedData.current = null;
+    processingLock.current = false;
+  }, []);
+
+  // Optimized employee data fetching with caching
+  const getEmployeeWithCache = useCallback(async (employeeId: string): Promise<EmployeeData> => {
+    const now = Date.now();
+    const cached = employeeCache.get(employeeId);
+    
+    if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+      return cached.data;
+    }
+
+    const employee = await getEmployeeById(employeeId) as EmployeeData;
+    employeeCache.set(employeeId, { data: employee, timestamp: now });
+    return employee;
+  }, []);
+
+  // Memoized video constraints
+  const videoConstraints = useMemo(() => ({
+    facingMode,
+    width: { ideal: SCAN_RESOLUTION.width * 2 },
+    height: { ideal: SCAN_RESOLUTION.height * 2 },
+    frameRate: { ideal: 30, min: 15 },
+    aspectRatio: { ideal: 1.777778 },
+  }), [facingMode]);
+
+  // Optimized QR scanning function
+  const scanQRCode = useCallback(() => {
+    if (!scanning || !webcamRef.current?.video || isProcessing || !ctxRef.current || !canvasRef.current) return;
+
+    const video = webcamRef.current.video;
+    if (video.readyState !== 4) return;
+
+    const ctx = ctxRef.current;
+    const canvas = canvasRef.current;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Process QR code in worker
+    qrWorker.postMessage({
+      data: imageData.data,
+      width: canvas.width,
+      height: canvas.height
+    });
+  }, [scanning, isProcessing]);
+
+  // Handle worker response
+  useEffect(() => {
+    const handleWorkerMessage = (e: MessageEvent) => {
+      if (e.data) {
+        processQRCode(e.data);
       }
     };
 
-    initializeCameras();
-    return () => cleanup();
+    qrWorker.addEventListener('message', handleWorkerMessage);
+    return () => qrWorker.removeEventListener('message', handleWorkerMessage);
   }, []);
 
-  const cleanup = useCallback(() => {
-    if (rafId.current) cancelAnimationFrame(rafId.current);
-    if (processingTimeout.current) clearTimeout(processingTimeout.current);
-    rafId.current = null;
-    processingTimeout.current = null;
-    scanAttempts.current = 0;
-    lastProcessedData.current = null;
-  }, []);
-
-  // Optimized QR code processing with debouncing and caching
+  // Optimized QR processing
   const processQRCode = useCallback(async (qrData: string) => {
-    if (!qrData?.trim() || qrData === lastProcessedData.current || isProcessing) return;
+    if (!qrData?.trim() || qrData === lastProcessedData.current || processingLock.current) return;
     
     try {
+      processingLock.current = true;
       setIsProcessing(true);
       lastProcessedData.current = qrData;
 
@@ -110,187 +247,115 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
         }
       }
 
-      if (!employeeId) {
-        throw new Error('Invalid QR code format');
-      }
+      if (!employeeId) throw new Error('Invalid QR code format');
 
-      // Optimized database operations
-      const [employee, attendanceRecord] = await Promise.all([
-        getEmployeeById(employeeId),
-        supabase
-          .from('attendance')
-          .select('check_in_time, check_out_time')
-          .eq('employee_id', employeeId)
-          .eq('date', new Date().toISOString().split('T')[0])
-          .maybeSingle()
+      // Parallel processing of employee validation and attendance
+      const [employee, result] = await Promise.all([
+        getEmployeeWithCache(employeeId),
+        singleScanAttendance(employeeId) as Promise<AttendanceResult>
       ]);
 
-      if (!employee) {
-        throw new Error('Employee not found');
-      }
+      if (!employee) throw new Error('Employee not found');
 
-      if (!attendanceRecord.data && !attendanceRecord.error) {
-        // Check-in flow
-        const checkInResult = await recordAttendanceCheckIn(employeeId);
-        if (!checkInResult || checkInResult.status !== 'present') {
-          throw new Error('Check-in failed');
+      const isCheckOut = result.action === 'check-out';
+      const timestamp = isCheckOut && result.check_out_time ? result.check_out_time : result.check_in_time;
+      const currentTime = new Date(timestamp).toLocaleTimeString();
+      const fullName = `${employee.first_name} ${employee.last_name}`;
+      
+      // Prepare speech text
+      const speechText = isCheckOut
+        ? `Goodbye ${fullName}. You have successfully checked out at ${currentTime}. Have a great evening!`
+        : `Welcome ${fullName}. You have successfully checked in at ${currentTime}. Have a great day!`;
+
+      // Speak the message
+      speak(speechText);
+      
+      // Show quick success message
+      Swal.fire({
+        title: isCheckOut ? 'Check-Out Successful!' : 'Check-In Successful!',
+        html: `
+          <div class="text-center">
+            <h2 class="text-2xl font-bold ${isCheckOut ? 'text-blue-600' : 'text-green-600'} mb-4">
+              ${isCheckOut ? 'Goodbye' : 'Hello'}, ${fullName}!
+            </h2>
+            <p class="text-lg">
+              ${isCheckOut ? 'Checked out' : 'Checked in'} at 
+              <strong>${currentTime}</strong>
+            </p>
+          </div>
+        `,
+        icon: 'success',
+        timer: ALERT_DURATION,
+        timerProgressBar: true,
+        showConfirmButton: false,
+        background: isCheckOut ? '#f0f9ff' : '#f0fdf4',
+        showClass: {
+          popup: 'animate__animated animate__fadeInDown animate__faster'
+        },
+        hideClass: {
+          popup: 'animate__animated animate__fadeOutUp animate__faster'
         }
+      });
 
-        // Immediate success feedback
-        Swal.fire({
-          title: 'Checked In',
-          text: `Welcome, ${employee.first_name} ${employee.last_name}!`,
-          icon: 'success',
-          timer: 1500,
-          showConfirmButton: false,
-          position: 'top-end',
-          toast: true
+      // Quick success sound
+      new Audio('/success.mp3').play().catch(() => {});
+      
+      if (onScan) {
+        onScan({
+          id: employeeId,
+          name: fullName,
+          type: result.action
         });
-
-        new Audio('/success.mp3').play().catch(() => {});
-        return;
-      }
-
-      if (attendanceRecord.data && !attendanceRecord.data.check_out_time) {
-        // Check-out flow
-        try {
-          const checkOutResult = await recordAttendanceCheckOut(employeeId);
-          if (!checkOutResult || checkOutResult.status !== 'checked-out') {
-            throw new Error('Check-out failed');
-          }
-
-          // Immediate success feedback
-          Swal.fire({
-            title: 'Checked Out',
-            text: `Goodbye, ${employee.first_name} ${employee.last_name}!`,
-            icon: 'success',
-            timer: 1500,
-            showConfirmButton: false,
-            position: 'top-end',
-            toast: true
-          });
-
-          new Audio('/success.mp3').play().catch(() => {});
-          return;
-        } catch (error) {
-          // Check if it's the 5-minute cooldown error
-          if (error instanceof Error && error.message.includes('Please wait at least 5 minutes')) {
-            Swal.fire({
-              title: 'Error',
-              text: 'Please wait at least 5 minutes after logging in before logging out. Please come back after your work hours and check again.',
-              icon: 'error',
-              confirmButtonText: 'OK',
-              confirmButtonColor: '#3085d6',
-              showCloseButton: true,
-              timer: 5000
-            });
-            return;
-          }
-          throw error;
-        }
-      }
-
-      if (attendanceRecord.data?.check_out_time) {
-        Swal.fire({
-          title: 'Already Recorded',
-          text: 'Attendance already recorded for today',
-          icon: 'info',
-          timer: 1500,
-          showConfirmButton: false,
-          position: 'top-end',
-          toast: true
-        });
-        return;
       }
 
     } catch (error) {
       console.error('Attendance recording error:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to record attendance',
-        variant: 'destructive',
-        duration: 2000,
+      
+      const errorMessage = error instanceof Error ? error.message : 'Failed to record attendance';
+      const alreadyCheckedIn = errorMessage.includes('already checked in');
+
+      // Speak error message
+      speak(alreadyCheckedIn 
+        ? "You have already checked in today. Please check out instead." 
+        : "Sorry, there was an error recording your attendance. Please try again.");
+
+      // Quick error message
+      Swal.fire({
+        title: alreadyCheckedIn ? 'Already Checked In' : 'Error',
+        text: errorMessage,
+        icon: alreadyCheckedIn ? 'info' : 'error',
+        timer: ALERT_DURATION,
+        timerProgressBar: true,
+        showConfirmButton: false,
+        background: alreadyCheckedIn ? '#f0f9ff' : '#fff0f0',
+        showClass: {
+          popup: 'animate__animated animate__shakeX animate__faster'
+        },
+        hideClass: {
+          popup: 'animate__animated animate__fadeOut animate__faster'
+        }
       });
+
     } finally {
-      setIsProcessing(false);
-      // Reset for next scan after a short delay
-      setTimeout(() => {
+      // Reset processing state after timeout
+      processingTimeoutRef.current = setTimeout(() => {
+        setIsProcessing(false);
+        processingLock.current = false;
         lastProcessedData.current = null;
-      }, 1000);
+      }, PROCESS_TIMEOUT);
     }
-  }, [toast, isProcessing]);
+  }, [onScan, speak, getEmployeeWithCache]);
 
-  // Optimized QR scanning with better performance
-  const scanQRCode = useCallback(() => {
-    if (!scanning || !webcamRef.current?.video || isProcessing) {
-      rafId.current = requestAnimationFrame(scanQRCode);
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastScanTime.current < scanCooldown) {
-      rafId.current = requestAnimationFrame(scanQRCode);
-      return;
-    }
-
-    const video = webcamRef.current.video;
-    if (video.readyState !== 4) {
-      rafId.current = requestAnimationFrame(scanQRCode);
-      return;
-    }
-
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 640;  // Optimal size for QR scanning
-      canvas.height = 480;
-
-      const ctx = canvas.getContext('2d', {
-        willReadFrequently: true,
-        alpha: false,
-        desynchronized: true
-      });
-
-      if (!ctx) return;
-
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      const code = jsQR(imageData.data, canvas.width, canvas.height, {
-        inversionAttempts: 'dontInvert'
-      });
-
-      if (code?.data) {
-        lastScanTime.current = now;
-        processQRCode(code.data);
-      }
-    } catch (error) {
-      console.error('QR scanning error:', error);
-    }
-
-    rafId.current = requestAnimationFrame(scanQRCode);
-  }, [scanning, processQRCode, scanCooldown, isProcessing]);
-
-  // Start/Stop scanning
+  // Optimized scanning interval
   useEffect(() => {
     cleanup();
     if (scanning) {
-      rafId.current = requestAnimationFrame(scanQRCode);
+      scanIntervalRef.current = setInterval(scanQRCode, SCAN_INTERVAL);
     }
     return cleanup;
   }, [scanQRCode, scanning, cleanup]);
 
-  // Optimized video constraints for fast scanning
-  const videoConstraints = {
-    deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
-    facingMode,
-    width: 1280,
-    height: 720,
-    frameRate: { ideal: 30, min: 15 },
-    focusMode: 'continuous',
-    exposureMode: 'continuous',
-    whiteBalanceMode: 'continuous',
-  };
-
+  // Optimized render with minimal state updates
   return (
     <Card className="w-full max-w-2xl mx-auto bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/50 dark:to-slate-800/50 shadow-lg border border-slate-200 dark:border-slate-700">
       <CardHeader className="px-4 py-2">
@@ -300,6 +365,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
             {mode === 'gatepass' ? 'Gate Pass Scanner' : 'Quick Attendance Scanner'}
           </span>
           <div className="flex gap-2">
+            <Button 
+              variant="outline"
+              size="sm"
+              onClick={() => setIsSpeechEnabled(prev => !prev)}
+              className="h-8"
+              title={isSpeechEnabled ? "Disable voice announcements" : "Enable voice announcements"}
+            >
+              {isSpeechEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </Button>
             <Button 
               variant="outline"
               size="sm"
@@ -333,17 +407,14 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
             audio={false}
             videoConstraints={videoConstraints}
             className="w-full h-full object-cover"
-            onUserMediaError={(err) => {
-              console.error('Camera error:', err);
-              setCameraError('Camera access error');
-            }}
+            screenshotQuality={SCAN_QUALITY}
           />
           
           {scanning && (
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 border-2 border-blue-500 rounded-md">
                 <div className="absolute inset-0 border border-blue-500 opacity-20"></div>
-                <div className="absolute inset-x-0 top-1/2 h-0.5 bg-red-500 opacity-50 transform -translate-y-1/2 animate-pulse"></div>
+                <div className="absolute inset-x-0 top-1/2 h-0.5 bg-red-500 opacity-50 transform -translate-y-1/2 animate-[scan_2s_ease-in-out_infinite]"></div>
               </div>
             </div>
           )}
@@ -363,4 +434,4 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
   );
 };
 
-export default QRScanner; 
+export default React.memo(QRScanner); 

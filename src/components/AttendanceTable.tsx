@@ -19,13 +19,15 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Attendance } from '@/types';
-import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2 } from 'lucide-react';
-import { getAttendanceRecords } from '@/utils/attendanceUtils';
+import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2, Trash2 } from 'lucide-react';
+import { getAttendanceRecords, deleteAttendance } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 import { Document, Page, Text, View, PDFDownloadLink } from '@react-pdf/renderer';
 import { StyleSheet } from '@react-pdf/renderer/lib/react-pdf.browser';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
+import Swal from 'sweetalert2';
+import { supabase } from '@/integrations/supabase/client';
 
 interface AttendanceTableProps {
   attendanceRecords?: Attendance[] | Promise<Attendance[]>;
@@ -117,7 +119,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     const matchesDepartment = department === 'all' || 
       (record.employee?.department || '').toLowerCase() === department.toLowerCase();
     const matchesSearch = searchTerm === '' || 
-      (record.employeeName || '').toLowerCase().includes(searchTerm.toLowerCase());
+      (record.employee_name || '').toLowerCase().includes(searchTerm.toLowerCase());
     
     return matchesDate && matchesDepartment && matchesSearch;
   });
@@ -129,12 +131,12 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     
     const rows = filteredRecords.map(record => [
       record.date,
-      record.employeeName,
-      new Date(record.checkInTime).toLocaleTimeString(),
-      record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString() : '-',
+      record.employee_name || 'Unknown',
+      new Date(record.check_in_time).toLocaleTimeString(),
+      record.check_out_time ? new Date(record.check_out_time).toLocaleTimeString() : '-',
       record.status,
-      record.minutesLate || 0,
-      record.workingDuration || '-'
+      record.minutes_late || 0,
+      record.working_duration || '-'
     ]);
     
     const csvContent = [
@@ -175,17 +177,17 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
             {filteredRecords.map((record, index) => (
               <View key={index} style={styles.tableRow}>
                 <Text style={styles.tableCell}>{new Date(record.date).toLocaleDateString()}</Text>
-                <Text style={styles.tableCell}>{record.employeeName}</Text>
+                <Text style={styles.tableCell}>{record.employee_name}</Text>
                 <Text style={styles.tableCell}>
-                  {record.checkInTime ? new Date(record.checkInTime).toLocaleTimeString() : '-'}
+                  {record.check_in_time ? new Date(record.check_in_time).toLocaleTimeString() : '-'}
                 </Text>
                 <Text style={styles.tableCell}>
-                  {record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString() : '-'}
+                  {record.check_out_time ? new Date(record.check_out_time).toLocaleTimeString() : '-'}
                 </Text>
                 <Text style={styles.tableCell}>{record.status}</Text>
                 <Text style={styles.tableCell}>
-                  {record.checkInTime ? (() => {
-                    const checkIn = new Date(record.checkInTime);
+                  {record.check_in_time ? (() => {
+                    const checkIn = new Date(record.check_in_time);
                     const workStart = new Date(checkIn);
                     workStart.setHours(9, 0, 0, 0);
                     
@@ -202,7 +204,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                     return '0';
                   })() : '0'}
                 </Text>
-                <Text style={styles.tableCell}>{record.workingDuration || '-'}</Text>
+                <Text style={styles.tableCell}>{record.working_duration || '-'}</Text>
               </View>
             ))}
           </View>
@@ -253,7 +255,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     // Calculate summary statistics
     const totalEmployees = selectedRecords.length;
     const onTime = selectedRecords.filter(r => {
-      const checkIn = new Date(r.checkInTime);
+      const checkIn = new Date(r.check_in_time);
       const workStart = new Date(checkIn);
       workStart.setHours(9, 0, 0, 0);
       return checkIn <= workStart;
@@ -275,7 +277,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
 
     // Format individual records with more detail
     const records = selectedRecords.map(record => {
-      const checkIn = new Date(record.checkInTime);
+      const checkIn = new Date(record.check_in_time);
       const workStart = new Date(checkIn);
       workStart.setHours(9, 0, 0, 0);
       
@@ -296,22 +298,22 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
 
       // Calculate working duration if checked out
       let workingTime = 'Still Working';
-      if (record.checkOutTime) {
-        const checkOut = new Date(record.checkOutTime);
+      if (record.check_out_time) {
+        const checkOut = new Date(record.check_out_time);
         const hours = Math.floor((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60));
         const minutes = Math.floor(((checkOut.getTime() - checkIn.getTime()) / (1000 * 60)) % 60);
         workingTime = `${hours}h ${minutes}m`;
       }
 
-      return `👤 *${record.employeeName}*
+      return `👤 *${record.employee_name}*
 📅 Date: ${new Date(record.date).toLocaleDateString('en-US', { 
         weekday: 'long', 
         year: 'numeric', 
         month: 'long', 
         day: 'numeric' 
       })}
-⏰ Check In: ${checkIn.toLocaleTimeString()}
-${record.checkOutTime ? `🏃 Check Out: ${new Date(record.checkOutTime).toLocaleTimeString()}` : '💼 Status: Still Working'}
+⏰ Check In: ${formatTime(record.check_in_time)}
+${record.check_out_time ? `🏃 Check Out: ${formatTime(record.check_out_time)}` : '💼 Status: Still Working'}
 ${lateStatus}
 ⏱️ Duration: ${workingTime}
 ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Progress'}`;
@@ -370,6 +372,112 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
     } finally {
       setSharing(false);
     }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      // Perform deletion using the utility function
+      const result = await deleteAttendance([id]);
+
+      if (result.success) {
+        // Remove the record from local state
+        setRecords(prevRecords => prevRecords.filter(record => record.id !== id));
+
+        // Show success toast
+        toast({
+          title: "Record Deleted",
+          description: `Attendance record from ${new Date(record.date).toLocaleDateString()} has been successfully deleted.`,
+        });
+      } else {
+        // Handle deletion failure
+        throw new Error(result.error || 'Failed to delete record');
+      }
+    } catch (error) {
+      console.error('Deletion error:', error);
+      toast({
+        title: "Deletion Failed",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedRecords.length === 0) {
+      toast({
+        title: 'No Records Selected',
+        description: 'Please select records to delete.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const result = await Swal.fire({
+      title: 'Delete Selected Attendance Records?',
+      html: `
+        <div class="text-center">
+          <p>You are about to permanently delete <strong>${selectedRecords.length}</strong> attendance record(s).</p>
+          <p class="text-red-600 mt-2">This action cannot be undone!</p>
+        </div>
+      `,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Yes, Delete Permanently',
+      cancelButtonText: 'Cancel'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        const { success, deletedCount, error } = await deleteAttendance(selectedRecords);
+
+        if (success) {
+          // Remove deleted records from the local state
+          const updatedRecords = records.filter(
+            (attendanceRecord) => !selectedRecords.includes(attendanceRecord.id)
+          );
+          setRecords(updatedRecords);
+
+          // Clear selected records
+          setSelectedRecords([]);
+
+          toast({
+            title: 'Records Deleted',
+            description: `Successfully deleted ${deletedCount} attendance record(s).`,
+            variant: 'default'
+          });
+        } else {
+          toast({
+            title: 'Deletion Failed',
+            description: error || 'Failed to delete records. Please try again.',
+            variant: 'destructive'
+          });
+        }
+      } catch (error) {
+        console.error('Bulk delete error:', error);
+        
+        toast({
+          title: 'Unexpected Error',
+          description: 'An unexpected error occurred while deleting records.',
+          variant: 'destructive'
+        });
+      }
+    }
+  };
+
+  const formatTime = (timeString: string) => {
+    if (!timeString) return '-';
+    const time = new Date(timeString);
+    return time.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
   };
 
   return (
@@ -460,6 +568,17 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
               <span className="text-sm text-gray-500">
                 {selectedRecords.length} records selected
               </span>
+              {selectedRecords.length > 0 && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleBulkDelete}
+                  className="ml-2"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete Selected
+                </Button>
+              )}
             </div>
             <Button
               onClick={handleShare}
@@ -502,6 +621,7 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                       Working Time
                     </div>
                   </TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -532,16 +652,14 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                               setSelectedRecords(prev => prev.filter(id => id !== record.id));
                             }
                           }}
-                          aria-label={`Select record for ${record.employeeName}`}
+                          aria-label={`Select record for ${record.employee_name}`}
                         />
                       </TableCell>
                       <TableCell>{new Date(record.date).toLocaleDateString()}</TableCell>
-                      <TableCell className="font-medium">{record.employeeName}</TableCell>
+                      <TableCell className="font-medium">{record.employee_name}</TableCell>
+                      <TableCell>{formatTime(record.check_in_time)}</TableCell>
                       <TableCell>
-                        {record.checkInTime ? new Date(record.checkInTime).toLocaleTimeString() : '-'}
-                      </TableCell>
-                      <TableCell>
-                        {record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString() : '-'}
+                        {record.check_out_time ? formatTime(record.check_out_time) : 'Not Checked Out'}
                       </TableCell>
                       <TableCell>
                         <Badge 
@@ -575,10 +693,10 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                         )}
                       </TableCell>
                       <TableCell>
-                        {record.checkInTime ? (
+                        {record.check_in_time ? (
                           <div>
                             {(() => {
-                              const checkIn = new Date(record.checkInTime);
+                              const checkIn = new Date(record.check_in_time);
                               const workStart = new Date(checkIn);
                               workStart.setHours(9, 0, 0, 0);
                               
@@ -622,17 +740,14 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                               ? 'text-blue-600'
                               : record.status === 'half-day' || record.status === 'early-departure'
                                 ? 'text-yellow-600'
+                                : record.status === 'present'
+                                  ? 'text-green-600'
                                 : ''
                           }`}>
-                            {record.workingDuration || 'N/A'}
-                            {record.status === 'present' && (
-                              <span className="text-green-600 ml-1">
-                                (Active)
-                              </span>
-                            )}
+                            {record.working_duration}
                           </div>
                           <div className="text-xs text-muted-foreground whitespace-nowrap">
-                            {record.fullTimeRange}
+                            {record.full_time_range}
                             {record.status === 'early-departure' && (
                               <span className="text-yellow-600 ml-1">
                                 (Early Leave)
@@ -640,6 +755,29 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                             )}
                           </div>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            Swal.fire({
+                              title: 'Are you sure?',
+                              text: 'You will not be able to recover this record!',
+                              icon: 'warning',
+                              showCancelButton: true,
+                              confirmButtonText: 'Yes, delete it!',
+                              cancelButtonText: 'Cancel'
+                            }).then((result) => {
+                              if (result.isConfirmed) {
+                                handleDelete(record.id);
+                              }
+                            });
+                          }}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))

@@ -108,8 +108,8 @@ const Dashboard: React.FC = () => {
     
     fetchData();
     
-    // Refresh data every 2 minutes
-    const intervalId = setInterval(fetchData, 2 * 60 * 1000);
+    // Refresh data every 30 seconds for more real-time updates
+    const intervalId = setInterval(fetchData, 30 * 1000);
     return () => clearInterval(intervalId);
   }, []);
   

@@ -48,6 +48,10 @@ const Dashboard: React.FC = () => {
     };
 
     fetchSummary();
+    
+    // Refresh data every 30 seconds for more real-time updates
+    const interval = setInterval(fetchSummary, 30 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) {

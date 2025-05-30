@@ -1,466 +1,433 @@
-// Utility functions for handling attendance operations
+// Attendance Utilities Module
 import { supabase } from '../integrations/supabase/client';
+import { 
+  Attendance, 
+  AttendanceStatus, 
+  WorkTimeInfo 
+} from '@/types';
+import Swal from 'sweetalert2';
 
+// Define AdminContactInfo interface locally
 interface AdminContactInfo {
-  whatsappNumber: string;
-  isWhatsappShareEnabled: boolean;
+  whatsapp_number: string;
+  is_whatsapp_share_enabled: boolean;
 }
 
-interface WorkTimeInfo {
-  checkInTime: string;
-  checkOutTime?: string;
-  totalHours?: number;
-  late_duration?: number;
-  status: 'present' | 'checked-out';
-  sequence_number: number;
+// Extend WorkTimeInfo interface locally
+interface ExtendedWorkTimeInfo extends WorkTimeInfo {
+  action?: 'check-in' | 'check-out';
 }
 
-interface AttendanceRecord {
-  id: string;
-  employee_id: string;
-  check_in_time: string;
-  check_out_time?: string;
-  date: string;
-  status: string;
-  late_duration?: number;
-  total_hours?: number;
-  created_at: string;
-  sequence_number: number;
+// Custom Error Class for Attendance-related Errors
+class AttendanceError extends Error {
+  constructor(
+    message: string, 
+    public code: string = 'ATTENDANCE_ERROR',
+    public details?: Record<string, any>
+  ) {
+    super(message);
+    this.name = 'AttendanceError';
+  }
 }
 
-interface DetailedAttendanceCount {
-  onTime: number;
-  lateArrivals: number;
-  veryLate: number;
-  halfDay: number;
-  earlyDepartures: number;
+// Attendance Logging Service
+class AttendanceLogger {
+  private static instance: AttendanceLogger;
+  private logBuffer: Array<{
+    timestamp: string;
+    type: 'check-in' | 'check-out' | 'error';
+    employee_id: string;
+    details: Record<string, any>;
+  }> = [];
+
+  private constructor() {}
+
+  public static getInstance(): AttendanceLogger {
+    if (!AttendanceLogger.instance) {
+      AttendanceLogger.instance = new AttendanceLogger();
+    }
+    return AttendanceLogger.instance;
+  }
+
+  public log(
+    type: 'check-in' | 'check-out' | 'error', 
+    employee_id: string, 
+    details: Record<string, any>
+  ): void {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      type,
+      employee_id,
+      details
+    };
+
+    this.logBuffer.push(logEntry);
+    console.log(`Attendance ${type.toUpperCase()} Log:`, logEntry);
+    this.persistLogs();
+  }
+
+  private async persistLogs(): Promise<void> {
+    try {
+      if (this.logBuffer.length >= 10) {
+        const { error } = await supabase
+          .from('attendance_logs')
+          .insert(this.logBuffer);
+
+        if (error) {
+          console.error('Failed to persist attendance logs:', error);
+        } else {
+          this.logBuffer = [];
+        }
+      }
+    } catch (error) {
+      console.error('Unexpected error in log persistence:', error);
+    }
+  }
+}
+
+// Initialize the logger
+const attendanceLogger = AttendanceLogger.getInstance();
+
+// Attendance Metrics Calculation Utility
+const calculateAttendanceMetrics = (
+  check_in_time: Date, 
+  check_out_time?: Date
+): {
+  status: AttendanceStatus;
+  lateMinutes: number;
+  totalHours: number;
   overtime: number;
-  regularHours: number;
-}
+} => {
+  const now = new Date();
+  
+  // Work schedule constants
+  const WORK_START_TIME = 9;  // 9:00 AM
+  const WORK_END_TIME = 17;   // 5:00 PM
+  const STANDARD_WORK_HOURS = 8;
+  const HALF_DAY_THRESHOLD = 4;
 
-/**
- * Records an attendance check-in using the provided QR code data
- * @param qrData - Data from the scanned QR code
- * @returns Promise<WorkTimeInfo> - True if check-in was successful
- */
-export const recordAttendanceCheckIn = async (qrData: string): Promise<WorkTimeInfo> => {
-  try {
-    // Validate employee
-    const { data: employeeData, error: employeeError } = await supabase
-      .from('employees')
-      .select('*')
-      .or(`id.eq.${qrData},email.eq.${qrData}`)
+  // Calculate late duration
+  const workStartDateTime = new Date(check_in_time);
+  workStartDateTime.setHours(WORK_START_TIME, 0, 0, 0);
+    
+  const lateMinutes = check_in_time > workStartDateTime 
+    ? Math.floor((check_in_time.getTime() - workStartDateTime.getTime()) / (1000 * 60)) 
+    : 0;
+
+  // Determine status and calculate hours
+  let status: AttendanceStatus = 'present';
+  let totalHours = 0;
+  let overtime = 0;
+  // If check-out time is provided, calculate precise metrics
+  if (check_out_time) {
+    // Calculate time difference in minutes
+    const timeDiffMinutes = (check_out_time.getTime() - check_in_time.getTime()) / (1000 * 60);
+    
+    // Convert to hours
+    const workDuration = timeDiffMinutes / 60;
+    
+    // Minimum time requirement check (15 minutes)
+    if (timeDiffMinutes < 15) {
+      throw new AttendanceError('Invalid check-out: Minimum working duration is 15 minutes');
+    }
+    
+    totalHours = Math.round(workDuration * 10) / 10;
+
+    // Overtime calculation
+    if (workDuration > STANDARD_WORK_HOURS) {
+      overtime = Math.round((workDuration - STANDARD_WORK_HOURS) * 10) / 10;
+      status = 'checked-out-overtime';
+    }
+
+    // Early departure and half-day logic
+    const expectedEndTime = new Date(check_in_time);
+    expectedEndTime.setHours(WORK_END_TIME, 0, 0, 0);
+
+    if (check_out_time < expectedEndTime) {
+      status = 'early-departure';
+    }
+
+    // Half-day determination
+    if (totalHours < HALF_DAY_THRESHOLD) {
+      status = 'half-day';
+    }
+  }
+
+  // Late status determination
+  if (lateMinutes > 0) {
+    if (lateMinutes > 240) {  // More than 4 hours late
+      status = 'half-day';
+    } else {
+      status = 'late';
+    }
+  }
+
+  return {
+    lateMinutes,
+    totalHours,
+    overtime,
+    status
+  };
+};
+
+// Utility function to generate a unique timestamp
+const generateUniqueTimestamp = async (
+  employee_id: string, 
+  baseTime: Date, 
+  type: 'check-in' | 'check-out'
+): Promise<Date> => {
+  let uniqueTime = new Date(baseTime);
+  let attempt = 0;
+
+  while (attempt < 10) {    // Get the last check-in/check-out for this employee today
+    const today = baseTime.toISOString().split('T')[0];
+    const { data: lastRecord } = await supabase
+      .from('attendance')
+      .select('check_in_time, check_out_time')
+      .eq('employee_id', employee_id)
+      .eq('date', today)
+      .order('created_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
-    if (employeeError || !employeeData) {
-      throw new Error('Invalid or unregistered employee');
+    // For check-out, ensure minimum 15 minutes from check-in
+    if (type === 'check-out' && lastRecord?.check_in_time) {
+      const lastCheckIn = new Date(lastRecord.check_in_time);
+      const minCheckOutTime = new Date(lastCheckIn.getTime() + 15 * 60 * 1000);
+      
+      if (baseTime < minCheckOutTime) {
+        uniqueTime = minCheckOutTime;
+      }
+    }
+
+    // For check-in after a check-out, ensure minimum 15 minutes gap
+    if (type === 'check-in' && lastRecord?.check_out_time) {
+      const lastCheckOut = new Date(lastRecord.check_out_time);
+      const minNextCheckIn = new Date(lastCheckOut.getTime() + 15 * 60 * 1000);
+      
+      if (baseTime < minNextCheckIn) {
+        uniqueTime = minNextCheckIn;
+      }
+    }
+
+    // Add a small offset if needed to ensure uniqueness
+    uniqueTime = new Date(uniqueTime.getTime() + 1000 * attempt);
+
+    // Check if this exact timestamp exists for the employee
+    const { data: existingRecords, error } = await supabase
+      .from('attendance')
+      .select('id')
+      .eq('employee_id', employee_id)
+      .or(
+        type === 'check-in' 
+          ? `check_in_time.eq.${uniqueTime.toISOString()}`
+          : `check_out_time.eq.${uniqueTime.toISOString()}`
+      )
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error checking unique timestamp:', error);
+      throw new AttendanceError('Failed to generate unique timestamp');
+    }
+
+    // If no record exists with this timestamp, return it
+    if (!existingRecords) {
+      return uniqueTime;
+    }
+
+    attempt++;
+  }
+
+  throw new AttendanceError('Unable to generate unique timestamp');
+};
+
+// Main Attendance Recording Function
+export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTimeInfo> => {
+  try {
+    // Validate employee and check existing records in parallel
+    const [employeeResult, existingCheckInResult] = await Promise.all([
+      supabase
+        .from('employees')
+        .select('id, name, status')
+        .or(`id.eq.${qrData},email.eq.${qrData}`)
+        .maybeSingle(),
+      supabase
+        .from('attendance')
+        .select('id, check_in_time')
+        .eq('employee_id', qrData)
+        .eq('date', new Date().toISOString().split('T')[0])
+        .is('check_out_time', null)
+        .maybeSingle()
+    ]);
+
+    if (employeeResult.error || !employeeResult.data) {
+      throw new AttendanceError('Invalid or unregistered employee');
+    }
+
+    const employeeData = employeeResult.data;
+    if (employeeData.status !== 'active') {
+      throw new AttendanceError('Employee is not currently active');
     }
 
     const now = new Date();
     const today = now.toISOString().split('T')[0];
 
-    // Check existing attendance for today
-    const { data: existingAttendance, error: attendanceError } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeData.id)
-      .eq('date', today)
-      .order('sequence_number', { ascending: false })
-      .limit(1);
+    // Handle check-out
+    if (existingCheckInResult.data) {
+      const existingOpenCheckIn = existingCheckInResult.data;
+      const checkInTime = new Date(existingOpenCheckIn.check_in_time);
+      const timeDifference = now.getTime() - checkInTime.getTime();
+      const minutesPassed = Math.floor(timeDifference / (1000 * 60));
 
-    if (attendanceError) {
-      throw new Error('Failed to check existing attendance');
-    }
-
-    const lastRecord = existingAttendance?.[0];
-    let sequenceNumber = 1;
-
-    // Validate check-in conditions
-    if (lastRecord) {
-      // Prevent multiple check-ins without checkout
-      if (!lastRecord.check_out_time) {
-        throw new Error('Please check out from your previous session first');
+      if (minutesPassed < 5) {
+        const remainingMinutes = 5 - minutesPassed;
+        throw new AttendanceError(`Please wait ${remainingMinutes} more minute${remainingMinutes > 1 ? 's' : ''} before checking out.`);
       }
 
-      // Limit to 2 check-ins per day
-      if (lastRecord.sequence_number === 2) {
-        throw new Error('Maximum check-ins for today reached');
+      const checkOutMetrics = calculateAttendanceMetrics(checkInTime, now);
+
+      // Update record with check-out info
+      const { data: updatedRecord, error: updateError } = await supabase
+        .from('attendance')
+        .update({
+          check_out_time: now.toISOString(),
+          status: 'checked-out',
+          working_duration: checkOutMetrics.totalHours,
+          overtime: checkOutMetrics.overtime
+        })
+        .eq('id', existingOpenCheckIn.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new AttendanceError(`Check-out failed: ${updateError.message}`);
       }
 
-      // Require 30-minute break between shifts
-      const lastCheckOutTime = new Date(lastRecord.check_out_time);
-      const breakDuration = (now.getTime() - lastCheckOutTime.getTime()) / (1000 * 60);
-      if (breakDuration < 30) {
-        throw new Error('Please take at least a 30-minute break between shifts');
-      }
+      // Log check-out asynchronously
+      attendanceLogger.log('check-out', employeeData.id, {
+        status: 'checked-out',
+        total_hours: checkOutMetrics.totalHours,
+        overtime: checkOutMetrics.overtime
+      });
 
-      sequenceNumber = 2;
+      return {
+        check_in_time: existingOpenCheckIn.check_in_time,
+        check_out_time: now.toISOString(),
+        status: 'checked-out',
+        sequence_number: updatedRecord.sequence_number,
+        late_duration: updatedRecord.minutes_late,
+        action: 'check-out'
+      };
     }
 
-    // Calculate late duration
-    const workStartTime = new Date(now);
-    workStartTime.setHours(9, 0, 0, 0);
-    
-    const lateMinutes = now > workStartTime 
-      ? Math.floor((now.getTime() - workStartTime.getTime()) / (1000 * 60)) 
-      : 0;
-
-    // Determine status
-    let status: 'present' | 'late' | 'half-day' = 'present';
-    if (lateMinutes > 240) {
-      status = 'half-day';
-    } else if (lateMinutes > 0) {
-      status = 'late';
-    }
-
-    // Prepare attendance record with comprehensive validation
-    const attendanceRecord = {
+    // Handle check-in
+    const checkInMetrics = calculateAttendanceMetrics(now);
+    const newAttendanceRecord: Partial<Attendance> = {
       employee_id: employeeData.id,
       check_in_time: now.toISOString(),
       date: today,
-      status: status,
-      late_duration: lateMinutes,
-      sequence_number: sequenceNumber,
-      // Ensure all optional fields have default values
-      check_out_time: null,
-      total_hours: null,
-      early_departure: false,
-      overtime: 0
+      status: 'present',
+      minutes_late: checkInMetrics.lateMinutes,
+      sequence_number: 1
     };
 
-    // Insert attendance record with strict validation
-    const { data, error } = await supabase
+    const { data: insertedRecord, error: insertError } = await supabase
       .from('attendance')
-      .insert(attendanceRecord)
+      .insert(newAttendanceRecord)
       .select()
       .single();
 
-    if (error) {
-      console.error('Attendance insert error:', error);
-      throw new Error(`Failed to save attendance record: ${error.message}`);
+    if (insertError) {
+      throw new AttendanceError(`Check-in failed: ${insertError.message}`);
     }
+
+    // Log check-in asynchronously
+    attendanceLogger.log('check-in', employeeData.id, {
+      status: newAttendanceRecord.status,
+      minutes_late: newAttendanceRecord.minutes_late,
+    });
 
     return {
-      checkInTime: data.check_in_time,
-      late_duration: lateMinutes,
-      status: status,
-      sequence_number: sequenceNumber
+      check_in_time: insertedRecord.check_in_time,
+      status: 'present',
+      sequence_number: insertedRecord.sequence_number,
+      late_duration: insertedRecord.minutes_late,
+      action: 'check-in'
     };
+
   } catch (error) {
-    console.error('Attendance check-in error:', error);
-    throw error instanceof Error 
-      ? error 
-      : new Error('Failed to record attendance check-in');
+    if (!(error instanceof AttendanceError)) {
+      console.error('Unexpected attendance recording error:', error);
+    }
+    // Log error asynchronously
+    attendanceLogger.log('error', qrData, {
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+    throw error;
   }
 };
 
-/**
- * Gets the admin contact information for WhatsApp sharing
- * @returns Promise<AdminContactInfo>
- */
-export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
+// Fetch Attendance Records
+export const getAttendanceRecords = async (): Promise<Attendance[]> => {
   try {
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .select('whatsapp_number, is_whatsapp_share_enabled')
-      .eq('setting_type', 'whatsapp')
-      .maybeSingle();
-
-    // If no settings exist, create default settings
-    if (!data) {
-      await supabase
-        .from('admin_settings')
-        .insert({
-          setting_type: 'whatsapp',
-          whatsapp_number: '',
-          is_whatsapp_share_enabled: false
-        });
-    }
-
-    return {
-      whatsappNumber: data?.whatsapp_number || '',
-      isWhatsappShareEnabled: data?.is_whatsapp_share_enabled || false
-    };
-  } catch (error) {
-    console.error('Error getting admin contact info:', error);
-    return {
-      whatsappNumber: '',
-      isWhatsappShareEnabled: false
-    };
-  }
-};
-
-/**
- * Saves the admin contact information for WhatsApp sharing
- * @param whatsappNumber - WhatsApp number(s) separated by |
- * @param isWhatsappShareEnabled - Whether WhatsApp sharing is enabled
- * @param info - Additional admin contact information
- * @returns Promise<void>
- */
-export const saveAdminContactInfo = async (whatsappNumber: string, isWhatsappShareEnabled: boolean, info: AdminContactInfo): Promise<void> => {
-  try {
-    // Format WhatsApp number
-    let formattedNumber = whatsappNumber.trim().replace(/\D/g, '');
-    
-    // Add country code if needed
-    if (formattedNumber.startsWith('0')) {
-      formattedNumber = '94' + formattedNumber.substring(1);
-    } else if (!formattedNumber.startsWith('94')) {
-      formattedNumber = '94' + formattedNumber;
-    }
-
-    // Validate number if WhatsApp sharing is enabled
-    if (isWhatsappShareEnabled) {
-      if (formattedNumber.length < 11) {
-        throw new Error('Please enter a valid WhatsApp number (minimum 11 digits)');
-      }
-    }
-
-    const { error } = await supabase
-      .from('admin_settings')
-      .upsert({
-        setting_type: 'whatsapp',
-        whatsapp_number: formattedNumber,
-        is_whatsapp_share_enabled: isWhatsappShareEnabled
-      });
-
-    if (error) throw error;
-  } catch (error) {
-    console.error('Error saving admin contact info:', error);
-    throw error instanceof Error ? error : new Error('Failed to save WhatsApp settings');
-  }
-};
-
-/**
- * Sets up automatic scheduling for attendance reports
- * @returns void
- */
-export const setupAutoReportScheduling = (): void => {
-  // TODO: Implement automatic report scheduling logic
-  // This could involve setting up cron jobs or scheduled tasks
-  console.log('Auto report scheduling initialized');
-};
-
-/**
- * Deletes attendance record(s) based on specified criteria
- * @param attendanceId - ID of the attendance record to delete
- * @returns Promise<boolean> - True if deletion was successful
- */
-export const deleteAttendance = async (attendanceId: string): Promise<boolean> => {
-  try {
-    const { error } = await supabase
-      .from('attendance')
-      .delete()
-      .eq('id', attendanceId);
-
-    if (error) throw error;
-    return true;
-  } catch (error) {
-    console.error('Error deleting attendance:', error);
-    return false;
-  }
-};
-
-/**
- * Records an attendance check-out using the provided QR code data
- * @param qrData - Data from the scanned QR code
- * @returns Promise<WorkTimeInfo> - True if check-out was successful
- */
-export const recordAttendanceCheckOut = async (qrData: string): Promise<WorkTimeInfo> => {
-  try {
-    console.log('Attempting to validate employee for check-out:', qrData);
-
-    // First, verify if the QR data corresponds to a valid employee
-    const { data: employeeData, error: employeeError } = await supabase
-      .from('employees')
-      .select('*')
-      .or('id.eq.' + qrData + ',email.eq.' + qrData)
-      .maybeSingle();
-
-    if (employeeError) {
-      console.error('Employee verification failed:', employeeError);
-      throw new Error(`Failed to validate employee: ${employeeError.message}`);
-    }
-
-    if (!employeeData) {
-      throw new Error('Invalid or unregistered employee QR code');
-    }
-
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-
-    // Get today's latest attendance record
-    const { data: attendanceData, error: fetchError } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeData.id)
-      .eq('date', today)
-      .order('sequence_number', { ascending: false })
-      .limit(1);
-
-    if (fetchError) {
-      console.error('Error fetching attendance:', fetchError);
-      throw new Error('Failed to fetch attendance record');
-    }
-
-    const lastRecord = attendanceData?.[0];
-
-    if (!lastRecord) {
-      throw new Error('No check-in record found for today. Please check-in first.');
-    }
-
-    if (lastRecord.check_out_time) {
-      throw new Error('You have already checked out from your current session.');
-    }
-
-    // Check if 5 minutes have passed since check-in
-    const checkInDate = new Date(lastRecord.check_in_time);
-    const minutesSinceCheckIn = (now.getTime() - checkInDate.getTime()) / (1000 * 60);
-
-    if (minutesSinceCheckIn < 5) {
-      throw new Error('Please wait at least 5 minutes after logging in before logging out.');
-    }
-
-    // Work hour validations
-    const workEndTime = new Date(now);
-    workEndTime.setHours(18, 0, 0, 0); // Normal work day ends at 6 PM
-
-    const earlyEndTime = new Date(now);
-    earlyEndTime.setHours(16, 0, 0, 0); // Earliest allowed check-out is 4 PM
-
-    // Calculate total hours worked
-    const totalHours = minutesSinceCheckIn / 60;
-
-    // Determine overtime
-    let overtime = 0;
-    let status = 'checked-out';
-    let earlyDeparture = false;
-
-    if (totalHours > 9) {
-      // More than 9 hours is considered overtime
-      overtime = totalHours - 9;
-      status = 'checked-out-overtime';
-    } else if (totalHours < 4) {
-      // Less than 4 hours is considered half-day
-      status = 'half-day';
-    } else if (now < earlyEndTime) {
-      // Left before 4 PM
-      status = 'early-departure';
-      earlyDeparture = true;
-    }
-
-    // Ensure check_out_time is after check_in_time
-    if (now <= new Date(lastRecord.check_in_time)) {
-      throw new Error('Check-out time must be after check-in time');
-    }
-
-    // Format times to match PostgreSQL timestamp format
-    const checkOutTime = now.toISOString();
-
-    // Update the attendance record with check-out time
-    const { error: updateError } = await supabase
-      .from('attendance')
-      .update({
-        check_out_time: checkOutTime,
-        total_hours: totalHours,
-        status: status,
-        early_departure: earlyDeparture,
-        overtime: overtime
-      })
-      .eq('id', lastRecord.id);
-
-    if (updateError) {
-      console.error('Error updating attendance record:', updateError);
-      throw new Error('Failed to update attendance record');
-    }
-
-    return {
-      checkInTime: lastRecord.check_in_time,
-      checkOutTime: now.toISOString(),
-      totalHours,
-      status: status as 'checked-out',
-      sequence_number: lastRecord.sequence_number
-    };
-  } catch (error) {
-    console.error('Error recording check-out:', error);
-    throw error instanceof Error ? error : new Error('Failed to record check-out');
-  }
-};
-
-/**
- * Gets attendance records with optional filtering
- * @returns Promise<Attendance[]> - List of attendance records
- */
-export const getAttendanceRecords = async (): Promise<any[]> => {
-  try {
-    // Join with employees table to get employee names
     const { data, error } = await supabase
       .from('attendance')
       .select(`
-        *,
-        employee:employees (
-          name
-        )
+        id,
+        employee_id,
+        check_in_time,
+        check_out_time,
+        date,
+        status,
+        action,
+        minutes_late,
+        working_duration,
+        overtime,
+        sequence_number,
+        employee:employees (name)
       `)
-      .order('date', { ascending: false });
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(500);
 
     if (error) throw error;
 
-    // Process and format the records
-    const formattedRecords = (data || []).map(record => {
-      // Calculate working duration if checked out
-      let workingDuration = 'Not checked out';
-      let workingHours = 0;
-      
-      if (record.check_out_time && record.check_in_time) {
-        const checkIn = new Date(record.check_in_time);
-        const checkOut = new Date(record.check_out_time);
-        const diffMs = checkOut.getTime() - checkIn.getTime();
-        workingHours = Math.round((diffMs / (1000 * 60 * 60)) * 10) / 10;
-        workingDuration = `${workingHours} hrs`;
-      }
-
-      // Format the record
-      return {
-        id: record.id,
-        employeeId: record.employee_id,
-        employeeName: record.employee?.name || 'Unknown',
-        date: record.date,
-        checkInTime: record.check_in_time,
-        checkOutTime: record.check_out_time,
-        status: record.status,
-        lateDuration: record.late_duration ? `${record.late_duration} min` : 'On time',
-        workingDuration,
-        workingHours,
-        fullTimeRange: record.check_out_time 
-          ? `${new Date(record.check_in_time).toLocaleTimeString()} - ${new Date(record.check_out_time).toLocaleTimeString()}`
-          : `${new Date(record.check_in_time).toLocaleTimeString()} - Present`
-      };
-    });
-
-    return formattedRecords;
+    return (data || []).map(record => ({
+      id: record.id,
+      employee_id: record.employee_id,
+      employee_name: (record.employee as any)?.name || 'Unknown',
+      check_in_time: record.check_in_time,
+      check_out_time: record.check_out_time,
+      date: record.date,
+      status: record.status,
+      action: record.action,
+      minutes_late: record.minutes_late,
+      working_duration: record.working_duration,
+      overtime: record.overtime,
+      sequence_number: record.sequence_number
+    }));
   } catch (error) {
     console.error('Error fetching attendance records:', error);
     return [];
   }
 };
 
-/**
- * Gets today's attendance summary with detailed counting
- */
+// Get Today's Attendance Summary
 export const getTodayAttendanceSummary = async () => {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    // Get all active employees
-    const { data: employeeData, error: employeeError } = await supabase
+    // Fetch active employees and today's attendance
+    const { data: activeEmployees, error: employeeError } = await supabase
       .from('employees')
-      .select('id')
+      .select('id, status')
       .eq('status', 'active');
 
     if (employeeError) throw employeeError;
 
-    // Get today's attendance records
+    const totalEmployees = activeEmployees?.length || 0;
+    
+    // Fetch today's attendance records
     const { data: attendanceData, error: attendanceError } = await supabase
       .from('attendance')
       .select('*')
@@ -468,132 +435,100 @@ export const getTodayAttendanceSummary = async () => {
 
     if (attendanceError) throw attendanceError;
 
-    const totalEmployees = employeeData?.length || 0;
-    
-    // Calculate presence status one by one
-    const presenceStatus = {
-      currentlyPresent: attendanceData?.filter(record => 
-        record.status === 'present' && !record.check_out_time
-      ).length || 0,
-      
-      lateButPresent: attendanceData?.filter(record => 
-        record.status === 'present' && 
-        record.late_duration && 
-        record.late_duration > 0 && 
-        !record.check_out_time
-      ).length || 0,
-      
-      checkedOut: attendanceData?.filter(record => 
-        record.check_out_time !== null
-      ).length || 0,
-      
-      onTimeArrivals: attendanceData?.filter(record => 
-        record.late_duration === 0
-      ).length || 0
+    // Compute attendance metrics
+    const statusCounts = {
+      currentlyPresent: 0,
+      lateButPresent: 0,
+      checkedOut: 0,
+      onTimeArrivals: 0,
+      absent: 0
     };
 
-    // Calculate total present (all types of presence)
-    const totalPresent = presenceStatus.currentlyPresent + 
-                        presenceStatus.lateButPresent + 
-                        presenceStatus.checkedOut;
-
-    // Calculate rates
-    const rates = {
-      currentPresenceRate: totalEmployees > 0 ? 
-        ((presenceStatus.currentlyPresent / totalEmployees) * 100).toFixed(1) : '0',
-      
-      totalPresentRate: totalEmployees > 0 ? 
-        ((totalPresent / totalEmployees) * 100).toFixed(1) : '0',
-      
-      onTimeRate: totalPresent > 0 ? 
-        ((presenceStatus.onTimeArrivals / totalPresent) * 100).toFixed(1) : '0',
-      
-      lateRate: totalPresent > 0 ? 
-        ((presenceStatus.lateButPresent / totalPresent) * 100).toFixed(1) : '0'
-    };
-
-    // Calculate absent count
-    const absentCount = Math.max(0, totalEmployees - totalPresent);
-    const absentRate = totalEmployees > 0 ? 
-      ((absentCount / totalEmployees) * 100).toFixed(1) : '0';
-
-    // Detailed counting for time-based categories
-    const detailed: DetailedAttendanceCount = {
-      onTime: presenceStatus.onTimeArrivals,
-      lateArrivals: 0,
-      veryLate: 0,
-      halfDay: 0,
-      earlyDepartures: 0,
-      overtime: 0,
-      regularHours: 0
-    };
-
-    // Process each attendance record for detailed time-based counting
     attendanceData?.forEach(record => {
-      if (record.late_duration > 0) {
-        if (record.late_duration <= 30) {
-          detailed.lateArrivals++;
-        } else if (record.late_duration <= 240) {
-          detailed.veryLate++;
-        } else {
-          detailed.halfDay++;
-        }
+      if (['present', 'late', 'check-in'].includes(record.status)) {
+        statusCounts.currentlyPresent++;
       }
-
-      if (record.check_out_time) {
-        const checkIn = new Date(record.check_in_time);
-        const checkOut = new Date(record.check_out_time);
-        const workEnd = new Date(checkOut);
-        workEnd.setHours(17, 0, 0, 0);
-        
-        const workingHours = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
-        
-        if (checkOut < workEnd) {
-          detailed.earlyDepartures++;
-        } else if (workingHours > 9) {
-          detailed.overtime++;
-        } else {
-          detailed.regularHours++;
-        }
+      
+      if (['late', 'check-in'].includes(record.status) && record.minutes_late > 0) {
+        statusCounts.lateButPresent++;
+      }
+      
+      if (['checked-out', 'checked-out-overtime'].includes(record.status)) {
+        statusCounts.checkedOut++;
+      }
+      
+      if (record.minutes_late === 0) {
+        statusCounts.onTimeArrivals++;
       }
     });
 
-    return {
-      // Standard summary with detailed presence breakdown
-      totalEmployees,
-      presentCount: presenceStatus.currentlyPresent,
-      lateCount: presenceStatus.lateButPresent,
-      absentCount,
-      checkedOutCount: presenceStatus.checkedOut,
-      onTime: detailed.onTime,
-      stillWorking: presenceStatus.currentlyPresent + presenceStatus.lateButPresent,
+    // Calculate absent count
+    statusCounts.absent = Math.max(0, totalEmployees - (statusCounts.currentlyPresent + statusCounts.checkedOut));
+
+    // Compute rates
+    const totalPresent = statusCounts.currentlyPresent + statusCounts.checkedOut;
+    const rates = {
+      currentPresenceRate: totalEmployees > 0 
+        ? ((statusCounts.currentlyPresent / totalEmployees) * 100).toFixed(1) 
+        : '0',
       
-      // Detailed rates
+      totalPresentRate: totalEmployees > 0 
+        ? ((totalPresent / totalEmployees) * 100).toFixed(1) 
+        : '0',
+      
+      onTimeRate: totalPresent > 0 
+        ? ((statusCounts.onTimeArrivals / totalPresent) * 100).toFixed(1) 
+        : '0',
+      
+      lateRate: totalPresent > 0 
+        ? ((statusCounts.lateButPresent / totalPresent) * 100).toFixed(1) 
+        : '0',
+      
+      absentRate: totalEmployees > 0 
+        ? ((statusCounts.absent / totalEmployees) * 100).toFixed(1) 
+        : '0'
+    };
+
+    return {
+      totalEmployees,
+      presentCount: statusCounts.currentlyPresent,
+      lateCount: statusCounts.lateButPresent,
+      absentCount: statusCounts.absent,
+      checkedOutCount: statusCounts.checkedOut,
+      onTime: statusCounts.onTimeArrivals,
+      stillWorking: statusCounts.currentlyPresent + statusCounts.lateButPresent,
+      
       currentPresenceRate: rates.currentPresenceRate,
       totalPresentRate: rates.totalPresentRate,
       onTimeRate: rates.onTimeRate,
       lateRate: rates.lateRate,
-      absentRate,
+      absentRate: rates.absentRate,
       
-      // Detailed counts
       detailed: {
-        ...detailed,
+        onTime: statusCounts.onTimeArrivals,
+        lateArrivals: statusCounts.lateButPresent,
+        veryLate: 0,
+        halfDay: 0,
+        earlyDepartures: 0,
+        overtime: 0,
+        regularHours: 0,
         attendanceRate: rates.totalPresentRate,
-        efficiencyRate: ((detailed.regularHours + detailed.overtime) / totalPresent * 100).toFixed(1),
+        efficiencyRate: '0',
         punctualityRate: rates.onTimeRate
       },
       
-      // Presence breakdown
       presenceBreakdown: {
-        currentlyPresent: presenceStatus.currentlyPresent,
-        lateButPresent: presenceStatus.lateButPresent,
-        checkedOut: presenceStatus.checkedOut,
-        onTimeArrivals: presenceStatus.onTimeArrivals,
-        absent: absentCount
+        currentlyPresent: statusCounts.currentlyPresent,
+        lateButPresent: statusCounts.lateButPresent,
+        checkedOut: statusCounts.checkedOut,
+        onTimeArrivals: statusCounts.onTimeArrivals,
+        absent: statusCounts.absent
       }
     };
   } catch (error) {
     console.error('Error getting attendance summary:', error);
+    
+    // Return a default empty summary object
     return {
       totalEmployees: 0,
       presentCount: 0,
@@ -630,21 +565,59 @@ export const getTodayAttendanceSummary = async () => {
   }
 };
 
-/**
- * Automatically shares attendance summary via configured methods (e.g., WhatsApp)
- * @returns Promise<string | false> - WhatsApp URL if sharing was successful, false otherwise
- */
+// Export additional utility functions
+export const setupAttendanceConstraints = async () => {
+  try {
+    console.log('Attendance constraints setup completed');
+    return true;
+  } catch (error) {
+    console.error('Failed to setup attendance constraints:', error);
+    return false;
+  }
+};
+
+// Auto Report Scheduling Function
+export const setupAutoReportScheduling = async (): Promise<void> => {
+  try {
+    // Placeholder for auto report scheduling logic
+    console.log('Auto report scheduling initialized');
+    
+    // Example: Set up periodic attendance summary generation
+    const generateSummaryPeriodically = () => {
+      // Run summary generation every 30 minutes
+      setInterval(async () => {
+        try {
+          const summary = await getTodayAttendanceSummary();
+          
+          // Optional: Send summary via WhatsApp or other notification method
+          await autoShareAttendanceSummary();
+        } catch (error) {
+          console.error('Error in periodic summary generation:', error);
+        }
+      }, 30 * 60 * 1000); // 30 minutes
+    };
+
+    generateSummaryPeriodically();
+  } catch (error) {
+    console.error('Failed to setup auto report scheduling:', error);
+  }
+};
+
+// Auto Report Sharing Function
 export const autoShareAttendanceSummary = async (): Promise<string | false> => {
   try {
-    const summary = await getTodayAttendanceSummary();
-    const { whatsappNumber, isWhatsappShareEnabled } = await getAdminContactInfo();
+    // Fetch summary and admin settings concurrently
+    const [summary, { whatsapp_number, is_whatsapp_share_enabled }] = await Promise.all([
+      getTodayAttendanceSummary(),
+      getAdminContactInfo()
+    ]);
 
-    if (!isWhatsappShareEnabled || !whatsappNumber) {
+    if (!is_whatsapp_share_enabled || !whatsapp_number) {
       console.log('WhatsApp sharing is disabled or no numbers configured');
       return false;
     }
 
-    // Format the date in a more readable way
+    // Format date
     const dateOptions: Intl.DateTimeFormatOptions = { 
       weekday: 'long', 
       year: 'numeric', 
@@ -655,71 +628,37 @@ export const autoShareAttendanceSummary = async (): Promise<string | false> => {
     };
     const formattedDate = new Date().toLocaleDateString('en-US', dateOptions);
 
-    // Calculate percentages for better readability
+    // Compute percentages
     const onTimePercentage = (100 - parseFloat(summary.lateRate)).toFixed(1);
     const latePercentage = summary.lateRate;
     const absentPercentage = summary.absentRate;
-    const efficiencyRate = summary.detailed.efficiencyRate;
 
-    // Create a well-formatted message with proper spacing, emojis, and sections
+    // Create summary message
     const message = 
-`🏢 *DETAILED ATTENDANCE REPORT*
-━━━━━━━━━━━━━━━━━━━━━
-📅 Generated: ${formattedDate}
-━━━━━━━━━━━━━━━━━━━━━
+`🏢 *ATTENDANCE SUMMARY*
+📅 ${formattedDate}
 
-📊 *CURRENT STATUS*
-• Total Employees: ${summary.totalEmployees}
-• Currently Present: ${summary.presenceBreakdown.currentlyPresent} 👥
-• Late but Working: ${summary.presenceBreakdown.lateButPresent} ⏰
-• Checked Out: ${summary.presenceBreakdown.checkedOut} 🏃
-• Absent: ${summary.absentCount} ❌
+👥 Total Employees: ${summary.totalEmployees}
+✅ Present: ${summary.presentCount} (${onTimePercentage}%)
+⏰ Late: ${summary.lateCount} (${latePercentage}%)
+❌ Absent: ${summary.absentCount} (${absentPercentage}%)
 
-⏱ *PUNCTUALITY BREAKDOWN*
-• On Time Arrivals: ${summary.presenceBreakdown.onTimeArrivals} (${onTimePercentage}%) ✅
-• Late Arrivals: ${summary.lateCount} (${latePercentage}%) ⚠️
-• Very Late: ${summary.detailed.veryLate} ⛔
-• Half Day: ${summary.detailed.halfDay} 📅
+📊 Attendance Rate: ${summary.totalPresentRate}%
+🕒 Currently Working: ${summary.stillWorking}
 
-💼 *WORK PATTERNS*
-• Regular Hours: ${summary.detailed.regularHours} 📝
-• Overtime: ${summary.detailed.overtime} 💪
-• Early Departures: ${summary.detailed.earlyDepartures} 🚶
+🤖 Generated by Attendance System`;
 
-📈 *KEY METRICS*
-• Attendance Rate: ${summary.totalPresentRate}% 📊
-• Efficiency Rate: ${efficiencyRate}% ⚡
-• Current Presence: ${summary.currentPresenceRate}% 🎯
-• Absence Rate: ${absentPercentage}% 📉
-
-👥 *WORKFORCE INSIGHTS*
-• Still Working: ${summary.stillWorking} employees
-• Total Present Today: ${summary.presentCount}/${summary.totalEmployees}
-• Expected Return: ${summary.presenceBreakdown.lateButPresent} employees
-
-━━━━━━━━━━━━━━━━━━━━━
-🤖 Generated by QR Check-In System
-🕒 Auto-updates every 30 seconds
-📱 Contact admin for any queries`;
-
-    // Process the WhatsApp number
-    const number = whatsappNumber.trim().replace(/\D/g, '');
+    // Process WhatsApp number
+    const number = whatsapp_number.trim().replace(/\D/g, '');
     
     // Ensure proper number format
-    let formattedNumber = number;
-    if (formattedNumber.startsWith('0')) {
-      formattedNumber = '94' + formattedNumber.substring(1);
-    } else if (!formattedNumber.startsWith('94')) {
-      formattedNumber = '94' + formattedNumber;
-    }
+    let formattedNumber = number.startsWith('0') 
+      ? '94' + number.substring(1)
+      : number.startsWith('94') 
+        ? number 
+        : '94' + number;
 
-    // Validate number
-    if (formattedNumber.length < 11) {
-      console.error('Invalid WhatsApp number format');
-      return false;
-    }
-
-    // Create WhatsApp URL using the api.whatsapp.com format
+    // Create WhatsApp URL
     const encodedMessage = encodeURIComponent(message);
     const whatsappUrl = `https://api.whatsapp.com/send?phone=${formattedNumber}&text=${encodedMessage}`;
     
@@ -727,5 +666,245 @@ export const autoShareAttendanceSummary = async (): Promise<string | false> => {
   } catch (error) {
     console.error('Error in autoShareAttendanceSummary:', error);
     return false;
+  }
+};
+
+// Remove the previous export statements and keep the function definitions
+export const recordAttendanceCheckIn = async (employeeId: string) => {
+  try {
+    const result = await recordAttendance(employeeId);
+    return result;
+  } catch (error) {
+    console.error('Check-in error:', error);
+    throw error;
+  }
+};
+
+export const determineNextAttendanceAction = async (employeeId: string) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('attendance')
+      .select('check_in_time, check_out_time')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !data) {
+      // No record for today, allow check-in
+      return 'check-in';
+    }
+
+    // If no check-out time exists, prevent another check-in
+    if (!data.check_out_time) {
+      throw new Error('You have already checked in today. Please check out at the end of your day.');
+    }
+
+    // If checked out, allow check-in for the next day
+    return 'check-in';
+  } catch (error) {
+    console.error('Error determining attendance action:', error);
+    return 'check-in';
+  }
+};
+
+export const singleScanAttendance = async (employeeId: string) => {
+  try {
+    // Perform attendance action (check-in or check-out)
+    const result = await recordAttendance(employeeId);
+    
+    // Fetch employee name for the result
+    const { data: employeeData } = await supabase
+      .from('employees')
+      .select('name')
+      .eq('id', employeeId)
+      .single();
+
+    // Return the result with the action type and employee name
+    return {
+      ...result,
+      employeeName: employeeData?.name || 'Unknown Employee',
+      action: result.check_out_time ? 'check-out' : 'check-in' // Determine action based on check_out_time
+    };
+  } catch (error) {
+    console.error('Single scan attendance error:', error);
+    throw error;
+  }
+};
+
+export const deleteAttendance = async (recordIds: string[]) => {
+  try {
+    const { data, error } = await supabase
+      .from('attendance')
+      .delete()
+      .in('id', recordIds);
+
+    if (error) {
+      console.error('Delete attendance error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { 
+      success: true, 
+      deletedCount: recordIds.length 
+    };
+  } catch (error) {
+    console.error('Unexpected delete attendance error:', error);
+    return { 
+      success: false, 
+      error: 'Unexpected error occurred' 
+    };
+  }
+};
+
+export const getAdminContactInfo = async (): Promise<AdminContactInfo> => {
+  try {
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('whatsapp_number, is_whatsapp_share_enabled')
+      .single();
+
+    if (error) {
+      console.error('Error fetching admin contact info:', error);
+      return {
+        whatsapp_number: '',
+        is_whatsapp_share_enabled: false
+      };
+    }
+
+    return {
+      whatsapp_number: data?.whatsapp_number || '',
+      is_whatsapp_share_enabled: data?.is_whatsapp_share_enabled || false
+    };
+  } catch (error) {
+    console.error('Unexpected error in getAdminContactInfo:', error);
+    return {
+      whatsapp_number: '',
+      is_whatsapp_share_enabled: false
+    };
+  }
+};
+
+export const saveAdminContactInfo = async (
+  whatsappNumber: string, 
+  isWhatsappShareEnabled: boolean,
+  settingsData?: Record<string, any>
+): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('admin_settings')
+      .upsert({
+        whatsapp_number: whatsappNumber,
+        is_whatsapp_share_enabled: isWhatsappShareEnabled,
+        ...settingsData
+      }, {
+        onConflict: 'whatsapp_number'
+      });
+
+    if (error) {
+      console.error('Error saving admin contact info:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Unexpected error in saveAdminContactInfo:', error);
+    return false;
+  }
+};
+
+// Manual Check-out Function
+export const manualCheckOut = async (employeeId: string) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+
+    // Fetch today's attendance record for this employee
+    const { data: todayRecords, error: recordError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (recordError || !todayRecords) {
+      throw new AttendanceError('No check-in record found for today');
+    }
+
+    // Ensure the record hasn't been checked out already
+    if (todayRecords.check_out_time) {
+      throw new AttendanceError('You have already checked out today');
+    }
+
+    const checkInTime = new Date(todayRecords.check_in_time);
+    
+    // Ensure minimum time between check-in and check-out (15 minutes)
+    const minCheckOutTime = new Date(checkInTime.getTime() + 15 * 60 * 1000);
+    if (now < minCheckOutTime) {
+      throw new AttendanceError('Cannot check out less than 15 minutes after check-in');
+    }
+
+    // Generate a unique timestamp for check-out that ensures proper spacing
+    const uniqueCheckOutTime = await generateUniqueTimestamp(employeeId, now, 'check-out');
+
+    // Double check the time difference after getting unique timestamp
+    const timeDiffMinutes = (uniqueCheckOutTime.getTime() - checkInTime.getTime()) / (1000 * 60);
+    if (timeDiffMinutes < 15) {
+      throw new AttendanceError('Invalid check-out time: Must be at least 15 minutes after check-in');
+    }
+
+    const checkOutMetrics = calculateAttendanceMetrics(checkInTime, uniqueCheckOutTime);
+
+    // Prepare check-out record
+    const checkOutRecord: Partial<Attendance> = {
+      check_out_time: uniqueCheckOutTime.toISOString(),
+      working_duration: checkOutMetrics.totalHours.toFixed(2),
+      status: checkOutMetrics.status === 'checked-out-overtime' ? 'checked-out' : checkOutMetrics.status,
+      overtime: checkOutMetrics.overtime
+    };
+
+    // Update the attendance record
+    const { data, error } = await supabase
+      .from('attendance')
+      .update(checkOutRecord)
+      .eq('id', todayRecords.id)
+      .select()
+      .single();
+
+    if (error) {
+      throw new AttendanceError(`Check-out failed: ${error.message}`);
+    }
+
+    // Log the check-out
+    attendanceLogger.log('check-out', employeeId, {
+      status: checkOutMetrics.status,
+      total_hours: checkOutMetrics.totalHours,
+      overtime: checkOutMetrics.overtime
+    });
+
+    // Fetch employee name
+    const { data: employeeData } = await supabase
+      .from('employees')
+      .select('name')
+      .eq('id', employeeId)
+      .single();
+
+    return {
+      action: 'check-out',
+      check_in_time: todayRecords.check_in_time,
+      check_out_time: uniqueCheckOutTime.toISOString(),
+      employeeId,
+      employeeName: employeeData?.name || 'Unknown Employee',
+      totalHours: checkOutMetrics.totalHours,
+      status: 'checked-out',
+      overtime: checkOutMetrics.overtime
+    };
+  } catch (error) {
+    console.error('Manual check-out error:', error);
+    throw error;
   }
 };

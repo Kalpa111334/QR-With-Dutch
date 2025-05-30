@@ -24,22 +24,22 @@ export type AttendanceStatus =
 
 export interface Attendance {
   id: string;
-  employeeId: string;
-  checkInTime: string;
-  checkOutTime?: string;
+  employee_id: string;
+  check_in_time: string;
+  check_out_time?: string;
   date: string;
-  createdAt?: string;
+  created_at?: string;
   status: AttendanceStatus;
   employee?: Employee;
   // Additional properties used in components
-  employeeName?: string;
-  minutesLate?: number;
-  lateDuration?: string;
-  expectedTime?: string;
-  workingDuration?: string;
-  workingDurationMinutes?: number;
-  workingHours?: number;
-  fullTimeRange?: string;
+  employee_name?: string;
+  minutes_late?: number;
+  late_duration?: string;
+  expected_time?: string;
+  working_duration?: string;
+  working_duration_minutes?: number;
+  working_hours?: number;
+  full_time_range?: string;
   sequence_number: number;
   overtime?: number;
 }
@@ -70,4 +70,13 @@ export interface GatePass {
     hours: number;
     minutes: number;
   };
+}
+
+export interface WorkTimeInfo {
+  check_in_time: string;
+  check_out_time?: string;
+  total_hours?: number;
+  late_duration?: number;
+  status: 'present' | 'checked-out';
+  sequence_number: number;
 }

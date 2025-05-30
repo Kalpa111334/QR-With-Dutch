@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { getAdminContactInfo, saveAdminContactInfo, recordAttendanceCheckIn, recordAttendanceCheckOut } from '../utils/attendanceUtils';
+import { getAdminContactInfo, saveAdminContactInfo, recordAttendanceCheckIn, recordAttendanceCheckOut, determineNextAttendanceAction, singleScanAttendance } from '../utils/attendanceUtils';
 import Swal from 'sweetalert2';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -10,11 +10,61 @@ import { Switch } from '../components/ui/switch';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
+import { 
+  FileSpreadsheet, 
+  FileText, 
+  Filter, 
+  Search,
+  Trash2,
+  X,
+  Clock,
+  Calendar
+} from 'lucide-react';
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from '@/components/ui/table';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { 
+  getAttendanceRecords, 
+  deleteAttendance 
+} from '@/utils/attendanceUtils';
+import { format } from 'date-fns';
 
 // Dynamically import QR Scanner to avoid SSR issues
 const QrScanner = dynamic(() => import('react-qr-scanner'), {
   ssr: false
 });
+
+// Add this function before the Attendance component
+const extractEmployeeId = (qrData: string): string | null => {
+  // Assuming QR code contains either an employee ID or email
+  // You might need to adjust this logic based on your exact QR code format
+  const trimmedData = qrData.trim();
+  
+  // If it looks like an email, return it
+  if (trimmedData.includes('@')) {
+    return trimmedData;
+  }
+  
+  // If it looks like an ID (assuming IDs are alphanumeric)
+  if (/^[a-zA-Z0-9]+$/.test(trimmedData)) {
+    return trimmedData;
+  }
+  
+  return null;
+};
 
 export default function Attendance() {
   const router = useRouter();
@@ -23,6 +73,21 @@ export default function Attendance() {
   const [isLoading, setIsLoading] = useState(true);
   const [isScanning, setIsScanning] = useState(true);
   const [lastScannedData, setLastScannedData] = useState<string | null>(null);
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [department, setDepartment] = useState('All Departments');
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Enhanced filtering with more options
+  const [advancedFilters, setAdvancedFilters] = useState({
+    status: 'All',
+    minWorkHours: '',
+    maxWorkHours: '',
+    lateArrivals: false,
+    earlyDepartures: false
+  });
 
   useEffect(() => {
     const checkSession = async () => {
@@ -67,8 +132,8 @@ export default function Attendance() {
   const loadSettings = async () => {
     try {
       const settings = await getAdminContactInfo();
-      setWhatsappNumber(settings.whatsappNumber || '');
-      setIsWhatsappShareEnabled(settings.isWhatsappShareEnabled || false);
+      setWhatsappNumber(settings.whatsapp_number || '');
+      setIsWhatsappShareEnabled(settings.is_whatsapp_share_enabled || false);
     } catch (error) {
       console.error('Error loading settings:', error);
       toast.error('Failed to load WhatsApp settings');
@@ -82,8 +147,8 @@ export default function Attendance() {
         whatsappNumber,
         isWhatsappShareEnabled,
         {
-          whatsappNumber,
-          isWhatsappShareEnabled
+          whatsapp_number: whatsappNumber,
+          is_whatsapp_share_enabled: isWhatsappShareEnabled
         }
       );
       toast.success('WhatsApp settings saved successfully');
@@ -119,123 +184,111 @@ export default function Attendance() {
     window.open(whatsappUrl, '_blank');
   };
 
-  const formatTime = (date: string) => {
-    return new Date(date).toLocaleTimeString('en-US', {
+  const formatTime = (date: string | Date | undefined) => {
+    if (!date) return 'N/A';
+    const parsedDate = typeof date === 'string' ? new Date(date) : date;
+    return parsedDate.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true
     });
   };
 
-  const formatHours = (hours: number) => {
-    const h = Math.floor(hours);
-    const m = Math.round((hours - h) * 60);
+  const formatHours = (hours: number | string | undefined) => {
+    if (hours === undefined) return 'N/A';
+    const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
+    const h = Math.floor(numHours);
+    const m = Math.round((numHours - h) * 60);
     return `${h}h ${m}m`;
   };
 
   const handleScan = async (data: string | null) => {
-    if (data) {
-      console.log('Scanned QR code data:', data);
-      setIsScanning(false);
-      setIsLoading(true);
-      try {
-        // Try to ensure we have a session before proceeding
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          const { error: signInError } = await supabase.auth.signInAnonymously();
-          if (signInError) {
-            console.error('Anonymous sign in failed:', signInError);
-            throw new Error('Failed to initialize session');
-          }
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+    if (!data) return;
 
-        // Parse QR code data
-        let employeeId: string;
-        const cleanData = data.trim();
-        
-        // Log the scanned data for debugging
-        console.log('Raw QR data:', cleanData);
-        
-        // Check if the QR code matches our format (EMP:id:name)
-        if (cleanData.startsWith('EMP:')) {
-          const parts = cleanData.split(':');
-          if (parts.length >= 2) {
-            employeeId = parts[1]; // Get the ID part
-            console.log('Extracted employee ID:', employeeId);
-          } else {
-            throw new Error('Invalid QR code format');
-          }
-        } else {
-          // Try parsing as JSON
-          try {
-            const parsedData = JSON.parse(cleanData);
-            employeeId = parsedData.id || parsedData.employeeId;
-            if (!employeeId) throw new Error();
-          } catch (e) {
-            // If both formats fail, use the raw data
-            employeeId = cleanData;
-          }
-        }
-        
-        // Validate the extracted ID
-        if (!employeeId || employeeId.trim().length === 0) {
-          throw new Error('Could not extract valid employee ID from QR code');
-        }
+    setIsScanning(false);
+    setIsLoading(true);
 
-        // Try check-out first, if fails, try check-in
-        try {
-          const checkOutInfo = await recordAttendanceCheckOut(employeeId);
-          setLastScannedData(employeeId);
-          
-          await Swal.fire({
-            icon: 'success',
-            title: 'Check-out Successful',
-            html: `
-              <div class="text-left">
-                <p>Check-in: ${formatTime(checkOutInfo.checkInTime)}</p>
-                <p>Check-out: ${formatTime(checkOutInfo.checkOutTime!)}</p>
-                <p>Total Hours: ${formatHours(checkOutInfo.totalHours!)}</p>
-              </div>
-            `,
-            showConfirmButton: true,
-            timer: 5000
-          });
-        } catch (checkOutError) {
-          // If check-out fails, try check-in
-          const checkInInfo = await recordAttendanceCheckIn(employeeId);
-          setLastScannedData(employeeId);
-
-          const lateText = checkInInfo.late_duration! > 0 
-            ? `<p class="text-warning">You are ${checkInInfo.late_duration} minutes late</p>` 
-            : '<p class="text-success">You are on time!</p>';
-
-          await Swal.fire({
-            icon: 'success',
-            title: 'Check-in Successful',
-            html: `
-              <div class="text-left">
-                <p>Check-in time: ${formatTime(checkInInfo.checkInTime)}</p>
-                ${lateText}
-              </div>
-            `,
-            showConfirmButton: true,
-            timer: 5000
-          });
-        }
-      } catch (error) {
-        console.error('Error processing QR code:', error);
-        Swal.fire({
-          icon: 'error',
-          title: 'Error',
-          text: error instanceof Error ? error.message : 'Failed to process QR code',
-          timer: 3000
-        });
-      } finally {
-        setIsLoading(false);
-        setIsScanning(true);
+    try {
+      // Ensure an active session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        await supabase.auth.signInAnonymously();
       }
+
+      // Extract employee ID from QR code
+      const employeeId = extractEmployeeId(data);
+      
+      if (!employeeId) {
+        throw new Error('Invalid QR code: Could not extract employee ID');
+      }
+
+      // Perform ONLY check-in action
+      const attendanceResult = await recordAttendanceCheckIn(employeeId);
+
+      // Display success message for check-in
+      await displayAttendanceSuccessMessage(attendanceResult, 'check-in');
+
+      // Update last scanned data
+      setLastScannedData(employeeId);
+    } catch (error) {
+      console.error('Attendance Scan Error:', error);
+      
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Failed to process attendance';
+      
+      const alreadyCheckedIn = errorMessage.includes('You have already checked in today') || 
+                               errorMessage.includes('already checked in');
+      
+      await Swal.fire({
+        icon: alreadyCheckedIn ? 'info' : 'error',
+        title: alreadyCheckedIn ? 'Already Checked In' : 'Attendance Error',
+        text: alreadyCheckedIn ? 'You have already checked in for today. Please check out manually at the end of your day.' : errorMessage,
+        timer: 3000
+      });
+    } finally {
+      setIsLoading(false);
+      setIsScanning(true);
     }
+  };
+
+  // Helper function to perform attendance action - THIS WILL NOW ONLY BE FOR CHECK-IN VIA QR
+  const performAttendanceAction = async (employeeId: string) => {
+    try {
+      // This function in attendanceUtils.ts should now strictly be for check-in
+      const attendanceInfo = await recordAttendanceCheckIn(employeeId);
+      return { ...attendanceInfo, action: 'check-in' }; // Explicitly set action as check-in
+    } catch (error) {
+      console.error('Attendance Action Error:', error);
+      throw error;
+    }
+  };
+
+  // Helper function to display success message
+  const displayAttendanceSuccessMessage = async (attendanceResult: any, action: 'check-in' /* removed 'check-out' */) => {
+    const { employeeName, timestamp, status, lateMinutes } = attendanceResult;
+
+    if (action === 'check-in') {
+      const lateText = lateMinutes > 0 
+        ? `<p class="text-warning">You are ${lateMinutes} minutes late</p>` 
+        : '<p class="text-success">You are on time!</p>';
+
+      await Swal.fire({
+        icon: 'success',
+        title: 'Check-in Successful',
+        html: `
+          <div class="text-left">
+            <p>Employee: ${employeeName}</p>
+            <p>Check-in time: ${formatTime(timestamp)}</p>
+            <p>Status: ${status}</p>
+            ${lateText}
+          </div>
+        `,
+        showConfirmButton: true,
+        timer: 5000
+      });
+    } 
+    // Removed the 'else' block that handled check-out messages
   };
 
   const handleError = (err: any) => {
@@ -248,6 +301,274 @@ export default function Attendance() {
         padding: '16px'
       }
     });
+  };
+
+  // Fetch attendance records
+  useEffect(() => {
+    const fetchRecords = async () => {
+      try {
+        setIsLoading(true);
+        const records = await getAttendanceRecords();
+        console.log('Fetched Attendance Records:', records);
+        setAttendanceRecords(records);
+      } catch (error) {
+        console.error('Error fetching records:', error);
+        toast.error('Failed to fetch attendance records');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchRecords();
+  }, []);
+
+  // Handle record selection
+  const handleSelectRecord = (recordId: string) => {
+    setSelectedRecords(prev => 
+      prev.includes(recordId) 
+        ? prev.filter(id => id !== recordId)
+        : [...prev, recordId]
+    );
+  };
+
+  // Select all records
+  const handleSelectAll = () => {
+    if (selectedRecords.length === attendanceRecords.length) {
+      setSelectedRecords([]);
+    } else {
+      setSelectedRecords(attendanceRecords.map(record => record.id));
+    }
+  };
+
+  // Modify the handleDeleteRecords function to reset dashboard count
+  const handleDeleteRecords = async () => {
+    if (selectedRecords.length === 0) {
+      toast.error('Please select records to delete');
+      return;
+    }
+
+    // Show confirmation dialog
+    const confirmDelete = await Swal.fire({
+      title: 'Clear Selected Attendance Records?',
+      html: `
+        <div class="text-center">
+          <p>You are about to permanently delete <strong>${selectedRecords.length}</strong> selected attendance record(s).</p>
+          <p class="text-red-600 mt-2">This action cannot be undone!</p>
+        </div>
+      `,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Yes, Clear Selected',
+      cancelButtonText: 'Cancel'
+    });
+
+    // If user confirms deletion
+    if (confirmDelete.isConfirmed) {
+      try {
+        const result = await deleteAttendance(selectedRecords);
+        
+        if (result.success) {
+          // Remove deleted records from the list
+          const updatedRecords = attendanceRecords.filter(
+            (record) => !selectedRecords.includes(record.id)
+          );
+          setAttendanceRecords(updatedRecords);
+          
+          // Reset dashboard summary
+          const resetSummary = {
+            total: 0,
+            present: 0,
+            late: 0,
+            earlyDepartures: 0,
+            averageWorkHours: 0
+          };
+          
+          // Clear selected records
+          setSelectedRecords([]);
+          
+          Swal.fire({
+            title: 'Records Cleared',
+            text: `Successfully deleted ${result.deletedCount} attendance record(s). Dashboard count reset.`,
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false
+          });
+        } else {
+          Swal.fire({
+            title: 'Clearing Failed',
+            text: result.error || 'Failed to clear records',
+            icon: 'error'
+          });
+        }
+      } catch (error) {
+        console.error('Bulk delete error:', error);
+        
+        Swal.fire({
+          title: 'Unexpected Error',
+          text: 'An unexpected error occurred while clearing records.',
+          icon: 'error'
+        });
+      }
+    }
+  };
+
+  // Add a new function to handle individual record deletion
+  const handleDeleteSingleRecord = async (recordId: string) => {
+    // Show confirmation dialog
+    const confirmDelete = await Swal.fire({
+      title: 'Are you sure?',
+      text: 'Do you want to delete this attendance record?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Yes, delete it!'
+    });
+
+    // If user confirms deletion
+    if (confirmDelete.isConfirmed) {
+      try {
+        const result = await deleteAttendance([recordId]);
+        
+        if (result.success) {
+          // Remove deleted record from the list
+          setAttendanceRecords(prev => 
+            prev.filter(record => record.id !== recordId)
+          );
+          
+          Swal.fire({
+            title: 'Deleted!',
+            text: 'The attendance record has been deleted.',
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false
+          });
+        } else {
+          Swal.fire({
+            title: 'Delete Failed',
+            text: result.error || 'Failed to delete record',
+            icon: 'error'
+          });
+        }
+      } catch (error) {
+        Swal.fire({
+          title: 'Error',
+          text: 'An unexpected error occurred',
+          icon: 'error'
+        });
+      }
+    }
+  };
+
+  // Enhanced filter function
+  const filteredRecords = attendanceRecords.filter(record => {
+    // Basic filters
+    const matchesSearch = record.employeeName.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesDepartment = department === 'All Departments' || record.department === department;
+    const recordDate = new Date(record.date);
+    const matchesDateRange = 
+      recordDate >= new Date(startDate) && 
+      recordDate <= new Date(endDate);
+    
+    // Advanced filters
+    const matchesStatus = 
+      advancedFilters.status === 'All' || 
+      record.status === advancedFilters.status;
+
+    const workHours = parseFloat(record.workingDuration) || 0;
+    const matchesMinWorkHours = 
+      !advancedFilters.minWorkHours || 
+      workHours >= parseFloat(advancedFilters.minWorkHours);
+    
+    const matchesMaxWorkHours = 
+      !advancedFilters.maxWorkHours || 
+      workHours <= parseFloat(advancedFilters.maxWorkHours);
+
+    const matchesLateArrivals = 
+      !advancedFilters.lateArrivals || 
+      (record.lateDuration && parseInt(record.lateDuration) > 0);
+
+    const matchesEarlyDepartures = 
+      !advancedFilters.earlyDepartures || 
+      record.status === 'early-departure';
+
+    return (
+      matchesSearch && 
+      matchesDepartment && 
+      matchesDateRange &&
+      matchesStatus &&
+      matchesMinWorkHours &&
+      matchesMaxWorkHours &&
+      matchesLateArrivals &&
+      matchesEarlyDepartures
+    );
+  });
+
+  // Calculate summary statistics
+  const attendanceSummary = {
+    total: filteredRecords.length,
+    present: filteredRecords.filter(r => r.status === 'present').length,
+    late: filteredRecords.filter(r => r.lateDuration && parseInt(r.lateDuration) > 0).length,
+    earlyDepartures: filteredRecords.filter(r => r.status === 'early-departure').length,
+    averageWorkHours: filteredRecords.reduce((sum, r) => sum + (parseFloat(r.workingDuration) || 0), 0) / filteredRecords.length || 0
+  };
+
+  // Export to CSV
+  const handleExportCSV = () => {
+    const headers = [
+      'Employee Name', 
+      'Date', 
+      'Check-In Time', 
+      'Check-Out Time', 
+      'Status', 
+      'Working Duration'
+    ];
+    
+    const csvData = filteredRecords.map(record => [
+      record.employeeName,
+      record.date,
+      record.checkInTime,
+      record.checkOutTime || 'Not Checked Out',
+      record.status,
+      record.workingDuration
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...csvData.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `attendance_records_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Export to PDF (placeholder - would require a PDF generation library)
+  const handleExportPDF = () => {
+    toast('PDF export functionality will be added soon');
+  };
+
+  // Function to clear all filters and selections
+  const handleClearFilters = () => {
+    // Reset all filter states
+    setSearchTerm('');
+    setDepartment('All Departments');
+    
+    // Reset date to today
+    const today = new Date().toISOString().split('T')[0];
+    setStartDate(today);
+    setEndDate(today);
+    
+    // Clear selected records
+    setSelectedRecords([]);
   };
 
   if (isLoading) {
@@ -339,6 +660,260 @@ export default function Attendance() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">Attendance Records</h1>
+        <div className="flex space-x-2">
+          <Button 
+            variant="destructive" 
+            size="sm" 
+            onClick={handleDeleteRecords}
+            disabled={selectedRecords.length === 0}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Clear Selected
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleExportCSV}
+          >
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Export to CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleExportPDF}
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Export to PDF
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="flex space-x-2 p-4">
+            <Input 
+              placeholder="Search employee..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1"
+            />
+            <Select 
+              value={department} 
+              onValueChange={setDepartment}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All Departments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All Departments">All Departments</SelectItem>
+                {/* Add department options dynamically */}
+              </SelectContent>
+            </Select>
+            <Input 
+              type="date" 
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+            <Input 
+              type="date" 
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+            <Button 
+              variant="outline" 
+              size="icon" 
+              onClick={handleClearFilters}
+              title="Clear Filters"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Advanced Filtering Section */}
+          <div className="p-4 bg-gray-50 border-t">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Status Filter */}
+              <div>
+                <Label>Status</Label>
+                <Select 
+                  value={advancedFilters.status}
+                  onValueChange={(value) => setAdvancedFilters(prev => ({...prev, status: value}))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All Statuses</SelectItem>
+                    <SelectItem value="present">Present</SelectItem>
+                    <SelectItem value="late">Late</SelectItem>
+                    <SelectItem value="early-departure">Early Departure</SelectItem>
+                    <SelectItem value="half-day">Half Day</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Work Hours Range */}
+              <div className="flex space-x-2">
+                <div className="flex-1">
+                  <Label>Min Hours</Label>
+                  <Input 
+                    type="number" 
+                    placeholder="Min" 
+                    value={advancedFilters.minWorkHours}
+                    onChange={(e) => setAdvancedFilters(prev => ({...prev, minWorkHours: e.target.value}))}
+                    min="0" 
+                    step="0.5"
+                  />
+                </div>
+                <div className="flex-1">
+                  <Label>Max Hours</Label>
+                  <Input 
+                    type="number" 
+                    placeholder="Max" 
+                    value={advancedFilters.maxWorkHours}
+                    onChange={(e) => setAdvancedFilters(prev => ({...prev, maxWorkHours: e.target.value}))}
+                    min="0" 
+                    step="0.5"
+                  />
+                </div>
+              </div>
+
+              {/* Additional Filters */}
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="lateArrivals"
+                    checked={advancedFilters.lateArrivals}
+                    onCheckedChange={(checked) => setAdvancedFilters(prev => ({...prev, lateArrivals: !!checked}))}
+                  />
+                  <Label htmlFor="lateArrivals">Late Arrivals</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="earlyDepartures"
+                    checked={advancedFilters.earlyDepartures}
+                    onCheckedChange={(checked) => setAdvancedFilters(prev => ({...prev, earlyDepartures: !!checked}))}
+                  />
+                  <Label htmlFor="earlyDepartures">Early Departures</Label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Attendance Summary */}
+          <div className="p-4 bg-gray-100 grid grid-cols-3 gap-4">
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-600">Total Records</p>
+              <p className="text-2xl font-bold">{attendanceSummary.total}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-green-600">Present</p>
+              <p className="text-2xl font-bold text-green-700">{attendanceSummary.present}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-yellow-600">Late Arrivals</p>
+              <p className="text-2xl font-bold text-yellow-700">{attendanceSummary.late}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-red-600">Early Departures</p>
+              <p className="text-2xl font-bold text-red-700">{attendanceSummary.earlyDepartures}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-blue-600">Avg. Work Hours</p>
+              <p className="text-2xl font-bold text-blue-700">{attendanceSummary.averageWorkHours.toFixed(2)}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>
+                  <Checkbox 
+                    checked={selectedRecords.length === filteredRecords.length && filteredRecords.length > 0}
+                    onCheckedChange={handleSelectAll}
+                  />
+                </TableHead>
+                <TableHead>Employee Name</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Check-In Time</TableHead>
+                <TableHead>Check-Out Time</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Working Duration</TableHead>
+            <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+              <TableCell colSpan={8} className="text-center">
+                    Loading records...
+                  </TableCell>
+                </TableRow>
+              ) : filteredRecords.length === 0 ? (
+                <TableRow>
+              <TableCell colSpan={8} className="text-center">
+                    No attendance records found
+                  </TableCell>
+                </TableRow>
+              ) : (
+            filteredRecords.map((record) => {
+              console.log('Rendering Record:', JSON.stringify(record, null, 2)); // More detailed logging
+              
+              // Validate record has all required properties
+              if (!record.id) {
+                console.error('Record missing ID:', record);
+                return null; // Skip rendering this record
+              }
+
+              return (
+                  <TableRow key={record.id}>
+                    <TableCell>
+                      <Checkbox 
+                        checked={selectedRecords.includes(record.id)}
+                        onCheckedChange={() => handleSelectRecord(record.id)}
+                      />
+                    </TableCell>
+                  <TableCell>{(record.employeeName || record.employee_name || record.employee?.name || 'Unknown')}</TableCell>
+                  <TableCell>{record.date || 'N/A'}</TableCell>
+                  <TableCell>{formatTime(record.checkInTime)}</TableCell>
+                    <TableCell>{formatTime(record.checkOutTime)}</TableCell>
+                  <TableCell>{record.status || 'N/A'}</TableCell>
+                  <TableCell>{formatHours(record.workingDuration)}</TableCell>
+                  <TableCell>
+                    {record.id ? (
+                      <Button 
+                        variant="destructive" 
+                        size="sm" 
+                        onClick={() => {
+                          console.log('Delete Button Clicked for Record:', record.id);
+                          handleDeleteSingleRecord(record.id);
+                        }}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    ) : (
+                      <span>No Action</span>
+                    )}
+                  </TableCell>
+                  </TableRow>
+              );
+            }).filter(Boolean) // Remove any null entries
+              )}
+            </TableBody>
+          </Table>
+
+          <div className="p-4 text-sm text-gray-500">
+            {selectedRecords.length > 0 && (
+              <p>{selectedRecords.length} record(s) selected</p>
+            )}
+          </div>
     </div>
   );
 } 
