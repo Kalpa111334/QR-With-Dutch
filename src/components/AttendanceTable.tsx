@@ -376,31 +376,61 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
 
   const handleDelete = async (id: string) => {
     try {
-      // Perform deletion using the utility function
-      const result = await deleteAttendance([id]);
+      const result = await Swal.fire({
+        title: 'Delete Attendance Record',
+        html: `
+          <div class="text-center">
+            <p>Are you sure you want to delete this attendance record?</p>
+            <p class="text-red-600 mt-2">This action cannot be undone!</p>
+          </div>
+        `,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Yes, Delete',
+        cancelButtonText: 'Cancel',
+        showLoaderOnConfirm: true,
+        preConfirm: async () => {
+          try {
+            const deleteResult = await deleteAttendance([id]);
+            if (!deleteResult.success) {
+              throw new Error(deleteResult.error);
+            }
+            return deleteResult;
+          } catch (error) {
+            Swal.showValidationMessage(
+              error instanceof Error ? error.message : 'Failed to delete record'
+            );
+          }
+        },
+        allowOutsideClick: () => !Swal.isLoading()
+      });
 
-      if (result.success) {
-        // Update the local state by filtering out the deleted record
+      if (result.isConfirmed && result.value.success) {
+        // Remove the deleted record from the local state
         setRecords(prevRecords => prevRecords.filter(record => record.id !== id));
         
-        // Also update selected records if the deleted record was selected
+        // Remove from selected records if it was selected
         setSelectedRecords(prev => prev.filter(recordId => recordId !== id));
 
-        // Show success toast
+        // Show success message
         toast({
-          title: "Record Deleted",
-          description: "Successfully deleted 1 attendance record(s).",
+          title: 'Record Deleted',
+          description: 'The attendance record has been successfully deleted.',
+          variant: 'default'
         });
-      } else {
-        // Handle deletion failure
-        throw new Error(result.error || 'Failed to delete record');
+
+        // Refresh the data to ensure consistency
+        const updatedRecords = await getAttendanceRecords();
+        setRecords(updatedRecords);
       }
     } catch (error) {
-      console.error('Deletion error:', error);
+      console.error('Delete operation failed:', error);
       toast({
-        title: "Deletion Failed",
-        description: error instanceof Error ? error.message : "An unexpected error occurred",
-        variant: "destructive",
+        title: 'Deletion Failed',
+        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        variant: 'destructive'
       });
     }
   };
@@ -415,56 +445,65 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
       return;
     }
 
-    const result = await Swal.fire({
-      title: 'Delete Selected Attendance Records?',
-      html: `
-        <div class="text-center">
-          <p>You are about to permanently delete <strong>${selectedRecords.length}</strong> attendance record(s).</p>
-          <p class="text-red-600 mt-2">This action cannot be undone!</p>
-        </div>
-      `,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#d33',
-      cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Yes, Delete Permanently',
-      cancelButtonText: 'Cancel'
-    });
+    try {
+      const result = await Swal.fire({
+        title: 'Delete Selected Records',
+        html: `
+          <div class="text-center">
+            <p>You are about to delete <strong>${selectedRecords.length}</strong> attendance record(s).</p>
+            <p class="text-red-600 mt-2">This action cannot be undone!</p>
+          </div>
+        `,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Yes, Delete All',
+        cancelButtonText: 'Cancel',
+        showLoaderOnConfirm: true,
+        preConfirm: async () => {
+          try {
+            const deleteResult = await deleteAttendance(selectedRecords);
+            if (!deleteResult.success) {
+              throw new Error(deleteResult.error);
+            }
+            return deleteResult;
+          } catch (error) {
+            Swal.showValidationMessage(
+              error instanceof Error ? error.message : 'Failed to delete records'
+            );
+          }
+        },
+        allowOutsideClick: () => !Swal.isLoading()
+      });
 
-    if (result.isConfirmed) {
-      try {
-        const { success, deletedCount, error } = await deleteAttendance(selectedRecords);
-
-        if (success) {
-          // Update the local state by filtering out all deleted records
-          setRecords(prevRecords => 
-            prevRecords.filter(record => !selectedRecords.includes(record.id))
-          );
-
-          // Clear selected records
-          setSelectedRecords([]);
-
-          toast({
-            title: 'Records Deleted',
-            description: `Successfully deleted ${deletedCount} attendance record(s).`,
-            variant: 'default'
-          });
-        } else {
-          toast({
-            title: 'Deletion Failed',
-            description: error || 'Failed to delete records. Please try again.',
-            variant: 'destructive'
-          });
-        }
-      } catch (error) {
-        console.error('Bulk delete error:', error);
+      if (result.isConfirmed && result.value.success) {
+        // Remove deleted records from the local state
+        setRecords(prevRecords => 
+          prevRecords.filter(record => !selectedRecords.includes(record.id))
+        );
         
+        // Clear selected records
+        setSelectedRecords([]);
+
+        // Show success message
         toast({
-          title: 'Unexpected Error',
-          description: 'An unexpected error occurred while deleting records.',
-          variant: 'destructive'
+          title: 'Records Deleted',
+          description: `Successfully deleted ${result.value.deletedCount} attendance record(s).`,
+          variant: 'default'
         });
+
+        // Refresh the data to ensure consistency
+        const updatedRecords = await getAttendanceRecords();
+        setRecords(updatedRecords);
       }
+    } catch (error) {
+      console.error('Bulk delete operation failed:', error);
+      toast({
+        title: 'Deletion Failed',
+        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -575,10 +614,10 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                   variant="destructive"
                   size="sm"
                   onClick={handleBulkDelete}
-                  className="ml-2"
+                  className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white"
                 >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Selected
+                  <Trash2 className="h-4 w-4" />
+                  Delete Selected ({selectedRecords.length})
                 </Button>
               )}
             </div>
@@ -760,24 +799,12 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                       </TableCell>
                       <TableCell>
                         <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            Swal.fire({
-                              title: 'Are you sure?',
-                              text: 'You will not be able to recover this record!',
-                              icon: 'warning',
-                              showCancelButton: true,
-                              confirmButtonText: 'Yes, delete it!',
-                              cancelButtonText: 'Cancel'
-                            }).then((result) => {
-                              if (result.isConfirmed) {
-                                handleDelete(record.id);
-                              }
-                            });
-                          }}
-                          className="text-red-600 hover:text-red-800"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(record.id)}
+                          className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white"
                         >
-                          <Trash2 className="mr-2 h-4 w-4" />
+                          <Trash2 className="h-4 w-4" />
                           Delete
                         </Button>
                       </TableCell>

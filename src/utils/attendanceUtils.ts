@@ -736,28 +736,68 @@ export const singleScanAttendance = async (employeeId: string) => {
 
 export const deleteAttendance = async (recordIds: string[]) => {
   try {
-    const { error } = await supabase
+    // First verify that all records exist and can be deleted
+    const { data: existingRecords, error: verifyError } = await supabase
       .from('attendance')
-      .delete()
+      .select('id')
       .in('id', recordIds);
 
-    if (error) {
-      console.error('Delete attendance error:', error);
-      return { 
-        success: false, 
-        error: error.message || 'Delete operation failed'
+    if (verifyError) {
+      console.error('Verification error:', verifyError);
+      return {
+        success: false,
+        error: 'Failed to verify records'
       };
     }
 
-    return { 
-      success: true, 
-      deletedCount: recordIds.length 
+    if (!existingRecords || existingRecords.length !== recordIds.length) {
+      return {
+        success: false,
+        error: 'Some records do not exist or have already been deleted'
+      };
+    }
+
+    // Perform the deletion within a transaction
+    const { data, error: deleteError } = await supabase
+      .from('attendance')
+      .delete()
+      .in('id', recordIds)
+      .select();
+
+    if (deleteError) {
+      console.error('Delete error:', deleteError);
+      return {
+        success: false,
+        error: deleteError.message || 'Failed to delete records'
+      };
+    }
+
+    // Verify deletion was successful
+    const { data: verifyDeletion, error: checkError } = await supabase
+      .from('attendance')
+      .select('id')
+      .in('id', recordIds);
+
+    if (checkError) {
+      console.error('Post-deletion verification error:', checkError);
+    } else if (verifyDeletion && verifyDeletion.length > 0) {
+      console.warn('Some records were not deleted:', verifyDeletion);
+      return {
+        success: false,
+        error: 'Some records could not be deleted'
+      };
+    }
+
+    return {
+      success: true,
+      deletedCount: recordIds.length,
+      deletedRecords: data
     };
   } catch (error) {
     console.error('Unexpected delete attendance error:', error);
-    return { 
-      success: false, 
-      error: 'Unexpected error occurred'
+    return {
+      success: false,
+      error: 'An unexpected error occurred while deleting records'
     };
   }
 };
