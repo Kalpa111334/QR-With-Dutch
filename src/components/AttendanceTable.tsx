@@ -380,13 +380,14 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
       const result = await deleteAttendance([id]);
 
       if (result.success) {
-        // Remove the record from local state
-        setRecords(prevRecords => prevRecords.filter(record => record.id !== id));
+        // Fetch fresh data after deletion
+        const updatedRecords = await getAttendanceRecords();
+        setRecords(updatedRecords);
 
         // Show success toast
         toast({
           title: "Record Deleted",
-          description: `Attendance record from ${new Date(record.date).toLocaleDateString()} has been successfully deleted.`,
+          description: "Successfully deleted 1 attendance record(s).",
         });
       } else {
         // Handle deletion failure
@@ -433,10 +434,8 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
         const { success, deletedCount, error } = await deleteAttendance(selectedRecords);
 
         if (success) {
-          // Remove deleted records from the local state
-          const updatedRecords = records.filter(
-            (attendanceRecord) => !selectedRecords.includes(attendanceRecord.id)
-          );
+          // Fetch fresh data after deletion
+          const updatedRecords = await getAttendanceRecords();
           setRecords(updatedRecords);
 
           // Clear selected records
