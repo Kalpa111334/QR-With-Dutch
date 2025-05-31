@@ -736,14 +736,53 @@ export const singleScanAttendance = async (employeeId: string) => {
 
 export const deleteAttendance = async (recordIds: string[]) => {
   try {
-    const { data, error } = await supabase
+    // First, verify the records exist
+    const { data: existingRecords, error: checkError } = await supabase
+      .from('attendance')
+      .select('id')
+      .in('id', recordIds);
+
+    if (checkError) {
+      console.error('Error checking records:', checkError);
+      return { success: false, error: checkError.message };
+    }
+
+    // If not all records were found, return error
+    if (!existingRecords || existingRecords.length !== recordIds.length) {
+      return { 
+        success: false, 
+        error: 'Some records could not be found' 
+      };
+    }
+
+    // Perform the deletion
+    const { error: deleteError } = await supabase
       .from('attendance')
       .delete()
       .in('id', recordIds);
 
-    if (error) {
-      console.error('Delete attendance error:', error);
-      return { success: false, error: error.message };
+    if (deleteError) {
+      console.error('Delete attendance error:', deleteError);
+      return { success: false, error: deleteError.message };
+    }
+
+    // Verify deletion was successful
+    const { data: verifyRecords, error: verifyError } = await supabase
+      .from('attendance')
+      .select('id')
+      .in('id', recordIds);
+
+    if (verifyError) {
+      console.error('Error verifying deletion:', verifyError);
+      return { success: false, error: verifyError.message };
+    }
+
+    // If any records still exist, deletion wasn't complete
+    if (verifyRecords && verifyRecords.length > 0) {
+      return { 
+        success: false, 
+        error: 'Records could not be deleted. Please try again.' 
+      };
     }
 
     return { 
