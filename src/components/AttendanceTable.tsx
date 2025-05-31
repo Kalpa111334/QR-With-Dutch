@@ -380,9 +380,11 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
       const result = await deleteAttendance([id]);
 
       if (result.success) {
-        // Fetch fresh data after deletion
-        const updatedRecords = await getAttendanceRecords();
-        setRecords(updatedRecords);
+        // Update the local state by filtering out the deleted record
+        setRecords(prevRecords => prevRecords.filter(record => record.id !== id));
+        
+        // Also update selected records if the deleted record was selected
+        setSelectedRecords(prev => prev.filter(recordId => recordId !== id));
 
         // Show success toast
         toast({
@@ -434,9 +436,10 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
         const { success, deletedCount, error } = await deleteAttendance(selectedRecords);
 
         if (success) {
-          // Fetch fresh data after deletion
-          const updatedRecords = await getAttendanceRecords();
-          setRecords(updatedRecords);
+          // Update the local state by filtering out all deleted records
+          setRecords(prevRecords => 
+            prevRecords.filter(record => !selectedRecords.includes(record.id))
+          );
 
           // Clear selected records
           setSelectedRecords([]);
