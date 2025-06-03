@@ -247,11 +247,30 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
 
   const handleSelectAll = (checked: boolean | 'indeterminate') => {
     if (checked === true) {
-      setSelectedRecords(records.map(record => record.id));
+      // Select all filtered records instead of all records
+      const filteredIds = filteredRecords.map(record => record.id);
+      setSelectedRecords(prev => {
+        // Combine previously selected records that are not in the current filter
+        // with newly selected filtered records
+        const prevSelected = prev.filter(id => 
+          !records.find(r => r.id === id) || // Keep records that don't exist in the current view
+          !filteredRecords.find(r => r.id === id) // Keep records that aren't in the current filter
+        );
+        return [...new Set([...prevSelected, ...filteredIds])];
+      });
     } else {
-      setSelectedRecords([]);
+      // Deselect only the filtered records
+      setSelectedRecords(prev => 
+        prev.filter(id => !filteredRecords.find(r => r.id === id))
+      );
     }
   };
+
+  // Update the checkbox state to reflect partial selection
+  const isAllFilteredSelected = filteredRecords.length > 0 && 
+    filteredRecords.every(record => selectedRecords.includes(record.id));
+  const isPartiallySelected = !isAllFilteredSelected && 
+    filteredRecords.some(record => selectedRecords.includes(record.id));
 
   const formatRecordsForWhatsApp = (selectedRecords: Attendance[]) => {
     // Get the date range for the report
@@ -262,7 +281,17 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
       ? `for ${startDate.toLocaleDateString()}` 
       : `from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`;
 
-    // Calculate summary statistics
+    // Group records by department
+    const recordsByDept = selectedRecords.reduce((acc, record) => {
+      const dept = record.employee?.department || 'Unassigned';
+      if (!acc[dept]) {
+        acc[dept] = [];
+      }
+      acc[dept].push(record);
+      return acc;
+    }, {} as { [key: string]: Attendance[] });
+
+    // Calculate overall summary statistics
     const totalEmployees = selectedRecords.length;
     const onTime = selectedRecords.filter(r => {
       const checkIn = new Date(r.check_in_time);
@@ -274,63 +303,109 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     const checkedOut = selectedRecords.filter(r => r.status === 'checked-out').length;
     const stillWorking = selectedRecords.filter(r => r.status === 'present').length;
 
-    // Create header with summary
-    const header = `🏢 *ATTENDANCE REPORT ${dateRange.toUpperCase()}*
+    // Create header with overall summary
+    const header = `*ATTENDANCE REPORT ${dateRange.toUpperCase()}*
 ━━━━━━━━━━━━━━━━━━━━━
-📊 *SUMMARY*
-• Total Records: ${totalEmployees}
+📊 *OVERALL SUMMARY*
+• Total Employees: ${totalEmployees}
 • On Time: ${onTime} (${((onTime/totalEmployees)*100).toFixed(1)}%) ✅
 • Late: ${late} (${((late/totalEmployees)*100).toFixed(1)}%) ⚠️
 • Checked Out: ${checkedOut} 🏃
 • Still Working: ${stillWorking} 💼
 ━━━━━━━━━━━━━━━━━━━━━\n`;
 
-    // Format individual records with more detail
-    const records = selectedRecords.map(record => {
-      const checkIn = new Date(record.check_in_time);
-      const workStart = new Date(checkIn);
-      workStart.setHours(9, 0, 0, 0);
-      
-      let lateStatus = '';
-      if (checkIn > workStart) {
-        const lateMinutes = Math.round((checkIn.getTime() - workStart.getTime()) / (1000 * 60));
-        const hours = Math.floor(lateMinutes / 60);
-        const minutes = lateMinutes % 60;
+    // Format department-wise records
+    const departmentRecords = Object.entries(recordsByDept).map(([dept, records]) => {
+      // Calculate department statistics
+      const deptTotal = records.length;
+      const deptOnTime = records.filter(r => {
+        const checkIn = new Date(r.check_in_time);
+        const workStart = new Date(checkIn);
+        workStart.setHours(9, 0, 0, 0);
+        return checkIn <= workStart;
+      }).length;
+      const deptLate = deptTotal - deptOnTime;
+      const deptCheckedOut = records.filter(r => r.status === 'checked-out').length;
+      const deptWorking = records.filter(r => r.status === 'present').length;
+
+      // Department header with statistics
+      const deptHeader = `\n🏛️ *DEPARTMENT: ${dept.toUpperCase()}*
+📈 Department Statistics:
+• Total Employees: ${deptTotal}
+• On Time: ${deptOnTime} (${((deptOnTime/deptTotal)*100).toFixed(1)}%)
+• Late: ${deptLate} (${((deptLate/deptTotal)*100).toFixed(1)}%)
+• Checked Out: ${deptCheckedOut}
+• Still Working: ${deptWorking}
+──────────────────────`;
+
+      // Format individual employee records for this department
+      const employeeRecords = records.map(record => {
+        const checkIn = new Date(record.check_in_time);
+        const workStart = new Date(checkIn);
+        workStart.setHours(9, 0, 0, 0);
         
-        if (hours > 0) {
-          lateStatus = `⚠️ *${hours}h ${minutes}m late*`;
+        let lateStatus = '';
+        let lateMinutes = 0;
+        if (checkIn > workStart) {
+          lateMinutes = Math.round((checkIn.getTime() - workStart.getTime()) / (1000 * 60));
+          const hours = Math.floor(lateMinutes / 60);
+          const minutes = lateMinutes % 60;
+          
+          if (hours > 0) {
+            lateStatus = `⚠️ *${hours}h ${minutes}m late*`;
+          } else {
+            lateStatus = `⚠️ *${minutes}m late*`;
+          }
         } else {
-          lateStatus = `⚠️ *${minutes}m late*`;
+          lateStatus = '✅ *On Time*';
         }
-      } else {
-        lateStatus = '✅ *On Time*';
-      }
 
-      // Calculate working duration if checked out
-      let workingTime = 'Still Working';
-      if (record.check_out_time) {
-        const checkOut = new Date(record.check_out_time);
-        const hours = Math.floor((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60));
-        const minutes = Math.floor(((checkOut.getTime() - checkIn.getTime()) / (1000 * 60)) % 60);
-        workingTime = `${hours}h ${minutes}m`;
-      }
+        // Calculate working duration
+        let workingTime = 'Still Working';
+        let workingHours = 0;
+        if (record.check_out_time) {
+          const checkOut = new Date(record.check_out_time);
+          workingHours = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
+          const hours = Math.floor(workingHours);
+          const minutes = Math.floor((workingHours - hours) * 60);
+          workingTime = `${hours}h ${minutes}m`;
+        }
 
-      return `👤 *${record.employee_name}*
-📅 Date: ${new Date(record.date).toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      })}
+        // Status emoji based on working hours and late minutes
+        let statusEmoji = '🟡'; // Default - Still Working
+        if (record.check_out_time) {
+          if (workingHours >= 9) {
+            statusEmoji = '🟢'; // Full day
+          } else if (workingHours >= 4) {
+            statusEmoji = '🟠'; // Half day
+          } else {
+            statusEmoji = '🔴'; // Less than half day
+          }
+        }
+        if (lateMinutes > 120) {
+          statusEmoji = '🔴'; // Very late
+        }
+
+        return `${statusEmoji} *${record.employee_name}*
 ⏰ Check In: ${formatTime(record.check_in_time)}
 ${record.check_out_time ? `🏃 Check Out: ${formatTime(record.check_out_time)}` : '💼 Status: Still Working'}
 ${lateStatus}
 ⏱️ Duration: ${workingTime}
-${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Progress'}`;
-    }).join('\n\n───────────────\n\n');
+📝 Status: ${record.status === 'checked-out' ? 'Shift Completed' : 'Shift In Progress'}
+${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
+      }).join('\n───────────\n');
 
-    // Add footer with generation time
+      return `${deptHeader}\n\n${employeeRecords}`;
+    }).join('\n\n━━━━━━━━━━━━━━━━━━━━━\n');
+
+    // Add footer with generation time and legend
     const footer = `\n━━━━━━━━━━━━━━━━━━━━━
+📋 *STATUS LEGEND*
+🟢 Full Day (9+ hours)
+🟠 Half Day (4-9 hours)
+🔴 Critical (Less than 4 hours/Very Late)
+🟡 Still Working
+
 🤖 Generated by QR Check-In System
 🕒 Generated on: ${new Date().toLocaleString('en-US', { 
       weekday: 'long', 
@@ -339,11 +414,12 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit'
+      second: '2-digit',
+      hour12: true
     })}
 📱 For more details, check the dashboard`;
 
-    return `${header}${records}${footer}`;
+    return `${header}${departmentRecords}${footer}`;
   };
 
   const handleShare = async () => {
@@ -534,17 +610,17 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle className="flex justify-between items-center">
+        <CardTitle className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <span>Attendance Records</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
             <Dialog open={showAbsentDialog} onOpenChange={setShowAbsentDialog}>
               <DialogTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" className="w-full sm:w-auto">
                   <UserX className="mr-2 h-4 w-4" />
                   Absent Report
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-4xl">
+              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Absent Employees Report</DialogTitle>
                   <DialogDescription>
@@ -554,18 +630,26 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                 <AbsentEmployeeDownload />
               </DialogContent>
             </Dialog>
-            <Button onClick={exportToCsv} disabled={filteredRecords.length === 0}>
+            <Button 
+              onClick={exportToCsv} 
+              disabled={filteredRecords.length === 0}
+              className="w-full sm:w-auto"
+            >
               <Download className="mr-2 h-4 w-4" />
               Export to CSV
             </Button>
-            {filteredRecords.length > 0 && exportToPdf()}
+            {filteredRecords.length > 0 && (
+              <div className="w-full sm:w-auto">
+                {exportToPdf()}
+              </div>
+            )}
           </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="w-full">
               <label className="text-sm font-medium">Start Date</label>
               <div className="flex mt-1">
                 <Calendar className="mr-2 h-4 w-4 mt-3" />
@@ -574,11 +658,12 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   max={today}
+                  className="w-full"
                 />
               </div>
             </div>
             
-            <div>
+            <div className="w-full">
               <label className="text-sm font-medium">End Date</label>
               <div className="flex mt-1">
                 <Calendar className="mr-2 h-4 w-4 mt-3" />
@@ -588,17 +673,18 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
                   onChange={(e) => setEndDate(e.target.value)}
                   min={startDate}
                   max={today}
+                  className="w-full"
                 />
               </div>
             </div>
             
-            <div>
+            <div className="w-full">
               <label className="text-sm font-medium">Department</label>
               <Select
                 value={department}
                 onValueChange={setDepartment}
               >
-                <SelectTrigger className="mt-1">
+                <SelectTrigger className="mt-1 w-full">
                   <SelectValue placeholder="Select department" />
                 </SelectTrigger>
                 <SelectContent>
@@ -611,14 +697,14 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
               </Select>
             </div>
             
-            <div>
+            <div className="w-full">
               <label className="text-sm font-medium">Search</label>
               <div className="relative mt-1">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="search"
                   placeholder="Search employee..."
-                  className="pl-8"
+                  className="pl-8 w-full"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -626,32 +712,36 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
             </div>
           </div>
           
-          <div className="flex justify-between items-center mb-4">
-            <div className="flex items-center space-x-2">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+            <div className="flex items-center space-x-2 w-full sm:w-auto">
               <Checkbox 
-                checked={selectedRecords.length === records.length}
+                checked={isPartiallySelected ? "indeterminate" : isAllFilteredSelected}
                 onCheckedChange={handleSelectAll}
-                aria-label="Select all records"
+                aria-label="Select all filtered records"
+                className="translate-y-[2px]"
               />
               <span className="text-sm text-gray-500">
-                {selectedRecords.length} records selected
+                {selectedRecords.length} records selected 
+                {filteredRecords.length !== records.length && 
+                  ` (${filteredRecords.length} in current view)`
+                }
               </span>
               {selectedRecords.length > 0 && (
                 <Button
                   variant="destructive"
                   size="sm"
                   onClick={handleBulkDelete}
-                  className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white"
+                  className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white ml-2"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Delete Selected ({selectedRecords.length})
+                  Delete ({selectedRecords.length})
                 </Button>
               )}
             </div>
             <Button
               onClick={handleShare}
               disabled={sharing || selectedRecords.length === 0}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto"
             >
               {sharing ? (
                 <>
@@ -667,179 +757,209 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
             </Button>
           </div>
           
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[50px]">Select</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Employee Name</TableHead>
-                  <TableHead>Check In</TableHead>
-                  <TableHead>Check Out</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>
-                    <div className="flex items-center">
-                      <Clock className="mr-1 h-4 w-4" />
-                      Late Duration
-                    </div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="flex items-center">
-                      <Timer className="mr-1 h-4 w-4" />
-                      Working Time
-                    </div>
-                  </TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center h-24">
-                      <div className="flex justify-center">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : filteredRecords.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center h-24">
-                      No attendance records found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredRecords.map((record) => (
-                    <TableRow key={record.id}>
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedRecords.includes(record.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              handleSelectRecord(record.id);
-                            } else {
-                              setSelectedRecords(prev => prev.filter(id => id !== record.id));
-                            }
-                          }}
-                          aria-label={`Select record for ${record.employee_name}`}
-                        />
-                      </TableCell>
-                      <TableCell>{new Date(record.date).toLocaleDateString()}</TableCell>
-                      <TableCell className="font-medium">{record.employee_name}</TableCell>
-                      <TableCell>{formatTime(record.check_in_time)}</TableCell>
-                      <TableCell>
-                        {record.check_out_time ? formatTime(record.check_out_time) : 'Not Checked Out'}
-                      </TableCell>
-                      <TableCell>
-                        <Badge 
-                          variant={
-                            record.status === 'present' 
-                              ? 'default'
-                              : record.status === 'checked-out'
-                                ? 'secondary'
-                              : record.status === 'checked-out-overtime'
-                                ? 'secondary'
-                              : record.status === 'half-day'
-                                ? 'outline'
-                              : record.status === 'early-departure'
-                                ? 'outline'
-                                : 'destructive'
-                          }
-                        >
-                          {record.status === 'checked-out-overtime' 
-                            ? 'Overtime'
-                            : record.status === 'early-departure'
-                              ? 'Early Leave'
-                              : record.status.split('-').map(word => 
-                                  word.charAt(0).toUpperCase() + word.slice(1)
-                                ).join(' ')
-                          }
-                        </Badge>
-                        {typeof record.overtime === 'number' && record.overtime > 0 && (
-                          <div className="text-xs text-blue-600 mt-1">
-                            +{record.overtime.toFixed(1)}h overtime
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {record.check_in_time ? (
-                          <div>
-                            {(() => {
-                              const checkIn = new Date(record.check_in_time);
-                              const workStart = new Date(checkIn);
-                              workStart.setHours(9, 0, 0, 0);
-                              
-                              if (checkIn > workStart) {
-                                const lateMinutes = Math.round((checkIn.getTime() - workStart.getTime()) / (1000 * 60));
-                                const hours = Math.floor(lateMinutes / 60);
-                                const minutes = lateMinutes % 60;
-                                
-                                let lateText = '';
-                                if (hours > 0) {
-                                  lateText = `${hours}h ${minutes}m late`;
-                                } else {
-                                  lateText = `${minutes}m late`;
-                                }
-                                
-                                return (
-                                  <div>
-                                    <div className="text-red-600 font-medium">
-                                      {lateText}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      Expected: 9:00 AM
-                                    </div>
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <div className="text-green-600 font-medium">
-                                    On time
-                                  </div>
-                                );
-                              }
-                            })()}
-                          </div>
-                        ) : '-'}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <div className={`font-medium whitespace-nowrap ${
-                            record.status === 'checked-out-overtime'
-                              ? 'text-blue-600'
-                              : record.status === 'half-day' || record.status === 'early-departure'
-                                ? 'text-yellow-600'
-                                : record.status === 'present'
-                                  ? 'text-green-600'
-                                : ''
-                          }`}>
-                            {record.working_duration}
-                          </div>
-                          <div className="text-xs text-muted-foreground whitespace-nowrap">
-                            {record.full_time_range}
-                            {record.status === 'early-departure' && (
-                              <span className="text-yellow-600 ml-1">
-                                (Early Leave)
-                              </span>
-                            )}
-                          </div>
+          <div className="rounded-md border">
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <div className="inline-block min-w-full align-middle">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[50px] sticky left-0 bg-background">Select</TableHead>
+                      <TableHead className="min-w-[100px]">Date</TableHead>
+                      <TableHead className="min-w-[150px]">Employee Name</TableHead>
+                      <TableHead className="min-w-[160px]">Check In</TableHead>
+                      <TableHead className="min-w-[160px]">Check Out</TableHead>
+                      <TableHead className="min-w-[120px]">Status</TableHead>
+                      <TableHead className="min-w-[140px]">
+                        <div className="flex items-center">
+                          <Clock className="mr-1 h-4 w-4" />
+                          <span className="hidden sm:inline">Late Duration</span>
+                          <span className="sm:hidden">Late</span>
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDelete(record.id)}
-                          className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete
-                        </Button>
-                      </TableCell>
+                      </TableHead>
+                      <TableHead className="min-w-[140px]">
+                        <div className="flex items-center">
+                          <Timer className="mr-1 h-4 w-4" />
+                          <span className="hidden sm:inline">Working Time</span>
+                          <span className="sm:hidden">Time</span>
+                        </div>
+                      </TableHead>
+                      <TableHead className="min-w-[100px] sticky right-0 bg-background">Actions</TableHead>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center h-24">
+                          <div className="flex justify-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredRecords.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center h-24">
+                          No attendance records found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredRecords.map((record) => (
+                        <TableRow key={record.id} className="group">
+                          <TableCell className="sticky left-0 bg-background group-hover:bg-muted/50">
+                            <Checkbox
+                              checked={selectedRecords.includes(record.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  handleSelectRecord(record.id);
+                                } else {
+                                  setSelectedRecords(prev => prev.filter(id => id !== record.id));
+                                }
+                              }}
+                              aria-label={`Select record for ${record.employee_name}`}
+                            />
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1">
+                              <div className="font-medium">{new Date(record.date).toLocaleDateString()}</div>
+                              <div className="text-sm text-muted-foreground hidden sm:block">
+                                {new Date(record.date).toLocaleDateString('en-US', { weekday: 'short' })}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="max-w-[150px] sm:max-w-[200px] truncate font-medium">
+                              {record.employee_name}
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1">
+                              <div>{formatTime(record.check_in_time)}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1">
+                              <div>
+                                {record.check_out_time ? formatTime(record.check_out_time) : (
+                                  <span className="text-muted-foreground">Not Checked Out</span>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <Badge 
+                                variant={
+                                  record.status === 'present' 
+                                    ? 'default'
+                                    : record.status === 'checked-out'
+                                      ? 'secondary'
+                                    : record.status === 'checked-out-overtime'
+                                      ? 'secondary'
+                                    : record.status === 'half-day'
+                                      ? 'outline'
+                                    : record.status === 'early-departure'
+                                      ? 'outline'
+                                      : 'destructive'
+                                }
+                                className="w-fit whitespace-nowrap"
+                              >
+                                {record.status === 'checked-out-overtime' 
+                                  ? 'Overtime'
+                                  : record.status === 'early-departure'
+                                    ? 'Early Leave'
+                                    : record.status.split('-').map(word => 
+                                        word.charAt(0).toUpperCase() + word.slice(1)
+                                      ).join(' ')
+                                }
+                              </Badge>
+                              {typeof record.overtime === 'number' && record.overtime > 0 && (
+                                <div className="text-xs text-blue-600 whitespace-nowrap">
+                                  +{record.overtime.toFixed(1)}h overtime
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {record.check_in_time ? (
+                              <div>
+                                {(() => {
+                                  const checkIn = new Date(record.check_in_time);
+                                  const workStart = new Date(checkIn);
+                                  workStart.setHours(9, 0, 0, 0);
+                                  
+                                  if (checkIn > workStart) {
+                                    const lateMinutes = Math.round((checkIn.getTime() - workStart.getTime()) / (1000 * 60));
+                                    const hours = Math.floor(lateMinutes / 60);
+                                    const minutes = lateMinutes % 60;
+                                    
+                                    let lateText = '';
+                                    if (hours > 0) {
+                                      lateText = `${hours}h ${minutes}m late`;
+                                    } else {
+                                      lateText = `${minutes}m late`;
+                                    }
+                                    
+                                    return (
+                                      <div>
+                                        <div className="text-red-600 font-medium whitespace-nowrap">
+                                          {lateText}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground whitespace-nowrap hidden sm:block">
+                                          Expected: 9:00 AM
+                                        </div>
+                                      </div>
+                                    );
+                                  } else {
+                                    return (
+                                      <div className="text-green-600 font-medium whitespace-nowrap">
+                                        On time
+                                      </div>
+                                    );
+                                  }
+                                })()}
+                              </div>
+                            ) : '-'}
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <div className={`font-medium whitespace-nowrap ${
+                                record.status === 'checked-out-overtime'
+                                  ? 'text-blue-600'
+                                  : record.status === 'half-day' || record.status === 'early-departure'
+                                    ? 'text-yellow-600'
+                                    : record.status === 'present'
+                                      ? 'text-green-600'
+                                    : ''
+                              }`}>
+                                {record.working_duration}
+                              </div>
+                              <div className="text-xs text-muted-foreground whitespace-nowrap hidden sm:block">
+                                {record.full_time_range}
+                                {record.status === 'early-departure' && (
+                                  <span className="text-yellow-600 ml-1">
+                                    (Early)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="sticky right-0 bg-background">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDelete(record.id)}
+                              className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="hidden sm:inline">Delete</span>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
           </div>
         </div>
       </CardContent>
