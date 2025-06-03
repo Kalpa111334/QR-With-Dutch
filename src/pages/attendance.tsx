@@ -219,45 +219,17 @@ export default function Attendance() {
       const employeeId = extractEmployeeId(data);
       
       if (!employeeId) {
-        throw new Error('Invalid QR code format. Please scan a valid employee QR code.');
+        throw new Error('Invalid QR code: Could not extract employee ID');
       }
 
-      // Check if the employee exists and is active
-      const { data: employee, error: employeeError } = await supabase
-        .from('employees')
-        .select('id, name, status')
-        .eq('id', employeeId)
-        .single();
+      // Perform ONLY check-in action
+      const attendanceResult = await recordAttendanceCheckIn(employeeId);
 
-      if (employeeError || !employee) {
-        throw new Error('Employee not found. Please verify your QR code.');
-      }
-
-      if (employee.status !== 'active') {
-        throw new Error('Employee account is not active. Please contact administrator.');
-      }
-
-      // Determine next attendance action
-      const nextAction = await determineNextAttendanceAction(employeeId);
-      
-      if (nextAction === 'check-in') {
-        // Perform check-in
-        const attendanceResult = await recordAttendanceCheckIn(employeeId);
-        await displayAttendanceSuccessMessage(attendanceResult, 'check-in');
-      } else {
-        throw new Error('You have already checked in. Please use the check-out option at the end of your day.');
-      }
+      // Display success message for check-in
+      await displayAttendanceSuccessMessage(attendanceResult, 'check-in');
 
       // Update last scanned data
       setLastScannedData(employeeId);
-
-      // Show success toast
-      toast({
-        title: 'Success',
-        description: `Attendance marked successfully for ${employee.name}`,
-        variant: 'default'
-      });
-
     } catch (error) {
       console.error('Attendance Scan Error:', error);
       
@@ -265,32 +237,14 @@ export default function Attendance() {
         ? error.message 
         : 'Failed to process attendance';
       
-      const isKnownError = errorMessage.includes('already checked in') || 
-                          errorMessage.includes('not active') ||
-                          errorMessage.includes('not found') ||
-                          errorMessage.includes('Invalid QR code');
+      const alreadyCheckedIn = errorMessage.includes('You have already checked in today') || 
+                               errorMessage.includes('already checked in');
       
       await Swal.fire({
-        icon: isKnownError ? 'info' : 'error',
-        title: isKnownError ? 'Attention Required' : 'Attendance Error',
-        html: `
-          <div class="text-center">
-            <p class="text-lg">${errorMessage}</p>
-            ${!isKnownError ? '<p class="text-sm text-gray-600 mt-2">Please try again or contact administrator if the problem persists.</p>' : ''}
-          </div>
-        `,
-        showConfirmButton: true,
-        confirmButtonText: 'OK',
-        timer: 5000,
-        timerProgressBar: true,
-        background: isKnownError ? '#f0f9ff' : '#fff0f0'
-      });
-
-      // Show error toast
-      toast({
-        title: 'Error',
-        description: errorMessage,
-        variant: 'destructive'
+        icon: alreadyCheckedIn ? 'info' : 'error',
+        title: alreadyCheckedIn ? 'Already Checked In' : 'Attendance Error',
+        text: alreadyCheckedIn ? 'You have already checked in for today. Please check out manually at the end of your day.' : errorMessage,
+        timer: 3000
       });
     } finally {
       setIsLoading(false);

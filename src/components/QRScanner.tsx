@@ -59,18 +59,16 @@ interface QRScannerProps {
     id: string; 
     name?: string; 
     type?: 'check-in' | 'check-out' 
-  }) => Promise<AttendanceResult>;
+  }) => void;
   onError?: (error: Error) => void;
   className?: string;
   mode?: 'attendance' | 'gatepass';
 }
 
 interface AttendanceResult {
+  check_in_time: string;
+  check_out_time?: string;
   action: 'check-in' | 'check-out';
-  employee_name?: string;
-  late_duration?: number;
-  timestamp?: string;
-  status?: string;
 }
 
 interface EmployeeData {
@@ -78,17 +76,6 @@ interface EmployeeData {
   last_name: string;
   id: string;
 }
-
-// Add sound effect functions
-const playSuccessSound = () => {
-  const audio = new Audio('/success.mp3');
-  audio.play().catch(() => {}); // Ignore errors if sound can't play
-};
-
-const playErrorSound = () => {
-  const audio = new Audio('/error.mp3');
-  audio.play().catch(() => {}); // Ignore errors if sound can't play
-};
 
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendance' }) => {
   const webcamRef = useRef<Webcam>(null);
@@ -240,90 +227,107 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
   // Optimized QR processing
   const processQRCode = useCallback(async (qrData: string) => {
     if (!qrData?.trim() || qrData === lastProcessedData.current || processingLock.current) return;
-
+    
     try {
       processingLock.current = true;
       setIsProcessing(true);
       lastProcessedData.current = qrData;
 
-      // Validate QR code format
-      if (!qrData.match(/^[A-Za-z0-9@._-]+$/)) {
-        throw new Error('Invalid QR code format. Please try again.');
+      // Fast employee ID extraction
+      let employeeId = qrData;
+      if (qrData.startsWith('EMP:')) {
+        employeeId = qrData.split(':')[1];
+      } else if (qrData.includes('"id"')) {
+        try {
+          const parsed = JSON.parse(qrData);
+          employeeId = parsed.id;
+        } catch {
+          const uuidMatch = qrData.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+          employeeId = uuidMatch?.[0] || qrData;
+        }
       }
 
-      // Process the QR code with proper type
-      const result = await onScan({
-        id: qrData,
-        type: 'check-in'
-      });
+      if (!employeeId) throw new Error('Invalid QR code format');
 
-      // Play success sound
-      playSuccessSound();
+      // Parallel processing of employee validation and attendance
+      const [employee, result] = await Promise.all([
+        getEmployeeWithCache(employeeId),
+        singleScanAttendance(employeeId) as Promise<AttendanceResult>
+      ]);
 
-      // Speak success message
-      const action = result.action === 'check-in' ? 'checked in' : 'checked out';
-      speak(`Successfully ${action}. Have a great day!`);
+      if (!employee) throw new Error('Employee not found');
 
-      // Show success message with employee name and time
-      const time = new Date().toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      });
+      const isCheckOut = result.action === 'check-out';
+      const timestamp = isCheckOut && result.check_out_time ? result.check_out_time : result.check_in_time;
+      const currentTime = new Date(timestamp).toLocaleTimeString();
+      const fullName = `${employee.first_name} ${employee.last_name}`;
+      
+      // Prepare speech text
+      const speechText = isCheckOut
+        ? `Goodbye ${fullName}. You have successfully checked out at ${currentTime}. Have a great evening!`
+        : `Welcome ${fullName}. You have successfully checked in at ${currentTime}. Have a great day!`;
 
-      await Swal.fire({
-        title: `${result.action === 'check-in' ? 'Check-in' : 'Check-out'} Successful!`,
+      // Speak the message
+      speak(speechText);
+      
+      // Show quick success message
+      Swal.fire({
+        title: isCheckOut ? 'Check-Out Successful!' : 'Check-In Successful!',
         html: `
           <div class="text-center">
-            <p class="text-lg font-semibold mb-2">${result.employee_name || 'Employee'}</p>
-            <p class="text-sm text-gray-600">Time: ${time}</p>
-            ${result.late_duration ? `<p class="text-warning mt-2">Late by ${result.late_duration} minutes</p>` : ''}
+            <h2 class="text-2xl font-bold ${isCheckOut ? 'text-blue-600' : 'text-green-600'} mb-4">
+              ${isCheckOut ? 'Goodbye' : 'Hello'}, ${fullName}!
+            </h2>
+            <p class="text-lg">
+              ${isCheckOut ? 'Checked out' : 'Checked in'} at 
+              <strong>${currentTime}</strong>
+            </p>
           </div>
         `,
         icon: 'success',
         timer: ALERT_DURATION,
         timerProgressBar: true,
         showConfirmButton: false,
-        background: '#f0fff4',
+        background: isCheckOut ? '#f0f9ff' : '#f0fdf4',
         showClass: {
-          popup: 'animate__animated animate__bounceIn animate__faster'
+          popup: 'animate__animated animate__fadeInDown animate__faster'
         },
         hideClass: {
-          popup: 'animate__animated animate__fadeOut animate__faster'
+          popup: 'animate__animated animate__fadeOutUp animate__faster'
         }
       });
+
+      // Quick success sound
+      new Audio('/success.mp3').play().catch(() => {});
+      
+      if (onScan) {
+        onScan({
+          id: employeeId,
+          name: fullName,
+          type: result.action
+        });
+      }
 
     } catch (error) {
       console.error('Attendance recording error:', error);
       
       const errorMessage = error instanceof Error ? error.message : 'Failed to record attendance';
-      const isKnownError = error instanceof Error && (
-        errorMessage.includes('already checked in') ||
-        errorMessage.includes('wait') ||
-        errorMessage.includes('not active') ||
-        errorMessage.includes('not found')
-      );
-
-      // Play error sound
-      playErrorSound();
+      const alreadyCheckedIn = errorMessage.includes('already checked in');
 
       // Speak error message
-      speak(isKnownError ? errorMessage : "Sorry, there was an error recording your attendance. Please try again.");
+      speak(alreadyCheckedIn 
+        ? "You have already checked in today. Please check out instead." 
+        : "Sorry, there was an error recording your attendance. Please try again.");
 
-      // Show error message
-      await Swal.fire({
-        title: isKnownError ? 'Attention Required' : 'Error',
-        html: `
-          <div class="text-center">
-            <p class="text-lg">${errorMessage}</p>
-            ${!isKnownError ? '<p class="text-sm text-gray-600 mt-2">Please try again or contact administrator if the problem persists.</p>' : ''}
-          </div>
-        `,
-        icon: isKnownError ? 'info' : 'error',
+      // Quick error message
+      Swal.fire({
+        title: alreadyCheckedIn ? 'Already Checked In' : 'Error',
+        text: errorMessage,
+        icon: alreadyCheckedIn ? 'info' : 'error',
         timer: ALERT_DURATION,
         timerProgressBar: true,
         showConfirmButton: false,
-        background: isKnownError ? '#f0f9ff' : '#fff0f0',
+        background: alreadyCheckedIn ? '#f0f9ff' : '#fff0f0',
         showClass: {
           popup: 'animate__animated animate__shakeX animate__faster'
         },
@@ -340,7 +344,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
         lastProcessedData.current = null;
       }, PROCESS_TIMEOUT);
     }
-  }, [onScan, speak, playSuccessSound, playErrorSound]);
+  }, [onScan, speak, getEmployeeWithCache]);
 
   // Optimized scanning interval
   useEffect(() => {
