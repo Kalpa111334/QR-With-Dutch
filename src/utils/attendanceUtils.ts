@@ -244,6 +244,10 @@ const generateUniqueTimestamp = async (
 // Main Attendance Recording Function
 export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTimeInfo> => {
   try {
+    if (!qrData) {
+      throw new AttendanceError('Invalid QR code: Empty or missing data');
+    }
+
     // Validate employee and check existing records in parallel
     const [employeeResult, existingCheckInResult] = await Promise.all([
       supabase
@@ -260,13 +264,17 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
         .maybeSingle()
     ]);
 
-    if (employeeResult.error || !employeeResult.data) {
-      throw new AttendanceError('Invalid or unregistered employee');
+    if (employeeResult.error) {
+      throw new AttendanceError('Failed to verify employee information', 'DB_ERROR', employeeResult.error);
+    }
+
+    if (!employeeResult.data) {
+      throw new AttendanceError('Employee not found. Please verify your QR code.');
     }
 
     const employeeData = employeeResult.data;
     if (employeeData.status !== 'active') {
-      throw new AttendanceError('Employee is not currently active');
+      throw new AttendanceError('Employee account is not active. Please contact administrator.');
     }
 
     const now = new Date();
@@ -281,7 +289,7 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
 
       if (minutesPassed < 5) {
         const remainingMinutes = 5 - minutesPassed;
-        throw new AttendanceError(`Please wait ${remainingMinutes} more minute${remainingMinutes > 1 ? 's' : ''} before checking out.`);
+        throw new AttendanceError(`Please wait ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''} before checking out.`);
       }
 
       const checkOutMetrics = calculateAttendanceMetrics(checkInTime, now);
@@ -300,7 +308,7 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
         .single();
 
       if (updateError) {
-        throw new AttendanceError(`Check-out failed: ${updateError.message}`);
+        throw new AttendanceError('Failed to record check-out. Please try again.', 'DB_ERROR', updateError);
       }
 
       // Log check-out asynchronously
@@ -316,7 +324,8 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
         status: 'checked-out',
         sequence_number: updatedRecord.sequence_number,
         late_duration: updatedRecord.minutes_late,
-        action: 'check-out'
+        action: 'check-out',
+        employee_name: employeeData.name
       };
     }
 
@@ -338,7 +347,7 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
       .single();
 
     if (insertError) {
-      throw new AttendanceError(`Check-in failed: ${insertError.message}`);
+      throw new AttendanceError('Failed to record check-in. Please try again.', 'DB_ERROR', insertError);
     }
 
     // Log check-in asynchronously
@@ -352,17 +361,15 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
       status: 'present',
       sequence_number: insertedRecord.sequence_number,
       late_duration: insertedRecord.minutes_late,
-      action: 'check-in'
+      action: 'check-in',
+      employee_name: employeeData.name
     };
 
   } catch (error) {
     if (!(error instanceof AttendanceError)) {
       console.error('Unexpected attendance recording error:', error);
+      throw new AttendanceError('An unexpected error occurred. Please try again later.');
     }
-    // Log error asynchronously
-    attendanceLogger.log('error', qrData, {
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
     throw error;
   }
 };
