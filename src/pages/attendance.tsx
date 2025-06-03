@@ -41,6 +41,7 @@ import {
   deleteAttendance 
 } from '@/utils/attendanceUtils';
 import { format } from 'date-fns';
+import AbsentEmployeeDownload from '@/components/AbsentEmployeeDownload';
 
 // Dynamically import QR Scanner to avoid SSR issues
 const QrScanner = dynamic(() => import('react-qr-scanner'), {
@@ -583,295 +584,296 @@ export default function Attendance() {
   }
 
   return (
-    <div className="container mx-auto p-4">
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Attendance Check-In</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="max-w-md mx-auto">
-              <QrScanner
-                delay={500}
-                onError={handleError}
-                onScan={(data: string | null) => handleScan(data)}
-                style={{ width: '100%', height: '300px' }}
-                constraints={{
-                  facingMode: 'environment',
-                  aspectRatio: 1
-                }}
-                className="border-2 border-gray-300 rounded-lg"
-              />
-              <p className="text-sm text-gray-500 text-center mt-2">
-                Position the QR code within the scanning area
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>WhatsApp Settings</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="whatsapp-share"
-                checked={isWhatsappShareEnabled}
-                onCheckedChange={setIsWhatsappShareEnabled}
-              />
-              <Label htmlFor="whatsapp-share">Enable WhatsApp Sharing</Label>
-            </div>
-
-            {isWhatsappShareEnabled && (
-              <>
-                <div className="space-y-2">
-                  <Label>WhatsApp Number</Label>
-                  <Input
-                    type="tel"
-                    value={whatsappNumber}
-                    onChange={(e) => setWhatsappNumber(e.target.value)}
-                    placeholder="Enter WhatsApp number (e.g., 081234567890)"
-                  />
-                  <p className="text-sm text-gray-500">
-                    Enter number with country code (e.g., 081234567890)
-                  </p>
-                </div>
-
-                <div className="flex space-x-2">
-                  <Button
-                    onClick={handleSaveSettings}
-                    disabled={isLoading}
-                  >
-                    {isLoading ? 'Saving...' : 'Save Settings'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleWhatsAppShare}
-                    disabled={!whatsappNumber}
-                  >
-                    Share via WhatsApp
-                  </Button>
-                </div>
-              </>
+    <div className="container mx-auto py-6 space-y-6">
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>QR Code Scanner</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isScanning && !isLoading && (
+              <div className="aspect-square max-w-md mx-auto">
+                <QrScanner
+                  delay={1000}
+                  onError={handleError}
+                  onScan={handleScan}
+                  style={{ width: '100%' }}
+                />
+              </div>
             )}
-          </div>
-        </CardContent>
-      </Card>
+            {!isScanning && (
+              <Button 
+                onClick={() => setIsScanning(true)}
+                className="w-full"
+              >
+                Scan Again
+              </Button>
+            )}
+          </CardContent>
+        </Card>
 
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">Attendance Records</h1>
-        <div className="flex space-x-2">
-          <Button 
-            variant="destructive" 
-            size="sm" 
-            onClick={handleDeleteRecords}
-            disabled={selectedRecords.length === 0}
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Clear Selected
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleExportCSV}
-          >
-            <FileSpreadsheet className="mr-2 h-4 w-4" />
-            Export to CSV
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleExportPDF}
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Export to PDF
-          </Button>
-        </div>
-      </div>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>WhatsApp Settings</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="whatsapp-share"
+                  checked={isWhatsappShareEnabled}
+                  onCheckedChange={setIsWhatsappShareEnabled}
+                />
+                <Label htmlFor="whatsapp-share">Enable WhatsApp Sharing</Label>
+              </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex space-x-2 p-4">
-            <Input 
-              placeholder="Search employee..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1"
-            />
-            <Select 
-              value={department} 
-              onValueChange={setDepartment}
+              {isWhatsappShareEnabled && (
+                <>
+                  <div className="space-y-2">
+                    <Label>WhatsApp Number</Label>
+                    <Input
+                      type="tel"
+                      value={whatsappNumber}
+                      onChange={(e) => setWhatsappNumber(e.target.value)}
+                      placeholder="Enter WhatsApp number (e.g., 081234567890)"
+                    />
+                    <p className="text-sm text-gray-500">
+                      Enter number with country code (e.g., 081234567890)
+                    </p>
+                  </div>
+
+                  <div className="flex space-x-2">
+                    <Button
+                      onClick={handleSaveSettings}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? 'Saving...' : 'Save Settings'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleWhatsAppShare}
+                      disabled={!whatsappNumber}
+                    >
+                      Share via WhatsApp
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Attendance Records</h1>
+          <div className="flex space-x-2">
+            <Button 
+              variant="destructive" 
+              size="sm" 
+              onClick={handleDeleteRecords}
+              disabled={selectedRecords.length === 0}
             >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All Departments" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All Departments">All Departments</SelectItem>
-                {/* Add department options dynamically */}
-              </SelectContent>
-            </Select>
-            <Input 
-              type="date" 
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-            <Input 
-              type="date" 
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
+              <Trash2 className="mr-2 h-4 w-4" />
+              Clear Selected
+            </Button>
             <Button 
               variant="outline" 
-              size="icon" 
-              onClick={handleClearFilters}
-              title="Clear Filters"
+              size="sm" 
+              onClick={handleExportCSV}
             >
-              <X className="h-4 w-4" />
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Export to CSV
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleExportPDF}
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Export to PDF
             </Button>
           </div>
+        </div>
 
-          {/* Advanced Filtering Section */}
-          <div className="p-4 bg-gray-50 border-t">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Status Filter */}
-              <div>
-                <Label>Status</Label>
-                <Select 
-                  value={advancedFilters.status}
-                  onValueChange={(value) => setAdvancedFilters(prev => ({...prev, status: value}))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="All">All Statuses</SelectItem>
-                    <SelectItem value="present">Present</SelectItem>
-                    <SelectItem value="late">Late</SelectItem>
-                    <SelectItem value="early-departure">Early Departure</SelectItem>
-                    <SelectItem value="half-day">Half Day</SelectItem>
-                  </SelectContent>
-                </Select>
+        <Card>
+          <CardContent className="p-0">
+            <div className="flex space-x-2 p-4">
+              <Input 
+                placeholder="Search employee..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-1"
+              />
+              <Select 
+                value={department} 
+                onValueChange={setDepartment}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="All Departments" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All Departments">All Departments</SelectItem>
+                  {/* Add department options dynamically */}
+                </SelectContent>
+              </Select>
+              <Input 
+                type="date" 
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <Input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={handleClearFilters}
+                title="Clear Filters"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Advanced Filtering Section */}
+            <div className="p-4 bg-gray-50 border-t">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Status Filter */}
+                <div>
+                  <Label>Status</Label>
+                  <Select 
+                    value={advancedFilters.status}
+                    onValueChange={(value) => setAdvancedFilters(prev => ({...prev, status: value}))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All Statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Statuses</SelectItem>
+                      <SelectItem value="present">Present</SelectItem>
+                      <SelectItem value="late">Late</SelectItem>
+                      <SelectItem value="early-departure">Early Departure</SelectItem>
+                      <SelectItem value="half-day">Half Day</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Work Hours Range */}
+                <div className="flex space-x-2">
+                  <div className="flex-1">
+                    <Label>Min Hours</Label>
+                    <Input 
+                      type="number" 
+                      placeholder="Min" 
+                      value={advancedFilters.minWorkHours}
+                      onChange={(e) => setAdvancedFilters(prev => ({...prev, minWorkHours: e.target.value}))}
+                      min="0" 
+                      step="0.5"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Label>Max Hours</Label>
+                    <Input 
+                      type="number" 
+                      placeholder="Max" 
+                      value={advancedFilters.maxWorkHours}
+                      onChange={(e) => setAdvancedFilters(prev => ({...prev, maxWorkHours: e.target.value}))}
+                      min="0" 
+                      step="0.5"
+                    />
+                  </div>
+                </div>
+
+                {/* Additional Filters */}
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="lateArrivals"
+                      checked={advancedFilters.lateArrivals}
+                      onCheckedChange={(checked) => setAdvancedFilters(prev => ({...prev, lateArrivals: !!checked}))}
+                    />
+                    <Label htmlFor="lateArrivals">Late Arrivals</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="earlyDepartures"
+                      checked={advancedFilters.earlyDepartures}
+                      onCheckedChange={(checked) => setAdvancedFilters(prev => ({...prev, earlyDepartures: !!checked}))}
+                    />
+                    <Label htmlFor="earlyDepartures">Early Departures</Label>
+                  </div>
+                </div>
               </div>
+            </div>
 
-              {/* Work Hours Range */}
-              <div className="flex space-x-2">
-                <div className="flex-1">
-                  <Label>Min Hours</Label>
-                  <Input 
-                    type="number" 
-                    placeholder="Min" 
-                    value={advancedFilters.minWorkHours}
-                    onChange={(e) => setAdvancedFilters(prev => ({...prev, minWorkHours: e.target.value}))}
-                    min="0" 
-                    step="0.5"
-                  />
-                </div>
-                <div className="flex-1">
-                  <Label>Max Hours</Label>
-                  <Input 
-                    type="number" 
-                    placeholder="Max" 
-                    value={advancedFilters.maxWorkHours}
-                    onChange={(e) => setAdvancedFilters(prev => ({...prev, maxWorkHours: e.target.value}))}
-                    min="0" 
-                    step="0.5"
-                  />
-                </div>
+            {/* Attendance Summary */}
+            <div className="p-4 bg-gray-100 grid grid-cols-3 gap-4">
+              <div className="text-center">
+                <p className="text-sm font-medium text-gray-600">Total Records</p>
+                <p className="text-2xl font-bold">{attendanceSummary.total}</p>
               </div>
-
-              {/* Additional Filters */}
-              <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="lateArrivals"
-                    checked={advancedFilters.lateArrivals}
-                    onCheckedChange={(checked) => setAdvancedFilters(prev => ({...prev, lateArrivals: !!checked}))}
-                  />
-                  <Label htmlFor="lateArrivals">Late Arrivals</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="earlyDepartures"
-                    checked={advancedFilters.earlyDepartures}
-                    onCheckedChange={(checked) => setAdvancedFilters(prev => ({...prev, earlyDepartures: !!checked}))}
-                  />
-                  <Label htmlFor="earlyDepartures">Early Departures</Label>
-                </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-green-600">Present</p>
+                <p className="text-2xl font-bold text-green-700">{attendanceSummary.present}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-yellow-600">Late Arrivals</p>
+                <p className="text-2xl font-bold text-yellow-700">{attendanceSummary.late}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-red-600">Early Departures</p>
+                <p className="text-2xl font-bold text-red-700">{attendanceSummary.earlyDepartures}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-blue-600">Avg. Work Hours</p>
+                <p className="text-2xl font-bold text-blue-700">{attendanceSummary.averageWorkHours.toFixed(2)}</p>
               </div>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Attendance Summary */}
-          <div className="p-4 bg-gray-100 grid grid-cols-3 gap-4">
-            <div className="text-center">
-              <p className="text-sm font-medium text-gray-600">Total Records</p>
-              <p className="text-2xl font-bold">{attendanceSummary.total}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-green-600">Present</p>
-              <p className="text-2xl font-bold text-green-700">{attendanceSummary.present}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-yellow-600">Late Arrivals</p>
-              <p className="text-2xl font-bold text-yellow-700">{attendanceSummary.late}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-red-600">Early Departures</p>
-              <p className="text-2xl font-bold text-red-700">{attendanceSummary.earlyDepartures}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-blue-600">Avg. Work Hours</p>
-              <p className="text-2xl font-bold text-blue-700">{attendanceSummary.averageWorkHours.toFixed(2)}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-          <Table>
-            <TableHeader>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>
+                <Checkbox 
+                  checked={selectedRecords.length === filteredRecords.length && filteredRecords.length > 0}
+                  onCheckedChange={handleSelectAll}
+                />
+              </TableHead>
+              <TableHead>Employee Name</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>Check-In Time</TableHead>
+              <TableHead>Check-Out Time</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Working Duration</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
               <TableRow>
-                <TableHead>
-                  <Checkbox 
-                    checked={selectedRecords.length === filteredRecords.length && filteredRecords.length > 0}
-                    onCheckedChange={handleSelectAll}
-                  />
-                </TableHead>
-                <TableHead>Employee Name</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Check-In Time</TableHead>
-                <TableHead>Check-Out Time</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Working Duration</TableHead>
-            <TableHead>Actions</TableHead>
+                <TableCell colSpan={8} className="text-center">
+                  Loading records...
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-              <TableCell colSpan={8} className="text-center">
-                    Loading records...
-                  </TableCell>
-                </TableRow>
-              ) : filteredRecords.length === 0 ? (
-                <TableRow>
-              <TableCell colSpan={8} className="text-center">
-                    No attendance records found
-                  </TableCell>
-                </TableRow>
-              ) : (
-            filteredRecords.map((record) => {
-              console.log('Rendering Record:', JSON.stringify(record, null, 2)); // More detailed logging
-              
-              // Validate record has all required properties
-              if (!record.id) {
-                console.error('Record missing ID:', record);
-                return null; // Skip rendering this record
-              }
+            ) : filteredRecords.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center">
+                  No attendance records found
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredRecords.map((record) => {
+                console.log('Rendering Record:', JSON.stringify(record, null, 2)); // More detailed logging
+                
+                // Validate record has all required properties
+                if (!record.id) {
+                  console.error('Record missing ID:', record);
+                  return null; // Skip rendering this record
+                }
 
-              return (
+                return (
                   <TableRow key={record.id}>
                     <TableCell>
                       <Checkbox 
@@ -879,41 +881,44 @@ export default function Attendance() {
                         onCheckedChange={() => handleSelectRecord(record.id)}
                       />
                     </TableCell>
-                  <TableCell>{(record.employeeName || record.employee_name || record.employee?.name || 'Unknown')}</TableCell>
-                  <TableCell>{record.date || 'N/A'}</TableCell>
-                  <TableCell>{formatTime(record.checkInTime)}</TableCell>
+                    <TableCell>{(record.employeeName || record.employee_name || record.employee?.name || 'Unknown')}</TableCell>
+                    <TableCell>{record.date || 'N/A'}</TableCell>
+                    <TableCell>{formatTime(record.checkInTime)}</TableCell>
                     <TableCell>{formatTime(record.checkOutTime)}</TableCell>
-                  <TableCell>{record.status || 'N/A'}</TableCell>
-                  <TableCell>{formatHours(record.workingDuration)}</TableCell>
-                  <TableCell>
-                    {record.id ? (
-                      <Button 
-                        variant="destructive" 
-                        size="sm" 
-                        onClick={() => {
-                          console.log('Delete Button Clicked for Record:', record.id);
-                          handleDeleteSingleRecord(record.id);
-                        }}
-                        className="h-8 w-8 p-0"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <span>No Action</span>
-                    )}
-                  </TableCell>
+                    <TableCell>{record.status || 'N/A'}</TableCell>
+                    <TableCell>{formatHours(record.workingDuration)}</TableCell>
+                    <TableCell>
+                      {record.id ? (
+                        <Button 
+                          variant="destructive" 
+                          size="sm" 
+                          onClick={() => {
+                            console.log('Delete Button Clicked for Record:', record.id);
+                            handleDeleteSingleRecord(record.id);
+                          }}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <span>No Action</span>
+                      )}
+                    </TableCell>
                   </TableRow>
-              );
-            }).filter(Boolean) // Remove any null entries
-              )}
-            </TableBody>
-          </Table>
-
-          <div className="p-4 text-sm text-gray-500">
-            {selectedRecords.length > 0 && (
-              <p>{selectedRecords.length} record(s) selected</p>
+                );
+              }).filter(Boolean) // Remove any null entries
             )}
-          </div>
+          </TableBody>
+        </Table>
+
+        <div className="p-4 text-sm text-gray-500">
+          {selectedRecords.length > 0 && (
+            <p>{selectedRecords.length} record(s) selected</p>
+          )}
+        </div>
+
+        <AbsentEmployeeDownload />
+      </div>
     </div>
   );
 } 

@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Attendance } from '@/types';
-import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2, Trash2 } from 'lucide-react';
+import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2, Trash2, UserX } from 'lucide-react';
 import { getAttendanceRecords, deleteAttendance } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 import { Document, Page, Text, View, PDFDownloadLink } from '@react-pdf/renderer';
@@ -28,6 +28,15 @@ import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import Swal from 'sweetalert2';
 import { supabase } from '@/integrations/supabase/client';
+import AbsentEmployeeDownload from '@/components/AbsentEmployeeDownload';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 interface AttendanceTableProps {
   attendanceRecords?: Attendance[] | Promise<Attendance[]>;
@@ -83,6 +92,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const [loading, setLoading] = useState(true);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
   const [sharing, setSharing] = useState(false);
+  const [showAbsentDialog, setShowAbsentDialog] = useState(false);
   
   useEffect(() => {
     const fetchData = async () => {
@@ -527,6 +537,23 @@ ${record.status === 'checked-out' ? '✔️ Shift Completed' : '🔄 Shift In Pr
         <CardTitle className="flex justify-between items-center">
           <span>Attendance Records</span>
           <div className="flex gap-2">
+            <Dialog open={showAbsentDialog} onOpenChange={setShowAbsentDialog}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <UserX className="mr-2 h-4 w-4" />
+                  Absent Report
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>Absent Employees Report</DialogTitle>
+                  <DialogDescription>
+                    Generate and share reports of absent employees
+                  </DialogDescription>
+                </DialogHeader>
+                <AbsentEmployeeDownload />
+              </DialogContent>
+            </Dialog>
             <Button onClick={exportToCsv} disabled={filteredRecords.length === 0}>
               <Download className="mr-2 h-4 w-4" />
               Export to CSV

@@ -4,6 +4,8 @@ import AttendanceTable from '@/components/AttendanceTable';
 import AttendanceSummaryShare from '@/components/AttendanceSummaryShare';
 import AutomatedAttendanceBot from '@/components/AutomatedAttendanceBot';
 import EnhancedAttendanceReport from '@/components/EnhancedAttendanceReport';
+import AbsentEmployeeReport from '@/components/AbsentEmployeeReport';
+import AbsentEmployeeDownload from '@/components/AbsentEmployeeDownload';
 
 const AttendanceRecords: React.FC = () => {
   return (
@@ -14,6 +16,8 @@ const AttendanceRecords: React.FC = () => {
         <TabsList>
           <TabsTrigger value="enhanced">Enhanced Report</TabsTrigger>
           <TabsTrigger value="records">Basic Records</TabsTrigger>
+          <TabsTrigger value="absent">Absent Report</TabsTrigger>
+          <TabsTrigger value="absent-download">Download Absent</TabsTrigger>
           <TabsTrigger value="share">Manual Share</TabsTrigger>
           <TabsTrigger value="bot">Automated BOT</TabsTrigger>
         </TabsList>
@@ -24,6 +28,14 @@ const AttendanceRecords: React.FC = () => {
         
         <TabsContent value="records">
           <AttendanceTable />
+        </TabsContent>
+
+        <TabsContent value="absent">
+          <AbsentEmployeeReport />
+        </TabsContent>
+
+        <TabsContent value="absent-download">
+          <AbsentEmployeeDownload />
         </TabsContent>
         
         <TabsContent value="share">
