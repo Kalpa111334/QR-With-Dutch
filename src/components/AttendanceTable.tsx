@@ -23,7 +23,7 @@ import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2, Tr
 import { getAttendanceRecords, deleteAttendance } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 import { Document, Page, Text, View, PDFDownloadLink } from '@react-pdf/renderer';
-import { StyleSheet } from '@react-pdf/renderer/lib/react-pdf.browser';
+import { StyleSheet } from '@react-pdf/renderer/lib/react-pdf';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import Swal from 'sweetalert2';
