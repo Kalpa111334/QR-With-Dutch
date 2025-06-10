@@ -42,6 +42,19 @@ export interface Attendance {
   full_time_range?: string;
   sequence_number: number;
   overtime?: number;
+  second_check_in_time?: string;
+  second_check_out_time?: string;
+  break_duration?: string;
+}
+
+export interface ExtendedAttendance extends Attendance {
+  first_check_in_time?: string;
+  first_check_out_time?: string;
+  second_check_in_time?: string;
+  second_check_out_time?: string;
+  break_duration?: string;
+  action?: 'check-in' | 'check-out';
+  timestamp?: string;
 }
 
 export interface GatePass {
@@ -80,3 +93,42 @@ export interface WorkTimeInfo {
   status: 'present' | 'checked-out';
   sequence_number: number;
 }
+
+export interface ExtendedWorkTimeInfo {
+  check_in_time: string;
+  check_out_time?: string;
+  first_check_in_time?: string;
+  first_check_out_time?: string;
+  second_check_in_time?: string;
+  break_duration?: string;
+  status: 'present' | 'checked-out';
+  sequence_number: number;
+  total_hours?: number;
+  late_duration: number;
+  action: 'check-in' | 'check-out';
+  [key: string]: string | number | undefined; // Allow additional properties
+}
+
+export interface CustomPostgrestResponse<T> {
+  data: T & {
+    action?: string;
+    timestamp?: string;
+    first_check_in_time?: string;
+    first_check_out_time?: string;
+    second_check_in_time?: string;
+    second_check_out_time?: string;
+    break_duration?: string;
+    total_hours?: number;
+    message?: string;
+  };
+  error: null | {
+    message: string;
+  };
+}
+
+// Attendance-related types
+export type AttendanceAction = 
+  'check-in' | 
+  'check-out' | 
+  'second_check_in' | 
+  'second_check_out';

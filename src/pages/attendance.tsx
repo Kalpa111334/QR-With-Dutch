@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
-import { getAdminContactInfo, saveAdminContactInfo, recordAttendanceCheckIn, recordAttendanceCheckOut, determineNextAttendanceAction, singleScanAttendance } from '../utils/attendanceUtils';
+import { getAdminContactInfo, saveAdminContactInfo, recordAttendanceCheckIn, determineNextAttendanceAction, singleScanAttendance } from '../utils/attendanceUtils';
 import Swal from 'sweetalert2';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';

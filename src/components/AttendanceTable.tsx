@@ -23,9 +23,11 @@ import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2, Tr
 import { getAttendanceRecords, deleteAttendance } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 import { Document, Page, Text, View, PDFDownloadLink } from '@react-pdf/renderer';
-import { StyleSheet } from '@react-pdf/renderer/lib/react-pdf';
+import { StyleSheet, Image as PDFImage } from '@react-pdf/renderer/lib/react-pdf';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import Swal from 'sweetalert2';
 import { supabase } from '@/integrations/supabase/client';
 import AbsentEmployeeDownload from '@/components/AbsentEmployeeDownload';
@@ -37,47 +39,200 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { formatDistanceStrict, format } from 'date-fns';
 
 interface AttendanceTableProps {
   attendanceRecords?: Attendance[] | Promise<Attendance[]>;
 }
 
+// Company logo as base64 string
+const COMPANY_LOGO = 'data:image/png;base64,YOUR_BASE64_STRING_HERE';
+
 // Define styles for PDF
 const styles = StyleSheet.create({
   page: {
     padding: 30,
+    flexDirection: 'column',
+    backgroundColor: '#ffffff',
+    fontFamily: 'Helvetica',
   },
-  title: {
-    fontSize: 20,
-    marginBottom: 20,
+  header: {
+    marginBottom: 30,
+    borderBottom: '2px solid #e0e0e0',
+    paddingBottom: 20,
+  },
+  headerTitle: {
+    fontSize: 24,
+    color: '#1a1a1a',
+    marginBottom: 8,
     textAlign: 'center',
-  },
-  table: {
-    display: 'flex',
-    width: 'auto',
-    borderStyle: 'solid',
-    borderWidth: 1,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-  },
-  tableRow: {
-    margin: 'auto',
-    flexDirection: 'row',
-  },
-  tableHeader: {
-    backgroundColor: '#f0f0f0',
     fontWeight: 'bold',
   },
-  tableCell: {
-    width: '14.28%',
-    borderStyle: 'solid',
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  dateRange: {
+    fontSize: 12,
+    color: '#888888',
+    textAlign: 'center',
+  },
+  summarySection: {
+    marginBottom: 30,
+    padding: 15,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 5,
+  },
+  summaryTitle: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    marginBottom: 15,
+    fontWeight: 'bold',
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  summaryBox: {
+    width: '30%',
+    marginBottom: 15,
+    padding: 10,
+    backgroundColor: '#ffffff',
+    borderRadius: 4,
     borderWidth: 1,
-    borderLeftWidth: 0,
-    borderTopWidth: 0,
-    padding: 5,
+    borderColor: '#e0e0e0',
+  },
+  summaryLabel: {
     fontSize: 10,
+    color: '#666666',
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    fontWeight: 'bold',
+  },
+  summaryPercent: {
+    fontSize: 12,
+    color: '#888888',
+    marginTop: 2,
+  },
+  table: {
+    marginTop: 20,
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#f0f0f0',
+    borderBottomWidth: 2,
+    borderBottomColor: '#e0e0e0',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  tableHeaderCell: {
+    flex: 1,
+    padding: 8,
+    paddingHorizontal: 12,
+    marginHorizontal: 4,
+    fontSize: 10,
+    color: '#666666',
+    fontWeight: 'bold',
+    textAlign: 'left',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    minHeight: 32,
+    backgroundColor: '#ffffff',
+    marginVertical: 2,
+    alignItems: 'center',
+  },
+  tableRowAlt: {
+    backgroundColor: '#f8f9fa',
+  },
+  tableCell: {
+    flex: 1,
+    padding: 8,
+    paddingHorizontal: 12,
+    marginHorizontal: 4,
+    fontSize: 9,
+    color: '#333333',
+    textAlign: 'left',
+    backgroundColor: '#ffffff',
+    borderRadius: 4,
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 30,
+    right: 30,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    paddingTop: 10,
+  },
+  footerText: {
+    fontSize: 8,
+    color: '#888888',
+    textAlign: 'center',
+  },
+  statusBadge: {
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 3,
+    fontSize: 8,
+  },
+  statusPresent: {
+    backgroundColor: '#dcf7dc',
+    color: '#0a5f0a',
+  },
+  statusLate: {
+    backgroundColor: '#fff3cd',
+    color: '#856404',
+  },
+  statusAbsent: {
+    backgroundColor: '#f8d7da',
+    color: '#721c24',
+  },
+  companyName: {
+    fontSize: 28,
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 5,
+    fontWeight: 'bold',
+    fontFamily: 'Helvetica-Bold',
+  },
+  companyTagline: {
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+    marginBottom: 15,
+    fontStyle: 'italic',
   },
 });
+
+// Add a helper function to format the status badge
+const getStatusStyle = (status: string) => {
+  switch (status?.toLowerCase()) {
+    case 'present':
+      return styles.statusPresent;
+    case 'late':
+      return styles.statusLate;
+    case 'absent':
+      return styles.statusAbsent;
+    default:
+      return {};
+  }
+};
+
+// Add new interface for deletion type after the AttendanceTableProps interface
+interface DeletionType {
+  type: 'check_in' | 'check_out' | null;
+}
 
 const AttendanceTable: React.FC<AttendanceTableProps> = ({ 
   attendanceRecords: propAttendanceRecords
@@ -93,6 +248,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
   const [sharing, setSharing] = useState(false);
   const [showAbsentDialog, setShowAbsentDialog] = useState(false);
+  const [deletionType, setDeletionType] = useState<DeletionType>({ type: null });
   
   useEffect(() => {
     const fetchData = async () => {
@@ -137,16 +293,30 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const exportToCsv = () => {
     if (filteredRecords.length === 0) return;
     
-    const headers = ['Date', 'Employee Name', 'Check In', 'Check Out', 'Status', 'Minutes Late', 'Working Duration'];
+    const headers = [
+      'Date', 
+      'Employee Name', 
+      'First Check-In', 
+      'First Check-Out', 
+      'Second Check-In', 
+      'Second Check-Out', 
+      'Break Duration', 
+      'Status', 
+      'Minutes Late', 
+      'Working Duration'
+    ];
     
     const rows = filteredRecords.map(record => [
       record.date,
       record.employee_name || 'Unknown',
-      new Date(record.check_in_time).toLocaleTimeString(),
-      record.check_out_time ? new Date(record.check_out_time).toLocaleTimeString() : '-',
+      record.check_in_time ? new Date(record.check_in_time).toLocaleTimeString() : 'N/A',
+      record.check_out_time ? new Date(record.check_out_time).toLocaleTimeString() : 'N/A',
+      record.second_check_in_time ? new Date(record.second_check_in_time).toLocaleTimeString() : 'N/A',
+      record.second_check_out_time ? new Date(record.second_check_out_time).toLocaleTimeString() : 'N/A',
+      formatBreakDuration(record.break_duration),
       record.status,
       record.minutes_late || 0,
-      record.working_duration || '-'
+      record.working_duration || 'N/A'
     ]);
     
     const csvContent = [
@@ -167,56 +337,141 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const exportToPdf = () => {
     if (filteredRecords.length === 0) return;
 
+    // Calculate summary statistics
+    const totalEmployees = filteredRecords.length;
+    const onTimeEmployees = filteredRecords.filter(r => {
+      const checkIn = new Date(r.check_in_time);
+      const workStart = new Date(checkIn);
+      workStart.setHours(9, 0, 0, 0);
+      return checkIn <= workStart;
+    }).length;
+    const lateEmployees = totalEmployees - onTimeEmployees;
+    const checkedOutEmployees = filteredRecords.filter(r => r.status === 'checked-out').length;
+    const stillWorkingEmployees = filteredRecords.filter(r => r.status === 'present').length;
+
     const AttendancePDF = () => (
       <Document>
         <Page size="A4" style={styles.page}>
-          <Text style={styles.title}>Attendance Records</Text>
-          <View style={styles.table}>
-            {/* Table Header */}
-            <View style={[styles.tableRow, styles.tableHeader]}>
-              <Text style={styles.tableCell}>Date</Text>
-              <Text style={styles.tableCell}>Employee Name</Text>
-              <Text style={styles.tableCell}>Check In</Text>
-              <Text style={styles.tableCell}>Check Out</Text>
-              <Text style={styles.tableCell}>Status</Text>
-              <Text style={styles.tableCell}>Minutes Late</Text>
-              <Text style={styles.tableCell}>Working Duration</Text>
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Attendance Report</Text>
+            <Text style={styles.headerSubtitle}>QR Attendance System</Text>
+            <Text style={styles.dateRange}>
+              {startDate === endDate 
+                ? format(new Date(startDate), 'MMMM d, yyyy')
+                : `${format(new Date(startDate), 'MMM d, yyyy')} - ${format(new Date(endDate), 'MMM d, yyyy')}`}
+            </Text>
             </View>
             
-            {/* Table Body */}
+          {/* Summary Section */}
+          <View style={styles.summarySection}>
+            <Text style={styles.summaryTitle}>Attendance Summary</Text>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>Total Employees</Text>
+                <Text style={styles.summaryValue}>{totalEmployees}</Text>
+              </View>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>On Time</Text>
+                <Text style={styles.summaryValue}>{onTimeEmployees}</Text>
+                <Text style={styles.summaryPercent}>
+                  {((onTimeEmployees/totalEmployees)*100).toFixed(1)}%
+                </Text>
+              </View>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>Late Arrivals</Text>
+                <Text style={styles.summaryValue}>{lateEmployees}</Text>
+                <Text style={styles.summaryPercent}>
+                  {((lateEmployees/totalEmployees)*100).toFixed(1)}%
+                </Text>
+              </View>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>Average Break</Text>
+                <Text style={styles.summaryValue}>
+                  {calculateAverageBreakDuration(filteredRecords)}
+                </Text>
+              </View>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>Average Working Time</Text>
+                <Text style={styles.summaryValue}>
+                  {calculateAverageWorkingTime(filteredRecords)}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Attendance Table */}
+          <View style={styles.table}>
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Date</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 1.2 }]}>Employee</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>First Check-In</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>First Check-Out</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Second Check-In</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Second Check-Out</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Break</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Status</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Late</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Working Time</Text>
+            </View>
+
             {filteredRecords.map((record, index) => (
-              <View key={index} style={styles.tableRow}>
-                <Text style={styles.tableCell}>{new Date(record.date).toLocaleDateString()}</Text>
-                <Text style={styles.tableCell}>{record.employee_name}</Text>
-                <Text style={styles.tableCell}>
-                  {record.check_in_time ? new Date(record.check_in_time).toLocaleTimeString() : '-'}
+              <View key={index} style={[
+                styles.tableRow,
+                index % 2 === 1 && styles.tableRowAlt
+              ]}>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {format(new Date(record.date), 'MMM d, yyyy')}
                 </Text>
-                <Text style={styles.tableCell}>
-                  {record.check_out_time ? new Date(record.check_out_time).toLocaleTimeString() : '-'}
+                <Text style={[styles.tableCell, { flex: 1.2 }]}>
+                  {record.employee_name}
                 </Text>
-                <Text style={styles.tableCell}>{record.status}</Text>
-                <Text style={styles.tableCell}>
-                  {record.check_in_time ? (() => {
-                    const checkIn = new Date(record.check_in_time);
-                    const workStart = new Date(checkIn);
-                    workStart.setHours(9, 0, 0, 0);
-                    
-                    if (checkIn > workStart) {
-                      const lateMinutes = Math.round((checkIn.getTime() - workStart.getTime()) / (1000 * 60));
-                      const hours = Math.floor(lateMinutes / 60);
-                      const minutes = lateMinutes % 60;
-                      
-                      if (hours > 0) {
-                        return `${hours}h ${minutes}m late`;
-                      }
-                      return `${minutes}m late`;
-                    }
-                    return '0';
-                  })() : '0'}
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {record.check_in_time 
+                    ? format(new Date(record.check_in_time), 'h:mm a')
+                    : 'N/A'}
                 </Text>
-                <Text style={styles.tableCell}>{record.working_duration || '-'}</Text>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {record.check_out_time
+                    ? format(new Date(record.check_out_time), 'h:mm a')
+                    : 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {record.second_check_in_time
+                    ? format(new Date(record.second_check_in_time), 'h:mm a')
+                    : 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {record.second_check_out_time
+                    ? format(new Date(record.second_check_out_time), 'h:mm a')
+                    : 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {formatBreakDuration(record.break_duration)}
+                </Text>
+                <Text style={[
+                  styles.tableCell,
+                  { flex: 0.6 },
+                  styles.statusBadge,
+                  getStatusStyle(record.status)
+                ]}>
+                  {record.status || 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.6 }]}>
+                  {record.minutes_late ? `${record.minutes_late}m` : '-'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {record.working_duration || 'N/A'}
+                </Text>
               </View>
             ))}
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>
+              Generated on {format(new Date(), 'MMMM d, yyyy h:mm a')} • QR Attendance System
+            </Text>
           </View>
         </Page>
       </Document>
@@ -225,12 +480,15 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     return (
       <PDFDownloadLink
         document={<AttendancePDF />}
-        fileName={`attendance_${startDate}_to_${endDate}.pdf`}
+        fileName={`attendance_report_${startDate}_to_${endDate}.pdf`}
       >
         {({ loading }) => (
-          <Button disabled={loading}>
+          <Button 
+            disabled={loading} 
+            className="w-full sm:w-auto flex items-center justify-center"
+          >
             <FileText className="mr-2 h-4 w-4" />
-            Export to PDF
+            {loading ? 'Generating...' : 'Export to PDF'}
           </Button>
         )}
       </PDFDownloadLink>
@@ -460,61 +718,81 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
     }
   };
 
-  const handleDelete = async (id: string) => {
-    try {
-      const result = await Swal.fire({
-        title: 'Delete Attendance Record',
-        html: `
-          <div class="text-center">
-            <p>Are you sure you want to delete this attendance record?</p>
-            <p class="text-red-600 mt-2">This action cannot be undone!</p>
+  const handleDeleteSingleRecord = async (recordId: string) => {
+    // Create the custom dialog content
+    const { value: formValues } = await Swal.fire({
+      title: 'Delete Attendance Record',
+      html: `
+        <div class="text-center">
+          <p class="mb-4">Select what you want to delete:</p>
+          <div class="flex flex-col items-start gap-4 text-left">
+            <div class="flex items-center space-x-2">
+              <input type="radio" id="check_in" name="deletion_type" value="check_in" class="w-4 h-4">
+              <label for="check_in">Delete Check-in Record</label>
+            </div>
+            <div class="flex items-center space-x-2">
+              <input type="radio" id="check_out" name="deletion_type" value="check_out" class="w-4 h-4">
+              <label for="check_out">Delete Check-out Record</label>
+            </div>
+            <div class="flex items-center space-x-2">
+              <input type="radio" id="complete" name="deletion_type" value="complete" class="w-4 h-4">
+              <label for="complete">Delete Complete Record</label>
+            </div>
           </div>
-        `,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#d33',
-        cancelButtonColor: '#3085d6',
-        confirmButtonText: 'Yes, Delete',
-        cancelButtonText: 'Cancel',
-        showLoaderOnConfirm: true,
-        preConfirm: async () => {
-          try {
-            const deleteResult = await deleteAttendance([id]);
-            if (!deleteResult.success) {
-              throw new Error(deleteResult.error);
-            }
-            return deleteResult;
-          } catch (error) {
-            Swal.showValidationMessage(
-              error instanceof Error ? error.message : 'Failed to delete record'
-            );
-          }
-        },
-        allowOutsideClick: () => !Swal.isLoading()
-      });
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Delete',
+      cancelButtonText: 'Cancel',
+      preConfirm: () => {
+        const selectedType = document.querySelector('input[name="deletion_type"]:checked') as HTMLInputElement;
+        if (!selectedType) {
+          Swal.showValidationMessage('Please select a deletion type');
+          return false;
+        }
+        return selectedType.value;
+      }
+    });
 
-      if (result.isConfirmed && result.value.success) {
-        // Remove the deleted record from the local state
-        setRecords(prevRecords => prevRecords.filter(record => record.id !== id));
-        
-        // Remove from selected records if it was selected
-        setSelectedRecords(prev => prev.filter(recordId => recordId !== id));
+    if (!formValues) {
+      return; // User cancelled
+    }
 
-        // Show success message
-        toast({
-          title: 'Record Deleted',
-          description: 'The attendance record has been successfully deleted.',
-          variant: 'default'
-        });
+    try {
+      let result;
+      
+      if (formValues === 'complete') {
+        // Complete deletion
+        result = await deleteAttendance([recordId]);
+      } else {
+        // Selective deletion
+        const { data, error } = await supabase
+          .rpc('handle_selective_deletion', {
+            p_record_id: recordId,
+            p_deletion_type: formValues
+          });
 
-        // Refresh the data to ensure consistency
+        if (error) throw error;
+        result = data;
+      }
+
+      if (result.success) {
+        // Refresh the records
         const updatedRecords = await getAttendanceRecords();
         setRecords(updatedRecords);
+
+        toast({
+          title: 'Success',
+          description: result.message || 'Record updated successfully',
+          variant: 'default'
+        });
+      } else {
+        throw new Error(result.error || 'Failed to update record');
       }
     } catch (error) {
       console.error('Delete operation failed:', error);
       toast({
-        title: 'Deletion Failed',
+        title: 'Error',
         description: error instanceof Error ? error.message : 'An unexpected error occurred',
         variant: 'destructive'
       });
@@ -605,6 +883,103 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
       second: '2-digit',
       hour12: true
     });
+  };
+
+  const formatBreakDuration = (duration: string | null | undefined) => {
+    if (!duration) return 'N/A';
+    
+    try {
+      // Handle numeric input (assuming minutes)
+      if (typeof duration === 'number') {
+        const minutes = Math.floor(duration);
+        if (minutes === 0) return 'N/A';
+        
+        // Convert to hours and minutes if needed
+        if (minutes >= 60) {
+          const hours = Math.floor(minutes / 60);
+          const remainingMinutes = minutes % 60;
+          return `${hours}h ${remainingMinutes}m`;
+        }
+        
+        return `${minutes}m`;
+      }
+
+      // Parse string input
+      const trimmedDuration = duration.trim().toLowerCase();
+      
+      // Handle 'N/A' or empty string cases
+      if (trimmedDuration === 'n/a' || trimmedDuration === '') return 'N/A';
+      
+      // Parse minutes from string (e.g., '30 minutes', '45 mins')
+      const minutesMatch = trimmedDuration.match(/(\d+)\s*(?:minutes?|mins?)/);
+      if (minutesMatch) {
+        const minutes = parseInt(minutesMatch[1], 10);
+        if (minutes === 0) return 'N/A';
+        
+        // Convert to hours and minutes if needed
+        if (minutes >= 60) {
+          const hours = Math.floor(minutes / 60);
+          const remainingMinutes = minutes % 60;
+          return `${hours}h ${remainingMinutes}m`;
+        }
+        
+        return `${minutes}m`;
+      }
+      
+      // Handle direct hour:minute format
+      const hourMinuteMatch = trimmedDuration.match(/(\d+):(\d+)/);
+      if (hourMinuteMatch) {
+        const hours = parseInt(hourMinuteMatch[1], 10);
+        const minutes = parseInt(hourMinuteMatch[2], 10);
+        
+        if (hours === 0 && minutes === 0) return 'N/A';
+        
+        if (hours > 0 && minutes > 0) {
+          return `${hours}h ${minutes}m`;
+        } else if (hours > 0) {
+          return `${hours}h`;
+        } else {
+          return `${minutes}m`;
+        }
+      }
+      
+      // Fallback: return the original duration if no parsing worked
+      return duration || 'N/A';
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  const calculateAverageBreakDuration = (records: Attendance[]): string => {
+    if (records.length === 0) return 'N/A';
+    
+    const totalMinutes = records.reduce((total, record) => {
+      const duration = record.break_duration;
+      if (duration) {
+        const minutes = parseInt(duration.split('m')[0] || '0', 10);
+        return total + minutes;
+      }
+      return total;
+    }, 0);
+    
+    const averageMinutes = totalMinutes / records.length;
+    return `${Math.round(averageMinutes)}m`;
+  };
+
+  const calculateAverageWorkingTime = (records: Attendance[]): string => {
+    if (records.length === 0) return 'N/A';
+    
+    const totalMinutes = records.reduce((total, record) => {
+      const duration = record.working_duration;
+      if (duration) {
+        const minutes = parseInt(duration.split('m')[0] || '0', 10);
+        return total + minutes;
+      }
+      return total;
+    }, 0);
+    
+    const averageMinutes = totalMinutes / records.length;
+    return `${Math.round(averageMinutes)}m`;
   };
 
   return (
@@ -766,9 +1141,12 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                       <TableHead className="w-[50px] sticky left-0 bg-background">Select</TableHead>
                       <TableHead className="min-w-[100px]">Date</TableHead>
                       <TableHead className="min-w-[150px]">Employee Name</TableHead>
-                      <TableHead className="min-w-[160px]">Check In</TableHead>
-                      <TableHead className="min-w-[160px]">Check Out</TableHead>
-                      <TableHead className="min-w-[120px]">Status</TableHead>
+                      <TableHead className="min-w-[160px]">First Check-In</TableHead>
+                      <TableHead className="min-w-[160px]">First Check-Out</TableHead>
+                      <TableHead className="min-w-[160px]">Second Check-In</TableHead>
+                      <TableHead className="min-w-[160px]">Second Check-Out</TableHead>
+                      <TableHead className="min-w-[120px]">Break Duration</TableHead>
+                      <TableHead className="min-w-[140px]">Status</TableHead>
                       <TableHead className="min-w-[140px]">
                         <div className="flex items-center">
                           <Clock className="mr-1 h-4 w-4" />
@@ -842,6 +1220,21 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                                   <span className="text-muted-foreground">Not Checked Out</span>
                                 )}
                               </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1">
+                              <div>{record.second_check_in_time ? formatTime(record.second_check_in_time) : 'N/A'}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1">
+                              <div>{record.second_check_out_time ? formatTime(record.second_check_out_time) : 'N/A'}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="whitespace-nowrap">
+                              {formatBreakDuration(record.break_duration)}
                             </div>
                           </TableCell>
                           <TableCell>
@@ -946,7 +1339,7 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => handleDelete(record.id)}
+                              onClick={() => handleDeleteSingleRecord(record.id)}
                               className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white"
                             >
                               <Trash2 className="h-4 w-4" />

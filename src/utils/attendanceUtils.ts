@@ -1,21 +1,22 @@
 // Attendance Utilities Module
-import { supabase } from '../integrations/supabase/client';
+import { supabase } from '@/integrations/supabase/client';
 import { 
   Attendance, 
   AttendanceStatus, 
-  WorkTimeInfo 
+  WorkTimeInfo,
+  // Import the new types
+  ExtendedWorkTimeInfo, 
+  ExtendedAttendance, 
+  CustomPostgrestResponse,
+  AttendanceAction 
 } from '@/types';
+
 import Swal from 'sweetalert2';
 
 // Define AdminContactInfo interface locally
 interface AdminContactInfo {
   whatsapp_number: string;
   is_whatsapp_share_enabled: boolean;
-}
-
-// Extend WorkTimeInfo interface locally
-interface ExtendedWorkTimeInfo extends WorkTimeInfo {
-  action?: 'check-in' | 'check-out';
 }
 
 // Custom Error Class for Attendance-related Errors
@@ -241,23 +242,18 @@ const generateUniqueTimestamp = async (
   throw new AttendanceError('Unable to generate unique timestamp');
 };
 
-// Main Attendance Recording Function
+// Enhanced Attendance Recording Function
 export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTimeInfo> => {
   try {
     // Validate employee and check existing records in parallel
-    const [employeeResult, existingCheckInResult] = await Promise.all([
+    const [employeeResult, existingRecordResult] = await Promise.all([
       supabase
         .from('employees')
         .select('id, name, status')
         .or(`id.eq.${qrData},email.eq.${qrData}`)
         .maybeSingle(),
       supabase
-        .from('attendance')
-        .select('id, check_in_time')
-        .eq('employee_id', qrData)
-        .eq('date', new Date().toISOString().split('T')[0])
-        .is('check_out_time', null)
-        .maybeSingle()
+        .rpc('process_double_attendance', { p_employee_id: qrData }) as unknown as Promise<CustomPostgrestResponse<ExtendedAttendance>>
     ]);
 
     if (employeeResult.error || !employeeResult.data) {
@@ -269,100 +265,60 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
       throw new AttendanceError('Employee is not currently active');
     }
 
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const attendanceResult = existingRecordResult.data;
 
-    // Handle check-out
-    if (existingCheckInResult.data) {
-      const existingOpenCheckIn = existingCheckInResult.data;
-      const checkInTime = new Date(existingOpenCheckIn.check_in_time);
-      const timeDifference = now.getTime() - checkInTime.getTime();
-      const minutesPassed = Math.floor(timeDifference / (1000 * 60));
-
-      if (minutesPassed < 5) {
-        const remainingMinutes = 5 - minutesPassed;
-        throw new AttendanceError(`Please wait ${remainingMinutes} more minute${remainingMinutes > 1 ? 's' : ''} before checking out.`);
-      }
-
-      const checkOutMetrics = calculateAttendanceMetrics(checkInTime, now);
-
-      // Update record with check-out info
-      const { data: updatedRecord, error: updateError } = await supabase
-        .from('attendance')
-        .update({
-          check_out_time: now.toISOString(),
-          status: 'checked-out',
-          working_duration: checkOutMetrics.totalHours,
-          overtime: checkOutMetrics.overtime
-        })
-        .eq('id', existingOpenCheckIn.id)
-        .select()
-        .single();
-
-      if (updateError) {
-        throw new AttendanceError(`Check-out failed: ${updateError.message}`);
-      }
-
-      // Log check-out asynchronously
-      attendanceLogger.log('check-out', employeeData.id, {
-        status: 'checked-out',
-        total_hours: checkOutMetrics.totalHours,
-        overtime: checkOutMetrics.overtime
-      });
-
+    // Handle different attendance actions
+    switch (attendanceResult.action as string) {
+      case 'first_check_in':
       return {
-        check_in_time: existingOpenCheckIn.check_in_time,
-        check_out_time: now.toISOString(),
-        status: 'checked-out',
-        sequence_number: updatedRecord.sequence_number,
-        late_duration: updatedRecord.minutes_late,
-        action: 'check-out'
-      };
-    }
-
-    // Handle check-in
-    const checkInMetrics = calculateAttendanceMetrics(now);
-    const newAttendanceRecord: Partial<Attendance> = {
-      employee_id: employeeData.id,
-      check_in_time: now.toISOString(),
-      date: today,
+          check_in_time: attendanceResult.timestamp || new Date().toISOString(),
+          status: 'present',
+          sequence_number: 1,
+          action: 'check-in',
+          late_duration: 0,
+          timestamp: attendanceResult.timestamp
+        } as ExtendedWorkTimeInfo;
+      
+      case 'first_check_out':
+        return {
+          check_in_time: attendanceResult.first_check_in_time || new Date().toISOString(),
+          check_out_time: attendanceResult.timestamp || new Date().toISOString(),
       status: 'present',
-      minutes_late: checkInMetrics.lateMinutes,
-      sequence_number: 1
-    };
-
-    const { data: insertedRecord, error: insertError } = await supabase
-      .from('attendance')
-      .insert(newAttendanceRecord)
-      .select()
-      .single();
-
-    if (insertError) {
-      throw new AttendanceError(`Check-in failed: ${insertError.message}`);
-    }
-
-    // Log check-in asynchronously
-    attendanceLogger.log('check-in', employeeData.id, {
-      status: newAttendanceRecord.status,
-      minutes_late: newAttendanceRecord.minutes_late,
-    });
-
+          sequence_number: 1,
+          action: 'check-out',
+          late_duration: 0,
+          timestamp: attendanceResult.timestamp
+        } as ExtendedWorkTimeInfo;
+      
+      case 'second_check_in':
     return {
-      check_in_time: insertedRecord.check_in_time,
+          check_in_time: attendanceResult.timestamp || new Date().toISOString(),
+          check_out_time: attendanceResult.first_check_out_time,
       status: 'present',
-      sequence_number: insertedRecord.sequence_number,
-      late_duration: insertedRecord.minutes_late,
-      action: 'check-in'
-    };
-
-  } catch (error) {
-    if (!(error instanceof AttendanceError)) {
-      console.error('Unexpected attendance recording error:', error);
+          sequence_number: 2,
+          action: 'check-in',
+          late_duration: 0,
+          timestamp: attendanceResult.timestamp,
+          break_duration: attendanceResult.break_duration
+        } as ExtendedWorkTimeInfo;
+      
+      case 'second_check_out':
+        return {
+          check_in_time: attendanceResult.first_check_in_time || new Date().toISOString(),
+          check_out_time: attendanceResult.timestamp || new Date().toISOString(),
+          status: 'checked-out',
+          sequence_number: 2,
+          total_hours: attendanceResult.total_hours,
+          action: 'check-out',
+          late_duration: 0,
+          timestamp: attendanceResult.timestamp
+        } as ExtendedWorkTimeInfo;
+      
+      default:
+        throw new AttendanceError(attendanceResult.message || 'Maximum check-ins/check-outs reached');
     }
-    // Log error asynchronously
-    attendanceLogger.log('error', qrData, {
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+  } catch (error) {
+    console.error('Attendance recording error:', error);
     throw error;
   }
 };
@@ -377,6 +333,9 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
         employee_id,
         check_in_time,
         check_out_time,
+        second_check_in_time,
+        second_check_out_time,
+        break_duration,
         date,
         status,
         action,
@@ -398,6 +357,9 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
       employee_name: (record.employee as any)?.name || 'Unknown',
       check_in_time: record.check_in_time,
       check_out_time: record.check_out_time,
+      second_check_in_time: record.second_check_in_time,
+      second_check_out_time: record.second_check_out_time,
+      break_duration: record.break_duration,
       date: record.date,
       status: record.status,
       action: record.action,
@@ -722,11 +684,21 @@ export const singleScanAttendance = async (employeeId: string) => {
       .eq('id', employeeId)
       .single();
 
+    // Determine the action type based on the result
+    const actionMap: Record<string, AttendanceAction> = {
+      'present': 'check-in',
+      'checked-out': 'check-out',
+      'first_check_in': 'check-in',
+      'first_check_out': 'check-out',
+      'second_check_in': 'second_check_in',
+      'second_check_out': 'second_check_out'
+    };
+
     // Return the result with the action type and employee name
     return {
       ...result,
       employeeName: employeeData?.name || 'Unknown Employee',
-      action: result.check_out_time ? 'check-out' : 'check-in' // Determine action based on check_out_time
+      action: actionMap[result.status] || result.action
     };
   } catch (error) {
     console.error('Single scan attendance error:', error);

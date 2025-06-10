@@ -6,13 +6,13 @@ import 'sweetalert2/dist/sweetalert2.min.css';
 import 'animate.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/use-toast';
 import { getEmployeeById } from '@/utils/employeeUtils';
 import { SwitchCamera, Loader2, Camera, Power, Scan, Volume2, VolumeX } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { verifyGatePass } from '@/utils/gatePassUtils';
 import { singleScanAttendance } from '@/utils/attendanceUtils';
 import { Employee } from '@/types';
+import { toast } from 'sonner';
 
 // Performance optimized settings
 const SCAN_INTERVAL = 100; // Scan every 100ms for better performance
@@ -68,7 +68,7 @@ interface QRScannerProps {
 interface AttendanceResult {
   check_in_time: string;
   check_out_time?: string;
-  action: 'check-in' | 'check-out';
+  action: 'check-in' | 'check-out' | 'second_check_in' | 'second_check_out';
 }
 
 interface EmployeeData {
@@ -91,7 +91,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
   const [isProcessing, setIsProcessing] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
-  const { toast } = useToast();
 
   // Initialize canvas once
   useEffect(() => {
@@ -270,7 +269,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
       // Speak the message
       speak(speechText);
       
-      // Show quick success message
+      // Show detailed success message with sequence information
       Swal.fire({
         title: isCheckOut ? 'Check-Out Successful!' : 'Check-In Successful!',
         html: `
@@ -281,6 +280,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
             <p class="text-lg">
               ${isCheckOut ? 'Checked out' : 'Checked in'} at 
               <strong>${currentTime}</strong>
+            </p>
+            <p class="text-sm text-muted-foreground mt-2">
+              ${result.action === 'check-in' ? 'First Check-In' : 
+                result.action === 'check-out' ? 'First Check-Out' : 
+                result.action === 'second_check_in' ? 'Second Check-In' : 
+                result.action === 'second_check_out' ? 'Second Check-Out' : 'Attendance'}
             </p>
           </div>
         `,
@@ -304,7 +309,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
         onScan({
           id: employeeId,
           name: fullName,
-          type: result.action
+          type: result.action as 'check-in' | 'check-out'
         });
       }
 
