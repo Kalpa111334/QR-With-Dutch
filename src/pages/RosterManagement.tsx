@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { format, isAfter, isBefore, isToday } from 'date-fns';
+import { format, isAfter, isBefore, isToday, differenceInDays, differenceInHours, differenceInMinutes, isPast } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,6 +57,14 @@ import * as z from "zod";
 import { cn } from "@/lib/utils";
 import { supabase } from '../integrations/supabase/client';
 import Swal from 'sweetalert2';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 
 const SHIFT_TYPES: ShiftType[] = ['morning', 'evening', 'night', 'off'];
 
@@ -64,10 +72,38 @@ interface FormValues {
   employee: string;
   startDate: Date;
   endDate: Date;
-  shift: ShiftType;
+  rosterType: 'working' | 'off';
+  shift?: 'morning' | 'evening' | 'night' | 'off';
   startTime?: string;
   endTime?: string;
+  customStartTime?: string;
+  customEndTime?: string;
 }
+
+interface CountdownInfo {
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  isExpired: boolean;
+}
+
+const calculateCountdown = (endDate: string): CountdownInfo => {
+  const end = new Date(endDate);
+  const now = new Date();
+
+  if (isPast(end)) {
+    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
+  }
+
+  const totalSeconds = Math.floor((end.getTime() - now.getTime()) / 1000);
+  const days = Math.floor(totalSeconds / (24 * 60 * 60));
+  const hours = Math.floor((totalSeconds % (24 * 60 * 60)) / (60 * 60));
+  const minutes = Math.floor((totalSeconds % (60 * 60)) / 60);
+  const seconds = totalSeconds % 60;
+
+  return { days, hours, minutes, seconds, isExpired: false };
+};
 
 const getShiftColor = (shift: string) => {
   const colors = {
@@ -92,24 +128,200 @@ const getRosterStatus = (startDate: string, endDate: string) => {
   return { label: 'Unknown', color: 'bg-gray-100 text-gray-800' };
 };
 
+const getRosterTypeColor = (rosterType: string) => {
+  switch (rosterType.toLowerCase()) {
+    case 'working':
+      return 'bg-green-100 text-green-800 border-green-300';
+    case 'off':
+      return 'bg-orange-100 text-orange-800 border-orange-300';
+    default:
+      return 'bg-gray-100 text-gray-800 border-gray-300';
+  }
+};
+
 const formSchema = z.object({
   employee: z.string().min(1, { message: "Employee is required" }),
-  startDate: z.date(),
-  endDate: z.date(),
-  shift: z.enum(['morning', 'evening', 'night', 'off'] as const),
-  startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
-    message: "Please enter a valid time in 24-hour format (HH:mm)",
-  }).optional(),
-  endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
-    message: "Please enter a valid time in 24-hour format (HH:mm)",
-  }).optional(),
+  startDate: z.date({ required_error: "Start date is required" }),
+  endDate: z.date({ required_error: "End date is required" }),
+  rosterType: z.enum(['working', 'off']),
+  shift: z.enum(['morning', 'evening', 'night', 'off']).optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  customStartTime: z.string().optional(),
+  customEndTime: z.string().optional(),
+}).refine((data) => {
+  // Validate that end date is after start date
+  return data.endDate >= data.startDate;
+}, {
+  message: "End date must be after start date",
+  path: ["endDate"],
+}).refine((data) => {
+  // Validate custom time fields if they are being used
+  if (data.rosterType === 'working' && data.customStartTime) {
+    return data.customEndTime ? true : false;
+  }
+  return true;
+}, {
+  message: "Both custom start and end times must be provided",
+  path: ["customEndTime"],
 });
+
+const generatePDFReport = async (roster: any, employee: any) => {
+  const doc = new jsPDF();
+  
+  // Add company logo or header
+  doc.setFontSize(20);
+  doc.setTextColor(44, 62, 80);
+  doc.text('Dutch Trails Roster Report', 105, 15, { align: 'center' });
+  
+  // Add basic information section
+  doc.setFontSize(12);
+  doc.setTextColor(52, 73, 94);
+  
+  const basicInfo = [
+    ['Employee Name:', employee?.name || roster.employee_id],
+    ['Department:', employee?.department || 'N/A'],
+    ['Position:', employee?.position || 'N/A'],
+    ['Roster Period:', `${format(new Date(roster.start_date), 'PP')} - ${format(new Date(roster.end_date), 'PP')}`],
+    ['Duration:', `${differenceInDays(new Date(roster.end_date), new Date(roster.start_date))} days`],
+    ['Roster Type:', roster.shift_pattern?.[0]?.shift === 'off' ? 'Off Roster' : 'Working Roster'],
+  ];
+
+  doc.autoTable({
+    startY: 25,
+    head: [],
+    body: basicInfo,
+    theme: 'plain',
+    styles: {
+      cellPadding: 2,
+      fontSize: 10,
+      textColor: [52, 73, 94],
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 50 },
+      1: { cellWidth: 100 },
+    },
+  });
+
+  // Add shift pattern details
+  const shiftPatternHead = [['Day', 'Date', 'Shift Type', 'Time Slot', 'Status']];
+  const shiftPatternBody = roster.shift_pattern?.map((pattern: any, index: number) => {
+    const date = new Date(roster.start_date);
+    date.setDate(date.getDate() + index);
+    
+    return [
+      format(date, 'EEEE'),
+      format(date, 'PP'),
+      pattern.shift.charAt(0).toUpperCase() + pattern.shift.slice(1),
+      pattern.time_slot ? `${pattern.time_slot.start_time} - ${pattern.time_slot.end_time}` : 'N/A',
+      getRosterStatus(roster.start_date, roster.end_date).label,
+    ];
+  }) || [];
+
+  doc.autoTable({
+    startY: doc.lastAutoTable.finalY + 10,
+    head: shiftPatternHead,
+    body: shiftPatternBody,
+    theme: 'striped',
+    headStyles: {
+      fillColor: [41, 128, 185],
+      textColor: 255,
+      fontSize: 10,
+      fontStyle: 'bold',
+    },
+    styles: {
+      fontSize: 9,
+      cellPadding: 3,
+    },
+  });
+
+  // Add attendance records if available
+  if (roster.attendance_records?.length > 0) {
+    const attendanceHead = [['Date', 'Check In', 'Check Out', 'Total Hours', 'Status']];
+    const attendanceBody = roster.attendance_records.map((record: any) => {
+      const checkIn = new Date(record.check_in);
+      const checkOut = record.check_out ? new Date(record.check_out) : null;
+      const totalHours = checkOut 
+        ? ((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60)).toFixed(2)
+        : 'N/A';
+
+      return [
+        format(checkIn, 'PP'),
+        format(checkIn, 'p'),
+        checkOut ? format(checkOut, 'p') : 'Not checked out',
+        totalHours,
+        record.status || 'Present',
+      ];
+    });
+
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 10,
+      head: attendanceHead,
+      body: attendanceBody,
+      theme: 'striped',
+      headStyles: {
+        fillColor: [41, 128, 185],
+        textColor: 255,
+        fontSize: 10,
+        fontStyle: 'bold',
+      },
+      styles: {
+        fontSize: 9,
+        cellPadding: 3,
+      },
+    });
+  }
+
+  // Add summary section
+  const totalDays = differenceInDays(new Date(roster.end_date), new Date(roster.start_date));
+  const workingDays = roster.shift_pattern?.filter((p: any) => p.shift !== 'off').length || 0;
+  const offDays = totalDays - workingDays;
+  
+  const summaryInfo = [
+    ['Total Days:', `${totalDays}`],
+    ['Working Days:', `${workingDays}`],
+    ['Off Days:', `${offDays}`],
+    ['Generated On:', format(new Date(), 'PPpp')],
+  ];
+
+  doc.autoTable({
+    startY: doc.lastAutoTable.finalY + 10,
+    head: [],
+    body: summaryInfo,
+    theme: 'plain',
+    styles: {
+      cellPadding: 2,
+      fontSize: 10,
+      textColor: [52, 73, 94],
+    },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 50 },
+      1: { cellWidth: 100 },
+    },
+  });
+
+  // Add footer
+  const pageCount = doc.internal.getNumberOfPages();
+  doc.setFontSize(8);
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.text(
+      `Page ${i} of ${pageCount} - Generated by Dutch Trails Roster Management System`,
+      doc.internal.pageSize.width / 2,
+      doc.internal.pageSize.height - 10,
+      { align: 'center' }
+    );
+  }
+
+  return doc;
+};
 
 export default function RosterManagement() {
   const [formValues, setFormValues] = useState<FormValues>({
     employee: '',
     startDate: new Date(),
     endDate: new Date(),
+    rosterType: 'working',
     shift: 'morning'
   });
   const [rosters, setRosters] = useState<Roster[]>([]);
@@ -130,6 +342,10 @@ export default function RosterManagement() {
   const [selectedEndDate, setSelectedEndDate] = useState<Date>();
   const [selectedShift, setSelectedShift] = useState<ShiftType>('morning');
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [isCustomTime, setIsCustomTime] = useState(false);
+
+  // Add state for countdown refresh
+  const [countdownTick, setCountdownTick] = useState(0);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -137,7 +353,12 @@ export default function RosterManagement() {
       employee: '',
       startDate: new Date(),
       endDate: new Date(),
-      shift: 'morning'
+      rosterType: 'working',
+      shift: 'morning',
+      startTime: '',
+      endTime: '',
+      customStartTime: '',
+      customEndTime: ''
     }
   });
 
@@ -155,6 +376,15 @@ export default function RosterManagement() {
       }
     }
   }, [selectedEmployee, employees]);
+
+  // Update the countdown timer to tick every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdownTick(prev => prev + 1);
+    }, 1000); // Update every second instead of every minute
+
+    return () => clearInterval(timer);
+  }, []);
 
   const loadRosters = async () => {
     try {
@@ -181,39 +411,65 @@ export default function RosterManagement() {
     try {
       setLoading(true);
       setError(null);
-      
-      const timeSlot = data.shift !== 'off' && data.startTime && data.endTime ? {
-        start_time: data.startTime,
-        end_time: data.endTime
-      } : undefined;
 
+      // Validate dates
+      if (data.endDate < data.startDate) {
+        throw new Error('End date must be after start date');
+      }
+
+      // Determine time slot based on roster type and custom time settings
+      let timeSlot = null;
+      if (data.rosterType === 'working') {
+        if (isCustomTime && data.customStartTime && data.customEndTime) {
+          timeSlot = {
+            start_time: data.customStartTime,
+            end_time: data.customEndTime
+          };
+        } else if (data.shift && data.shift !== 'off') {
+          // Default time slots for each shift type
+          const defaultTimeSlots = {
+            morning: { start_time: '09:00', end_time: '17:00' },
+            evening: { start_time: '17:00', end_time: '01:00' },
+            night: { start_time: '23:00', end_time: '07:00' }
+          };
+          timeSlot = defaultTimeSlots[data.shift];
+        }
+      }
+
+      // Create the roster object
       const newRoster: Omit<Roster, 'id' | 'created_at' | 'updated_at'> = {
         employee_id: data.employee,
-        department: selectedDepartment,
-        position: selectedPosition,
+        department: selectedDepartment || 'Unassigned',
+        position: selectedPosition || 'Unassigned',
         start_date: format(data.startDate, 'yyyy-MM-dd'),
         end_date: format(data.endDate, 'yyyy-MM-dd'),
         shift_pattern: [{
           date: format(data.startDate, 'yyyy-MM-dd'),
-          shift: data.shift,
+          shift: data.rosterType === 'off' ? 'off' : (data.shift || 'morning'),
           time_slot: timeSlot
         }],
-        status: 'active' as const,
+        status: 'active',
+        notes: `${data.rosterType.toUpperCase()} Roster - Created on ${format(new Date(), 'PPP')}`,
       };
 
+      console.log('Creating roster with data:', newRoster);
+
       const result = await RosterService.createRoster(newRoster);
-      console.log('Roster creation result:', result);
       
-      // Update local state immediately with the new roster
+      if (!result) {
+        throw new Error('Failed to create roster - no response from server');
+      }
+
+      console.log('Roster creation successful:', result);
+
+      // Update local state and close dialog
       setRosters(prevRosters => [...prevRosters, result]);
-      
       setIsCreateDialogOpen(false);
+      
+      // Reset form and state
       resetForm();
-      form.reset();
       
-      // Refresh the roster list to ensure we have the latest data
-      await loadRosters();
-      
+      // Show success message
       await Swal.fire({
         icon: 'success',
         title: 'Success!',
@@ -221,9 +477,14 @@ export default function RosterManagement() {
         showConfirmButton: false,
         timer: 1500
       });
+
+      // Refresh roster list
+      await loadRosters();
+
     } catch (err) {
       console.error('Error creating roster:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
+      
       await Swal.fire({
         icon: 'error',
         title: 'Oops...',
@@ -251,6 +512,14 @@ export default function RosterManagement() {
     }
   };
 
+  const handleCustomTimeChange = (checked: boolean) => {
+    setIsCustomTime(checked);
+    if (!checked) {
+      form.setValue("customStartTime", '');
+      form.setValue("customEndTime", '');
+    }
+  };
+
   const resetForm = () => {
     setSelectedEmployee('');
     setSelectedDepartment('');
@@ -258,6 +527,18 @@ export default function RosterManagement() {
     setSelectedStartDate(undefined);
     setSelectedEndDate(undefined);
     setSelectedShift('morning');
+    setIsCustomTime(false);
+    form.reset({
+      employee: '',
+      startDate: new Date(),
+      endDate: new Date(),
+      rosterType: 'working',
+      shift: 'morning',
+      startTime: '',
+      endTime: '',
+      customStartTime: '',
+      customEndTime: ''
+    });
   };
 
   const filteredRosters = rosters.filter(roster => {
@@ -304,20 +585,20 @@ export default function RosterManagement() {
   const handleDownloadReport = async (rosterId: string) => {
     try {
       setGeneratingPdf(true);
-      const pdfBase64 = await RosterReportService.generateRosterReport(rosterId);
+      const roster = filteredRosters.find(r => r.id === rosterId);
+      if (!roster) throw new Error('Roster not found');
+
+      const employee = employees.find(emp => emp.id === roster.employee_id);
+      const doc = await generatePDFReport(roster, employee);
       
-      // Create a link element and trigger download
-      const link = document.createElement('a');
-      link.href = pdfBase64;
-      link.download = `roster-report-${rosterId}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Generate filename
+      const fileName = `roster_${employee?.name || roster.employee_id}_${format(new Date(roster.start_date), 'yyyy-MM-dd')}.pdf`;
+      doc.save(fileName);
     } catch (error) {
-      console.error('Error downloading report:', error);
+      console.error('Error generating PDF:', error);
       toast({
         title: 'Error',
-        description: 'Failed to download roster report',
+        description: 'Failed to generate PDF report',
         variant: 'destructive',
       });
     } finally {
@@ -446,45 +727,104 @@ export default function RosterManagement() {
                   const currentShift = roster.shift_pattern?.[0]?.shift || 'off';
                   const timeSlot = roster.shift_pattern?.[0]?.time_slot;
                   const employee = employees.find(emp => emp.id === roster.employee_id);
+                  const countdown = calculateCountdown(roster.end_date);
+                  const rosterType = currentShift === 'off' ? 'Off' : 'Working';
                   
                   return (
                     <Card key={roster.id} className="overflow-hidden">
-                      <CardContent className="p-4">
+                      {/* Card Header with Roster Type */}
+                      <CardHeader className="pb-2">
+                        <div className="flex justify-between items-center">
+                          <div className="flex flex-col">
+                            <h3 className="font-semibold text-lg">
+                              {employee?.name || roster.employee_id}
+                            </h3>
+                            <p className="text-sm text-gray-500">
+                              {format(new Date(roster.start_date), 'PP')} - {format(new Date(roster.end_date), 'PP')}
+                            </p>
+                          </div>
+                          <div className={cn(
+                            "px-4 py-1 rounded-full text-sm font-semibold",
+                            getRosterTypeColor(rosterType)
+                          )}>
+                            {rosterType} Roster
+                          </div>
+                        </div>
+                      </CardHeader>
+
+                      <CardContent className="pt-2 px-4 pb-4">
                         <div className="flex flex-col gap-3">
+                          {/* Real-time Countdown Timer */}
+                          {!countdown.isExpired && status.label !== 'Completed' && (
+                            <div className="bg-gray-50 p-3 rounded-lg border">
+                              <p className="text-sm font-medium text-gray-500 mb-2">Time Remaining:</p>
+                              <div className="grid grid-cols-4 gap-2 text-center">
+                                <div className="bg-white p-2 rounded shadow-sm">
+                                  <p className="text-lg font-bold text-primary">{countdown.days}</p>
+                                  <p className="text-xs text-gray-500">Days</p>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow-sm">
+                                  <p className="text-lg font-bold text-primary">{countdown.hours}</p>
+                                  <p className="text-xs text-gray-500">Hours</p>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow-sm">
+                                  <p className="text-lg font-bold text-primary">{countdown.minutes}</p>
+                                  <p className="text-xs text-gray-500">Minutes</p>
+                                </div>
+                                <div className="bg-white p-2 rounded shadow-sm">
+                                  <p className="text-lg font-bold text-primary">{countdown.seconds}</p>
+                                  <p className="text-xs text-gray-500">Seconds</p>
+                                </div>
+                              </div>
+
+                              {/* Progress Bar */}
+                              <div className="mt-3">
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div
+                                    className="bg-primary h-2 rounded-full transition-all duration-500"
+                                    style={{
+                                      width: `${Math.max(
+                                        0,
+                                        Math.min(
+                                          100,
+                                          ((new Date().getTime() - new Date(roster.start_date).getTime()) /
+                                            (new Date(roster.end_date).getTime() - new Date(roster.start_date).getTime())) *
+                                            100
+                                        )
+                                      )}%`
+                                    }}
+                                  />
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1 text-right">
+                                  {Math.round(((new Date().getTime() - new Date(roster.start_date).getTime()) /
+                                    (new Date(roster.end_date).getTime() - new Date(roster.start_date).getTime())) *
+                                    100)}% Complete
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Shift and Time Details */}
                           <div className="flex justify-between items-start">
                             <div>
-                              <h3 className="font-semibold">
-                                {employee?.name || roster.employee_id}
-                              </h3>
-                              <p className="text-sm text-gray-500">
-                                {format(new Date(roster.start_date), 'PP')} - {format(new Date(roster.end_date), 'PP')}
-                              </p>
                               {timeSlot && (
                                 <p className="text-sm text-gray-600">
-                                  Time: {timeSlot.start_time} - {timeSlot.end_time}
-                                </p>
-                              )}
-                              {roster.assignment_time && (
-                                <p className="text-xs text-gray-400">
-                                  Assigned: {format(new Date(roster.assignment_time), 'PPp')}
-                                </p>
-                              )}
-                              {roster.completion_time && (
-                                <p className="text-xs text-gray-400">
-                                  Completed: {format(new Date(roster.completion_time), 'PPp')}
+                                  Working Hours: {timeSlot.start_time} - {timeSlot.end_time}
                                 </p>
                               )}
                             </div>
                             <div className="flex flex-col gap-2 items-end">
                               <Badge className={getShiftColor(currentShift)}>
-                                {currentShift.charAt(0).toUpperCase() + currentShift.slice(1)}
+                                {currentShift.charAt(0).toUpperCase() + currentShift.slice(1)} Shift
                               </Badge>
                               <Badge className={status.color}>
                                 {status.label}
                               </Badge>
                             </div>
                           </div>
-                          <div className="flex justify-end gap-2">
+
+                          {/* Action Buttons */}
+                          <div className="flex justify-end gap-2 mt-2">
                             {status.label === 'Completed' && (
                               <>
                                 <Button
@@ -583,158 +923,240 @@ export default function RosterManagement() {
                   </AccordionContent>
                 </AccordionItem>
 
-                <AccordionItem value="schedule">
+                <AccordionItem value="roster">
                   <AccordionTrigger className="text-lg font-semibold">
-                    Schedule Details
+                    Roster Details
                   </AccordionTrigger>
                   <AccordionContent className="pt-4 pb-2">
-                    <div className="grid gap-6">
-                      <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="grid gap-4">
+                      <div className="grid grid-cols-2 gap-4">
                         <FormField
                           control={form.control}
                           name="startDate"
                           render={({ field }) => (
-                            <FormItem>
+                            <FormItem className="flex flex-col">
                               <FormLabel>Start Date</FormLabel>
-                              <div className="border rounded-md p-2">
-                                <Calendar
-                                  mode="single"
-                                  selected={field.value}
-                                  onSelect={(date) => {
-                                    field.onChange(date);
-                                    setSelectedStartDate(date);
-                                  }}
-                                  disabled={(date) =>
-                                    date < new Date() || (form.watch("endDate") && date > form.watch("endDate"))
-                                  }
-                                  className="rounded-md border"
-                                />
-                              </div>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <FormControl>
+                                    <Button
+                                      variant={"outline"}
+                                      className={cn(
+                                        "w-full pl-3 text-left font-normal",
+                                        !field.value && "text-muted-foreground"
+                                      )}
+                                    >
+                                      {field.value ? (
+                                        format(field.value, "PPP")
+                                      ) : (
+                                        <span>Pick a date</span>
+                                      )}
+                                      <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                    </Button>
+                                  </FormControl>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                  <Calendar
+                                    mode="single"
+                                    selected={field.value}
+                                    onSelect={field.onChange}
+                                    disabled={(date) =>
+                                      date < new Date()
+                                    }
+                                    initialFocus
+                                  />
+                                </PopoverContent>
+                              </Popover>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
+
                         <FormField
                           control={form.control}
                           name="endDate"
                           render={({ field }) => (
-                            <FormItem>
+                            <FormItem className="flex flex-col">
                               <FormLabel>End Date</FormLabel>
-                              <div className="border rounded-md p-2">
-                                <Calendar
-                                  mode="single"
-                                  selected={field.value}
-                                  onSelect={(date) => {
-                                    field.onChange(date);
-                                    setSelectedEndDate(date);
-                                  }}
-                                  disabled={(date) =>
-                                    date < (form.watch("startDate") || new Date())
-                                  }
-                                  className="rounded-md border"
-                                />
-                              </div>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <FormControl>
+                                    <Button
+                                      variant={"outline"}
+                                      className={cn(
+                                        "w-full pl-3 text-left font-normal",
+                                        !field.value && "text-muted-foreground"
+                                      )}
+                                    >
+                                      {field.value ? (
+                                        format(field.value, "PPP")
+                                      ) : (
+                                        <span>Pick a date</span>
+                                      )}
+                                      <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                    </Button>
+                                  </FormControl>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                  <Calendar
+                                    mode="single"
+                                    selected={field.value}
+                                    onSelect={field.onChange}
+                                    disabled={(date) =>
+                                      date < form.getValues("startDate")
+                                    }
+                                    initialFocus
+                                  />
+                                </PopoverContent>
+                              </Popover>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
                       </div>
+
                       <FormField
                         control={form.control}
-                        name="shift"
+                        name="rosterType"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Shift Type</FormLabel>
+                            <FormLabel>Roster Type</FormLabel>
                             <Select
                               value={field.value}
-                              onValueChange={(value) => {
-                                field.onChange(value);
-                                setSelectedShift(value as ShiftType);
-                              }}
+                              onValueChange={field.onChange}
                             >
                               <FormControl>
                                 <SelectTrigger>
-                                  <SelectValue placeholder="Select shift type" />
+                                  <SelectValue placeholder="Select roster type" />
                                 </SelectTrigger>
                               </FormControl>
                               <SelectContent>
-                                {SHIFT_TYPES.map((shift) => (
-                                  <SelectItem key={shift} value={shift}>
-                                    <div className="flex items-center gap-2">
-                                      <Badge className={cn("w-2 h-2 rounded-full", getShiftColor(shift))} />
-                                      {shift.charAt(0).toUpperCase() + shift.slice(1)}
-                                    </div>
-                                  </SelectItem>
-                                ))}
+                                <SelectItem value="working">Working Roster</SelectItem>
+                                <SelectItem value="off">Off Roster</SelectItem>
                               </SelectContent>
                             </Select>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
-                      
-                      {form.watch("shift") !== "off" && (
-                        <div className="grid sm:grid-cols-2 gap-4">
+
+                      {form.watch("rosterType") === "working" && (
+                        <>
                           <FormField
                             control={form.control}
-                            name="startTime"
+                            name="shift"
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>Start Time</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    type="time"
-                                    {...field}
-                                    placeholder="HH:mm"
-                                  />
-                                </FormControl>
-                                <FormDescription>
-                                  24-hour format (e.g., 09:00)
-                                </FormDescription>
+                                <FormLabel>Shift</FormLabel>
+                                <Select
+                                  value={field.value}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select shift" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="morning">Morning Shift</SelectItem>
+                                    <SelectItem value="evening">Evening Shift</SelectItem>
+                                    <SelectItem value="night">Night Shift</SelectItem>
+                                  </SelectContent>
+                                </Select>
                                 <FormMessage />
                               </FormItem>
                             )}
                           />
-                          <FormField
-                            control={form.control}
-                            name="endTime"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>End Time</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    type="time"
-                                    {...field}
-                                    placeholder="HH:mm"
-                                  />
-                                </FormControl>
-                                <FormDescription>
-                                  24-hour format (e.g., 17:00)
-                                </FormDescription>
-                                <FormMessage />
-                              </FormItem>
+
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <FormLabel className="text-base">Custom Time</FormLabel>
+                              <Switch
+                                checked={isCustomTime}
+                                onCheckedChange={handleCustomTimeChange}
+                                aria-label="Toggle custom time"
+                              />
+                            </div>
+
+                            {isCustomTime && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <FormField
+                                  control={form.control}
+                                  name="customStartTime"
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Custom Start Time</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type="time"
+                                          {...field}
+                                          placeholder="HH:mm"
+                                          required
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        24-hour format (e.g., 09:00)
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                                <FormField
+                                  control={form.control}
+                                  name="customEndTime"
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Custom End Time</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type="time"
+                                          {...field}
+                                          placeholder="HH:mm"
+                                          required
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        24-hour format (e.g., 17:00)
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
                             )}
-                          />
-                        </div>
+                          </div>
+                        </>
                       )}
                     </div>
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
 
-              <div className="flex justify-end gap-2 pt-4">
+              <div className="flex justify-end gap-4">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => {
                     setIsCreateDialogOpen(false);
                     resetForm();
-                    form.reset();
                   }}
                 >
                   Cancel
                 </Button>
-                <Button type="submit">Create Roster</Button>
+                <Button 
+                  type="submit" 
+                  disabled={loading || !form.formState.isValid}
+                  className="bg-primary hover:bg-primary/90"
+                >
+                  {loading ? (
+                    <div className="flex items-center gap-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Creating...
+                    </div>
+                  ) : (
+                    'Create Roster'
+                  )}
+                </Button>
               </div>
             </form>
           </Form>
