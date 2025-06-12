@@ -59,7 +59,7 @@ describe('recordAttendance', () => {
     expect(supabase.rpc).toHaveBeenCalledWith('process_double_attendance', {
       p_employee_id: mockEmployeeId,
       p_current_time: expect.any(String), // expect any string for current_time
-    }, { head: true });
+    });
 
     expect(result.check_in_time).toBe(mockTimestamp);
     expect(result.check_out_time).toBeNull();
@@ -93,7 +93,7 @@ describe('recordAttendance', () => {
     expect(supabase.rpc).toHaveBeenCalledWith('process_double_attendance', {
       p_employee_id: mockEmployeeId,
       p_current_time: expect.any(String),
-    }, { head: true });
+    });
 
     expect(result.check_in_time).toBe(secondCheckInTime);
     expect(result.check_out_time).toBe(mockTimestamp);

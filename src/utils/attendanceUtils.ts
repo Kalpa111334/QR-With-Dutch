@@ -210,8 +210,6 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
         .rpc('process_double_attendance', { 
           p_employee_id: qrData,
           p_current_time: new Date().toISOString()
-        }, {
-          head: true
         })
     ]) as [
       PostgrestSingleResponse<{ id: string; name: string; status: string }>,
