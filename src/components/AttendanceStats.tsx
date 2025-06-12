@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Users, UserCheck, LogOut, UserX, Clock, Timer, AlertTriangle, Briefcase, Share2, Loader2 } from 'lucide-react';
+import { Users, UserCheck, LogOut, UserX, Clock, Timer, AlertTriangle, Briefcase, Share2, Loader2, CheckCircle2, BarChart2, RefreshCcw } from 'lucide-react';
 import { getTodayAttendanceSummary, autoShareAttendanceSummary } from '@/utils/attendanceUtils';
 import { toast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/lib/supabase';
 
 interface DetailedStats {
   onTime: number;
@@ -50,31 +51,57 @@ const AttendanceStats: React.FC = () => {
   const [sharing, setSharing] = useState(false);
   const [lastPresentCount, setLastPresentCount] = useState(0);
   const [activeView, setActiveView] = useState<'standard' | 'detailed' | 'rates'>('standard');
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  useEffect(() => {
-    const fetchStats = async () => {
+  const refreshStats = useCallback(async () => {
       try {
+      setLoading(true);
         const data = await getTodayAttendanceSummary();
-        if (stats && data.presentCount > lastPresentCount) {
-          toast({
-            title: "New Check-in!",
-            description: `Total present: ${data.presentCount}/${data.totalEmployees}`,
-            duration: 3000,
-          });
-        }
+      setStats(data);
         setLastPresentCount(data.presentCount);
-        setStats(data);
       } catch (error) {
         console.error('Error fetching attendance stats:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update attendance statistics",
+        variant: "destructive",
+      });
       } finally {
         setLoading(false);
       }
-    };
+  }, []);
 
-    fetchStats();
-    const interval = setInterval(fetchStats, 30 * 1000);
+  useEffect(() => {
+    refreshStats();
+
+    const interval = setInterval(refreshStats, 30 * 1000);
     return () => clearInterval(interval);
-  }, [stats, lastPresentCount]);
+  }, [refreshKey]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('attendance-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'attendance'
+        },
+        () => {
+          refreshStats();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const handleRefresh = () => {
+    setRefreshKey(prev => prev + 1);
+  };
 
   const handleShare = async () => {
     try {
@@ -90,7 +117,6 @@ const AttendanceStats: React.FC = () => {
         return;
       }
 
-      // Open WhatsApp in a new window
       window.open(whatsappUrl, '_blank');
       
       toast({
@@ -108,16 +134,13 @@ const AttendanceStats: React.FC = () => {
     }
   };
 
-  if (loading) {
+  if (loading && !stats) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i} className="bg-white/50 dark:bg-black/20">
-            <CardContent className="p-6">
-              <div className="h-16 animate-pulse bg-gray-200 dark:bg-gray-700 rounded"></div>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="flex items-center justify-center p-8">
+        <div className="flex flex-col items-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Loading attendance statistics...</p>
+        </div>
       </div>
     );
   }
@@ -229,57 +252,183 @@ const AttendanceStats: React.FC = () => {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <Tabs value={activeView} onValueChange={(value) => setActiveView(value as 'standard' | 'detailed' | 'rates')}>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="standard">Standard View</TabsTrigger>
-            <TabsTrigger value="detailed">Detailed View</TabsTrigger>
-            <TabsTrigger value="rates">Rates View</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <h2 className="text-2xl font-bold tracking-tight">Today's Attendance</h2>
         <Button
-          onClick={handleShare}
-          disabled={sharing || loading}
-          className="ml-4 bg-blue-600 hover:bg-blue-700 text-white"
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          className="flex items-center gap-2"
         >
-          {sharing ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Sharing...
-            </>
-          ) : (
-            <>
-              <Share2 className="mr-2 h-4 w-4" />
-              Share Report
-            </>
-          )}
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {currentCards.map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <Card 
-              key={index} 
-              className={`bg-white/50 dark:bg-black/20 hover:shadow-md transition-all duration-300 ${
-                stat.highlight ? 'animate-pulse border-green-500 border-2' : ''
-              }`}
-            >
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {stat.title}
-                </CardTitle>
-                <Icon className={`h-4 w-4 ${stat.color}`} />
+      <Tabs value={activeView} onValueChange={(value: any) => setActiveView(value)}>
+        <TabsList>
+          <TabsTrigger value="standard">Standard View</TabsTrigger>
+          <TabsTrigger value="detailed">Detailed View</TabsTrigger>
+          <TabsTrigger value="rates">Rates & Percentages</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="standard" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Present Today</CardTitle>
+                <UserCheck className="h-4 w-4 text-green-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {stat.description}
+                <div className="text-2xl font-bold">{stats?.presentCount || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  of {stats?.totalEmployees || 0} total employees
                 </p>
               </CardContent>
             </Card>
-          );
-        })}
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Late Arrivals</CardTitle>
+                <Clock className="h-4 w-4 text-yellow-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.lateCount || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  {stats?.lateRate || '0'}% of present employees
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Checked Out</CardTitle>
+                <LogOut className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.checkedOutCount || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  {((stats?.checkedOutCount || 0) / (stats?.totalEmployees || 1) * 100).toFixed(1)}% completion
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Absent</CardTitle>
+                <UserX className="h-4 w-4 text-red-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.absentCount || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  {stats?.absentRate || '0'}% absence rate
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="detailed" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">On Time Arrivals</CardTitle>
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.detailed.onTime || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  {stats?.onTimeRate || '0'}% punctuality rate
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Working Overtime</CardTitle>
+                <Clock className="h-4 w-4 text-purple-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.detailed.overtime || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  employees working >8 hours
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Early Departures</CardTitle>
+                <LogOut className="h-4 w-4 text-orange-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.detailed.earlyDepartures || 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  left before shift end
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="rates" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Present Rate</CardTitle>
+                <BarChart2 className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.totalPresentRate || '0'}%</div>
+                <p className="text-xs text-muted-foreground">
+                  overall attendance rate
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Efficiency Rate</CardTitle>
+                <Timer className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.detailed.efficiencyRate || '0'}%</div>
+                <p className="text-xs text-muted-foreground">
+                  based on punctuality and presence
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Current Presence</CardTitle>
+                <Users className="h-4 w-4 text-purple-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats?.currentPresenceRate || '0'}%</div>
+                <p className="text-xs text-muted-foreground">
+                  currently in office
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      <div className="flex justify-end mt-4">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleShare}
+          disabled={sharing}
+          className="flex items-center gap-2"
+        >
+          {sharing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Share2 className="h-4 w-4" />
+          )}
+          Share Report
+        </Button>
       </div>
     </div>
   );

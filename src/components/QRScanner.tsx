@@ -13,11 +13,12 @@ import { verifyGatePass } from '@/utils/gatePassUtils';
 import { singleScanAttendance } from '@/utils/attendanceUtils';
 import { Employee } from '@/types';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 
 // Performance optimized settings
 const SCAN_INTERVAL = 100; // Scan every 100ms for better performance
 const PROCESS_TIMEOUT = 2000;
-const ALERT_DURATION = 2000;
+const ALERT_DURATION = 2500; // 2.5 seconds for alert display
 const SCAN_RESOLUTION = { width: 480, height: 360 }; // Reduced resolution for faster processing
 const SCAN_QUALITY = 0.6; // Reduced quality for better performance
 
@@ -29,7 +30,7 @@ const employeeCache = new Map<string, { data: EmployeeData; timestamp: number }>
 const SPEECH_SETTINGS = {
   lang: 'en-US',
   pitch: 1,
-  rate: 0.8,
+  rate: 0.6,
   volume: 1,
   voice: null as SpeechSynthesisVoice | null
 };
@@ -68,7 +69,16 @@ interface QRScannerProps {
 interface AttendanceResult {
   check_in_time: string;
   check_out_time?: string;
-  action: 'check-in' | 'check-out' | 'second_check_in' | 'second_check_out';
+  action: 'first_check_in' | 'first_check_out' | 'second_check_in' | 'second_check_out';
+  break_duration?: number;
+  cooldown_remaining?: number;
+  timestamp: string;
+  total_worked_time?: number;
+  first_check_in_time?: string;
+  first_check_out_time?: string;
+  second_check_in_time?: string;
+  second_check_out_time?: string;
+  total_hours?: number;
 }
 
 interface EmployeeData {
@@ -76,6 +86,11 @@ interface EmployeeData {
   last_name: string;
   id: string;
 }
+
+const formatTime = (timestamp: string | null | undefined) => {
+  if (!timestamp) return '-';
+  return format(new Date(timestamp), 'hh:mm:ss a');
+};
 
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendance' }) => {
   const webcamRef = useRef<Webcam>(null);
@@ -91,6 +106,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
   const [isProcessing, setIsProcessing] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
+  const [cooldownTimer, setCooldownTimer] = useState<number | null>(null);
 
   // Initialize canvas once
   useEffect(() => {
@@ -211,18 +227,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
     });
   }, [scanning, isProcessing]);
 
-  // Handle worker response
-  useEffect(() => {
-    const handleWorkerMessage = (e: MessageEvent) => {
-      if (e.data) {
-        processQRCode(e.data);
-      }
-    };
-
-    qrWorker.addEventListener('message', handleWorkerMessage);
-    return () => qrWorker.removeEventListener('message', handleWorkerMessage);
-  }, []);
-
   // Optimized QR processing
   const processQRCode = useCallback(async (qrData: string) => {
     if (!qrData?.trim() || qrData === lastProcessedData.current || processingLock.current) return;
@@ -251,44 +255,111 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
       // Parallel processing of employee validation and attendance
       const [employee, result] = await Promise.all([
         getEmployeeWithCache(employeeId),
-        singleScanAttendance(employeeId) as Promise<AttendanceResult>
+        singleScanAttendance(employeeId)
       ]);
 
       if (!employee) throw new Error('Employee not found');
 
-      const isCheckOut = result.action === 'check-out';
-      const timestamp = isCheckOut && result.check_out_time ? result.check_out_time : result.check_in_time;
-      const currentTime = new Date(timestamp).toLocaleTimeString();
+      const isCheckOut = result.action.includes('check-out');
+      const isSecondSequence = result.action.includes('second');
+      const timestamp = new Date(result.timestamp);
+      const currentTime = format(timestamp, 'hh:mm:ss a');
       const fullName = `${employee.first_name} ${employee.last_name}`;
       
-      // Prepare speech text
-      const speechText = isCheckOut
-        ? `Goodbye ${fullName}. You have successfully checked out at ${currentTime}. Have a great evening!`
-        : `Welcome ${fullName}. You have successfully checked in at ${currentTime}. Have a great day!`;
+      // Handle cooldown timer if present
+      if (result.cooldown_remaining && result.cooldown_remaining > 0) {
+        setCooldownTimer(result.cooldown_remaining);
+        const minutes = Math.ceil(result.cooldown_remaining / 60);
+        throw new Error(
+          result.action === 'first_check_out' 
+            ? `Must wait ${minutes} minutes after first check-in before checking out`
+            : `Please wait ${minutes} minutes before next scan`
+        );
+      }
+
+      // Prepare speech text and display message based on action
+      let speechText = '';
+      let title = '';
+      let html = '';
+
+      switch (result.action) {
+        case 'first_check_in':
+          speechText = `Welcome ${fullName}. First check-in recorded at ${currentTime}. Have a great day!`;
+          title = 'First Check-In Successful!';
+          html = `
+            <div class="text-center">
+              <h2 class="text-2xl font-bold text-green-600 mb-4">Welcome, ${fullName}!</h2>
+              <p class="mb-2">First Check-In recorded at <strong>${currentTime}</strong></p>
+              <p class="text-sm text-gray-600">You must wait 5 minutes before checking out.</p>
+            </div>
+          `;
+          break;
+
+        case 'first_check_out':
+          const firstSessionDuration = result.total_worked_time 
+            ? Math.floor(result.total_worked_time / 60)
+            : 0;
+          
+          speechText = `${fullName}, your first check-out has been recorded at ${currentTime}. Enjoy your break!`;
+          title = 'First Check-Out Successful!';
+          html = `
+            <div class="text-center">
+              <h2 class="text-2xl font-bold text-blue-600 mb-4">Break Time, ${fullName}!</h2>
+              <p class="mb-2">First Check-Out recorded at <strong>${currentTime}</strong></p>
+              <div class="text-sm text-gray-600 mt-4">
+                <p>First Check-In: ${formatTime(result.first_check_in_time)}</p>
+                <p>First Session Duration: ${firstSessionDuration} minutes</p>
+              </div>
+            </div>
+          `;
+          break;
+
+        case 'second_check_in':
+          const breakDuration = Math.round(result.break_duration || 0);
+          speechText = `Welcome back ${fullName}. Second check-in recorded at ${currentTime}.`;
+          title = 'Second Check-In Successful!';
+          html = `
+            <div class="text-center">
+              <h2 class="text-2xl font-bold text-green-600 mb-4">Welcome Back, ${fullName}!</h2>
+              <p class="mb-2">Second Check-In recorded at <strong>${currentTime}</strong></p>
+              <div class="text-sm text-gray-600 mt-4">
+                <p>Break Duration: ${breakDuration} minutes</p>
+                <p>First Check-In: ${formatTime(result.first_check_in_time)}</p>
+                <p>First Check-Out: ${formatTime(result.first_check_out_time)}</p>
+              </div>
+            </div>
+          `;
+          break;
+
+        case 'second_check_out':
+          const totalWorkedHours = result.total_hours?.toFixed(2) || '0.00';
+          const totalWorkedMinutes = Math.round((result.total_worked_time || 0) / 60);
+          
+          speechText = `Goodbye ${fullName}. Your second check-out has been recorded at ${currentTime}. Have a great evening!`;
+          title = 'Second Check-Out Successful!';
+          html = `
+            <div class="text-center">
+              <h2 class="text-2xl font-bold text-blue-600 mb-4">Goodbye, ${fullName}!</h2>
+              <p class="mb-2">Second Check-Out recorded at <strong>${currentTime}</strong></p>
+              <div class="text-sm text-gray-600 mt-4">
+                <p>First Check-In: ${formatTime(result.first_check_in_time)}</p>
+                <p>First Check-Out: ${formatTime(result.first_check_out_time)}</p>
+                <p>Second Check-In: ${formatTime(result.second_check_in_time)}</p>
+                <p>Break Duration: ${Math.round(result.break_duration || 0)} minutes</p>
+                <p class="mt-2 font-semibold">Total Time Worked: ${totalWorkedHours} hours (${totalWorkedMinutes} minutes)</p>
+              </div>
+            </div>
+          `;
+          break;
+      }
 
       // Speak the message
       speak(speechText);
       
-      // Show detailed success message with sequence information
+      // Show success message
       Swal.fire({
-        title: isCheckOut ? 'Check-Out Successful!' : 'Check-In Successful!',
-        html: `
-          <div class="text-center">
-            <h2 class="text-2xl font-bold ${isCheckOut ? 'text-blue-600' : 'text-green-600'} mb-4">
-              ${isCheckOut ? 'Goodbye' : 'Hello'}, ${fullName}!
-            </h2>
-            <p class="text-lg">
-              ${isCheckOut ? 'Checked out' : 'Checked in'} at 
-              <strong>${currentTime}</strong>
-            </p>
-            <p class="text-sm text-muted-foreground mt-2">
-              ${result.action === 'check-in' ? 'First Check-In' : 
-                result.action === 'check-out' ? 'First Check-Out' : 
-                result.action === 'second_check_in' ? 'Second Check-In' : 
-                result.action === 'second_check_out' ? 'Second Check-Out' : 'Attendance'}
-            </p>
-          </div>
-        `,
+        title,
+        html,
         icon: 'success',
         timer: ALERT_DURATION,
         timerProgressBar: true,
@@ -309,7 +380,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
         onScan({
           id: employeeId,
           name: fullName,
-          type: result.action as 'check-in' | 'check-out'
+          type: isCheckOut ? 'check-out' : 'check-in'
         });
       }
 
@@ -317,22 +388,25 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
       console.error('Attendance recording error:', error);
       
       const errorMessage = error instanceof Error ? error.message : 'Failed to record attendance';
-      const alreadyCheckedIn = errorMessage.includes('already checked in');
+      const cooldownError = errorMessage.includes('wait') || errorMessage.includes('minutes');
+      const completedError = errorMessage.includes('All attendance for today already marked');
 
       // Speak error message
-      speak(alreadyCheckedIn 
-        ? "You have already checked in today. Please check out instead." 
+      speak(cooldownError 
+        ? errorMessage 
+        : completedError
+          ? "You have already completed all attendance actions for today"
         : "Sorry, there was an error recording your attendance. Please try again.");
 
-      // Quick error message
+      // Show error message
       Swal.fire({
-        title: alreadyCheckedIn ? 'Already Checked In' : 'Error',
+        title: cooldownError ? 'Please Wait' : completedError ? 'Already Completed' : 'Error',
         text: errorMessage,
-        icon: alreadyCheckedIn ? 'info' : 'error',
+        icon: cooldownError || completedError ? 'info' : 'error',
         timer: ALERT_DURATION,
         timerProgressBar: true,
         showConfirmButton: false,
-        background: alreadyCheckedIn ? '#f0f9ff' : '#fff0f0',
+        background: cooldownError || completedError ? '#f0f9ff' : '#fff0f0',
         showClass: {
           popup: 'animate__animated animate__shakeX animate__faster'
         },
@@ -351,6 +425,18 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
     }
   }, [onScan, speak, getEmployeeWithCache]);
 
+  // Handle worker response
+  useEffect(() => {
+    const handleWorkerMessage = (e: MessageEvent) => {
+      if (e.data) {
+        processQRCode(e.data);
+      }
+    };
+
+    qrWorker.addEventListener('message', handleWorkerMessage);
+    return () => qrWorker.removeEventListener('message', handleWorkerMessage);
+  }, [processQRCode]);
+
   // Optimized scanning interval
   useEffect(() => {
     cleanup();
@@ -359,6 +445,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
     }
     return cleanup;
   }, [scanQRCode, scanning, cleanup]);
+
+  // Update cooldown timer
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (cooldownTimer && cooldownTimer > 0) {
+      interval = setInterval(() => {
+        setCooldownTimer(prev => prev !== null ? prev - 1 : null);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [cooldownTimer]);
 
   // Optimized render with minimal state updates
   return (
@@ -370,6 +469,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
             {mode === 'gatepass' ? 'Gate Pass Scanner' : 'Quick Attendance Scanner'}
           </span>
           <div className="flex gap-2">
+            {cooldownTimer && cooldownTimer > 0 && (
+              <span className="text-sm font-medium text-yellow-600">
+                Cooldown: {Math.floor(cooldownTimer / 60)}:{(cooldownTimer % 60).toString().padStart(2, '0')}
+              </span>
+            )}
             <Button 
               variant="outline"
               size="sm"

@@ -1,11 +1,8 @@
--- Add deletion_type column to attendance table
+-- Add soft delete column to attendance table
 ALTER TABLE attendance
-ADD COLUMN IF NOT EXISTS deletion_type TEXT CHECK (deletion_type IN ('check_in', 'check_out', NULL));
+ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL;
 
--- Drop existing function first
-DROP FUNCTION IF EXISTS handle_selective_deletion(UUID, TEXT);
-
--- Create function to handle selective deletion
+-- Update the handle_selective_deletion function to use soft delete
 CREATE OR REPLACE FUNCTION handle_selective_deletion(
     p_record_id UUID,
     p_deletion_type TEXT
@@ -17,7 +14,8 @@ BEGIN
     -- Get the record
     SELECT * INTO v_record 
     FROM attendance 
-    WHERE id = p_record_id;
+    WHERE id = p_record_id
+    AND deleted_at IS NULL;
 
     IF NOT FOUND THEN
         RETURN jsonb_build_object(
@@ -29,8 +27,9 @@ BEGIN
     -- Handle different deletion types
     CASE p_deletion_type
         WHEN 'complete' THEN
-            -- Delete the complete record
-            DELETE FROM attendance 
+            -- Soft delete the complete record
+            UPDATE attendance 
+            SET deleted_at = NOW()
             WHERE id = p_record_id;
 
             RETURN jsonb_build_object(
@@ -51,7 +50,8 @@ BEGIN
                 total_hours = NULL,
                 total_worked_time = NULL,
                 status = 'pending'
-            WHERE id = p_record_id;
+            WHERE id = p_record_id
+            AND deleted_at IS NULL;
 
         WHEN 'first_check_out' THEN
             -- If we delete first check-out, we need to clear second check-in/out
@@ -64,7 +64,8 @@ BEGIN
                 total_hours = NULL,
                 total_worked_time = NULL,
                 status = 'present'
-            WHERE id = p_record_id;
+            WHERE id = p_record_id
+            AND deleted_at IS NULL;
 
         WHEN 'second_check_in' THEN
             -- If we delete second check-in, we need to clear second check-out
@@ -75,7 +76,8 @@ BEGIN
                 total_hours = NULL,
                 total_worked_time = v_record.first_check_out_time - v_record.first_check_in_time,
                 status = 'on_break'
-            WHERE id = p_record_id;
+            WHERE id = p_record_id
+            AND deleted_at IS NULL;
 
         WHEN 'second_check_out' THEN
             -- Only clear second check-out
@@ -85,7 +87,8 @@ BEGIN
                 total_hours = NULL,
                 total_worked_time = v_record.first_check_out_time - v_record.first_check_in_time,
                 status = 'present'
-            WHERE id = p_record_id;
+            WHERE id = p_record_id
+            AND deleted_at IS NULL;
 
         ELSE
             RETURN jsonb_build_object(
@@ -97,15 +100,17 @@ BEGIN
     -- After any partial deletion, check if all time fields are NULL
     SELECT * INTO v_record 
     FROM attendance 
-    WHERE id = p_record_id;
+    WHERE id = p_record_id
+    AND deleted_at IS NULL;
 
-    -- If all time fields are NULL after update, delete the entire record
+    -- If all time fields are NULL after update, soft delete the entire record
     IF v_record.first_check_in_time IS NULL AND 
        v_record.first_check_out_time IS NULL AND 
        v_record.second_check_in_time IS NULL AND 
        v_record.second_check_out_time IS NULL THEN
         
-        DELETE FROM attendance 
+        UPDATE attendance 
+        SET deleted_at = NOW()
         WHERE id = p_record_id;
         
         RETURN jsonb_build_object(
@@ -122,5 +127,31 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Add comment for documentation
-COMMENT ON COLUMN attendance.deletion_type IS 'Type of deletion: check_in, check_out, or NULL for complete deletion'; 
+-- Update the delete policy to use soft delete
+DROP POLICY IF EXISTS "Enable delete access for authenticated users" ON attendance;
+CREATE POLICY "Enable delete access for authenticated users"
+ON attendance
+FOR UPDATE
+TO authenticated
+USING (deleted_at IS NULL)
+WITH CHECK (deleted_at IS NULL);
+
+-- Create index for better performance
+CREATE INDEX IF NOT EXISTS idx_attendance_deleted_at ON attendance(deleted_at);
+
+-- Update existing functions to exclude deleted records
+CREATE OR REPLACE FUNCTION bulk_delete_attendance(p_record_ids UUID[])
+RETURNS JSONB AS $$
+BEGIN
+    UPDATE attendance
+    SET deleted_at = NOW()
+    WHERE id = ANY(p_record_ids)
+    AND deleted_at IS NULL;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'message', 'Records deleted successfully',
+        'count', array_length(p_record_ids, 1)
+    );
+END;
+$$ LANGUAGE plpgsql; 

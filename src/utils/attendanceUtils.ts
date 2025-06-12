@@ -1,16 +1,15 @@
 // Attendance Utilities Module
 import { supabase } from '@/integrations/supabase/client';
+import { PostgrestSingleResponse } from '@supabase/supabase-js';
 import { 
   Attendance, 
   AttendanceStatus, 
   WorkTimeInfo,
-  // Import the new types
   ExtendedWorkTimeInfo, 
   ExtendedAttendance, 
   CustomPostgrestResponse,
   AttendanceAction 
 } from '@/types';
-
 import Swal from 'sweetalert2';
 
 // Define AdminContactInfo interface locally
@@ -90,85 +89,40 @@ class AttendanceLogger {
 const attendanceLogger = AttendanceLogger.getInstance();
 
 // Attendance Metrics Calculation Utility
-const calculateAttendanceMetrics = (
-  check_in_time: Date, 
-  check_out_time?: Date
-): {
-  status: AttendanceStatus;
-  lateMinutes: number;
-  totalHours: number;
-  overtime: number;
-} => {
-  const now = new Date();
-  
-  // Work schedule constants
-  const WORK_START_TIME = 9;  // 9:00 AM
-  const WORK_END_TIME = 17;   // 5:00 PM
-  const STANDARD_WORK_HOURS = 8;
-  const HALF_DAY_THRESHOLD = 4;
-
-  // Calculate late duration
-  const workStartDateTime = new Date(check_in_time);
-  workStartDateTime.setHours(WORK_START_TIME, 0, 0, 0);
-    
-  const lateMinutes = check_in_time > workStartDateTime 
-    ? Math.floor((check_in_time.getTime() - workStartDateTime.getTime()) / (1000 * 60)) 
-    : 0;
-
-  // Determine status and calculate hours
-  let status: AttendanceStatus = 'present';
-  let totalHours = 0;
-  let overtime = 0;
-  // If check-out time is provided, calculate precise metrics
-  if (check_out_time) {
-    // Calculate time difference in minutes
-    const timeDiffMinutes = (check_out_time.getTime() - check_in_time.getTime()) / (1000 * 60);
-    
-    // Convert to hours
-    const workDuration = timeDiffMinutes / 60;
-    
-    // Minimum time requirement check (15 minutes)
-    if (timeDiffMinutes < 15) {
-      throw new AttendanceError('Invalid check-out: Minimum working duration is 15 minutes');
-    }
-    
-    totalHours = Math.round(workDuration * 10) / 10;
-
-    // Overtime calculation
-    if (workDuration > STANDARD_WORK_HOURS) {
-      overtime = Math.round((workDuration - STANDARD_WORK_HOURS) * 10) / 10;
-      status = 'checked-out-overtime';
-    }
-
-    // Early departure and half-day logic
-    const expectedEndTime = new Date(check_in_time);
-    expectedEndTime.setHours(WORK_END_TIME, 0, 0, 0);
-
-    if (check_out_time < expectedEndTime) {
-      status = 'early-departure';
-    }
-
-    // Half-day determination
-    if (totalHours < HALF_DAY_THRESHOLD) {
-      status = 'half-day';
-    }
-  }
-
-  // Late status determination
-  if (lateMinutes > 0) {
-    if (lateMinutes > 240) {  // More than 4 hours late
-      status = 'half-day';
-    } else {
-      status = 'late';
-    }
-  }
-
-  return {
-    lateMinutes,
-    totalHours,
-    overtime,
-    status
+export const calculateAttendanceMetrics = (
+  firstCheckInTime: Date,
+  firstCheckOutTime: Date | null,
+  secondCheckInTime: Date | null,
+  secondCheckOutTime: Date | null
+) => {
+  const metrics = {
+    totalHours: 0,
+    breakDuration: 0,
+    status: 'present' as 'present' | 'checked-out',
+    isOvertime: false
   };
+
+  // Calculate first session duration
+  if (firstCheckOutTime) {
+    const firstSessionDuration = (firstCheckOutTime.getTime() - firstCheckInTime.getTime()) / (1000 * 60 * 60);
+    metrics.totalHours += firstSessionDuration;
+  }
+
+  // Calculate break duration and second session duration
+  if (firstCheckOutTime && secondCheckInTime) {
+    metrics.breakDuration = (secondCheckInTime.getTime() - firstCheckOutTime.getTime()) / (1000 * 60);
+    
+    if (secondCheckOutTime) {
+      const secondSessionDuration = (secondCheckOutTime.getTime() - secondCheckInTime.getTime()) / (1000 * 60 * 60);
+      metrics.totalHours += secondSessionDuration;
+      metrics.status = 'checked-out';
+    }
+  }
+
+  // Check for overtime (more than 8 hours total)
+  metrics.isOvertime = metrics.totalHours > 8;
+
+  return metrics;
 };
 
 // Utility function to generate a unique timestamp
@@ -253,8 +207,16 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
         .or(`id.eq.${qrData},email.eq.${qrData}`)
         .maybeSingle(),
       supabase
-        .rpc('process_double_attendance', { p_employee_id: qrData }) as unknown as Promise<CustomPostgrestResponse<ExtendedAttendance>>
-    ]);
+        .rpc('process_double_attendance', { 
+          p_employee_id: qrData,
+          p_current_time: new Date().toISOString()
+        }, {
+          head: true
+        })
+    ]) as [
+      PostgrestSingleResponse<{ id: string; name: string; status: string }>,
+      { data: ExtendedAttendance; error: null } | { data: null; error: any }
+    ];
 
     if (employeeResult.error || !employeeResult.data) {
       throw new AttendanceError('Invalid or unregistered employee');
@@ -265,10 +227,18 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
       throw new AttendanceError('Employee is not currently active');
     }
 
+    if (existingRecordResult.error || !existingRecordResult.data) {
+      // Check if it's an invalid UUID format error
+      if (existingRecordResult.error?.message?.includes('Invalid employee ID format')) {
+        throw new AttendanceError('Invalid QR code format');
+      }
+      throw new AttendanceError('Failed to process attendance');
+    }
+
     const attendanceResult = existingRecordResult.data;
 
     // Handle different attendance actions
-    switch (attendanceResult.action as string) {
+    switch (attendanceResult.action as 'first_check_in' | 'first_check_out' | 'second_check_in' | 'second_check_out') {
       case 'first_check_in':
       return {
           check_in_time: attendanceResult.timestamp || new Date().toISOString(),
@@ -308,14 +278,13 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
           check_out_time: attendanceResult.timestamp || new Date().toISOString(),
           status: 'checked-out',
           sequence_number: 2,
-          total_hours: attendanceResult.total_hours,
           action: 'check-out',
           late_duration: 0,
           timestamp: attendanceResult.timestamp
         } as ExtendedWorkTimeInfo;
       
       default:
-        throw new AttendanceError(attendanceResult.message || 'Maximum check-ins/check-outs reached');
+        throw new AttendanceError('Maximum check-ins/check-outs reached');
     }
   } catch (error) {
     console.error('Attendance recording error:', error);
@@ -345,6 +314,7 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
         sequence_number,
         employee:employees (name)
       `)
+      .is('deleted_at', null) // Only get non-deleted records
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(500);
@@ -407,20 +377,25 @@ export const getTodayAttendanceSummary = async () => {
     };
 
     attendanceData?.forEach(record => {
-      if (['present', 'late', 'check-in'].includes(record.status)) {
+      // Handle first check-in/out sequence
+      if (record.first_check_in_time && !record.first_check_out_time) {
+        statusCounts.currentlyPresent++;
+        if (record.minutes_late > 0) {
+        statusCounts.lateButPresent++;
+        } else {
+          statusCounts.onTimeArrivals++;
+        }
+      }
+      // Handle second check-in/out sequence
+      else if (record.second_check_in_time && !record.second_check_out_time) {
         statusCounts.currentlyPresent++;
       }
-      
-      if (['late', 'check-in'].includes(record.status) && record.minutes_late > 0) {
-        statusCounts.lateButPresent++;
-      }
-      
-      if (['checked-out', 'checked-out-overtime'].includes(record.status)) {
+      // Handle completed attendance
+      else if (record.second_check_out_time || (record.first_check_out_time && !record.second_check_in_time)) {
         statusCounts.checkedOut++;
-      }
-      
       if (record.minutes_late === 0) {
         statusCounts.onTimeArrivals++;
+        }
       }
     });
 
@@ -451,6 +426,26 @@ export const getTodayAttendanceSummary = async () => {
         : '0'
     };
 
+    // Calculate detailed metrics
+    const detailed = {
+      onTime: statusCounts.onTimeArrivals,
+      lateArrivals: statusCounts.lateButPresent,
+      veryLate: attendanceData?.filter(r => r.minutes_late > 30).length || 0,
+      halfDay: attendanceData?.filter(r => {
+        const workDuration = r.total_worked_time ? parseFloat(r.total_worked_time) : 0;
+        return workDuration > 0 && workDuration < 4;
+      }).length || 0,
+      earlyDepartures: attendanceData?.filter(r => r.status === 'early_departure').length || 0,
+      overtime: attendanceData?.filter(r => {
+        const workDuration = r.total_worked_time ? parseFloat(r.total_worked_time) : 0;
+        return workDuration > 8;
+      }).length || 0,
+      regularHours: attendanceData?.reduce((sum, r) => sum + (parseFloat(r.total_worked_time) || 0), 0) || 0,
+      attendanceRate: rates.totalPresentRate,
+      efficiencyRate: ((statusCounts.onTimeArrivals / totalEmployees) * 100).toFixed(1),
+      punctualityRate: rates.onTimeRate
+    };
+
     return {
       totalEmployees,
       presentCount: statusCounts.currentlyPresent,
@@ -458,7 +453,7 @@ export const getTodayAttendanceSummary = async () => {
       absentCount: statusCounts.absent,
       checkedOutCount: statusCounts.checkedOut,
       onTime: statusCounts.onTimeArrivals,
-      stillWorking: statusCounts.currentlyPresent + statusCounts.lateButPresent,
+      stillWorking: statusCounts.currentlyPresent,
       
       currentPresenceRate: rates.currentPresenceRate,
       totalPresentRate: rates.totalPresentRate,
@@ -466,18 +461,7 @@ export const getTodayAttendanceSummary = async () => {
       lateRate: rates.lateRate,
       absentRate: rates.absentRate,
       
-      detailed: {
-        onTime: statusCounts.onTimeArrivals,
-        lateArrivals: statusCounts.lateButPresent,
-        veryLate: 0,
-        halfDay: 0,
-        earlyDepartures: 0,
-        overtime: 0,
-        regularHours: 0,
-        attendanceRate: rates.totalPresentRate,
-        efficiencyRate: '0',
-        punctualityRate: rates.onTimeRate
-      },
+      detailed,
       
       presenceBreakdown: {
         currentlyPresent: statusCounts.currentlyPresent,
@@ -675,30 +659,42 @@ export const determineNextAttendanceAction = async (employeeId: string) => {
 export const singleScanAttendance = async (employeeId: string) => {
   try {
     // Perform attendance action (check-in or check-out)
-    const result = await recordAttendance(employeeId);
+    const { data: result, error } = await supabase.rpc('process_double_attendance', { 
+      p_employee_id: employeeId,
+      p_current_time: new Date().toISOString()
+    });
+    
+    if (error) {
+      console.error('Attendance processing error:', error);
+      throw new Error(error.message || 'Failed to process attendance');
+    }
+    
+    if (!result) {
+      throw new Error('No response from attendance processor');
+    }
+
+    // Check if the result indicates an error
+    if (result.status === 'Error') {
+      throw new Error(result.message || 'Failed to process attendance');
+    }
     
     // Fetch employee name for the result
-    const { data: employeeData } = await supabase
+    const { data: employeeData, error: employeeError } = await supabase
       .from('employees')
       .select('name')
       .eq('id', employeeId)
       .single();
 
-    // Determine the action type based on the result
-    const actionMap: Record<string, AttendanceAction> = {
-      'present': 'check-in',
-      'checked-out': 'check-out',
-      'first_check_in': 'check-in',
-      'first_check_out': 'check-out',
-      'second_check_in': 'second_check_in',
-      'second_check_out': 'second_check_out'
-    };
+    if (employeeError) {
+      console.error('Error fetching employee data:', employeeError);
+    }
 
-    // Return the result with the action type and employee name
+    // Return the result with employee name
     return {
       ...result,
       employeeName: employeeData?.name || 'Unknown Employee',
-      action: actionMap[result.status] || result.action
+      timestamp: result.timestamp || new Date().toISOString(),
+      status: result.status || 'present'
     };
   } catch (error) {
     console.error('Single scan attendance error:', error);
@@ -706,71 +702,51 @@ export const singleScanAttendance = async (employeeId: string) => {
   }
 };
 
+export const deleteAttendanceRecord = async (recordId: string, deletionType: 'first_check_in' | 'first_check_out' | 'second_check_in' | 'second_check_out' | 'complete') => {
+  try {
+    // Call the handle_selective_deletion function
+    const { data, error } = await supabase
+      .rpc('handle_selective_deletion', {
+        p_record_id: recordId,
+        p_deletion_type: deletionType
+      });
+
+    if (error) throw error;
+
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to delete record');
+    }
+
+    // Return the result with the updated record if it's a partial deletion
+      return {
+      success: true,
+      message: data.message,
+      isCompletelyDeleted: deletionType === 'complete' || !data.record,
+      updatedRecord: data.record
+    };
+  } catch (error) {
+    console.error('Error in deleteAttendanceRecord:', error);
+    throw new Error(error instanceof Error ? error.message : 'Failed to delete record');
+  }
+};
+
 export const deleteAttendance = async (recordIds: string[]) => {
   try {
-    // First verify that all records exist and can be deleted
-    const { data: existingRecords, error: verifyError } = await supabase
-      .from('attendance')
-      .select('id')
-      .in('id', recordIds);
+    const { data, error } = await supabase
+      .rpc('bulk_delete_attendance', {
+        p_record_ids: recordIds
+      });
 
-    if (verifyError) {
-      console.error('Verification error:', verifyError);
-      return {
-        success: false,
-        error: 'Failed to verify records'
-      };
-    }
-
-    if (!existingRecords || existingRecords.length !== recordIds.length) {
-      return {
-        success: false,
-        error: 'Some records do not exist or have already been deleted'
-      };
-    }
-
-    // Perform the deletion within a transaction
-    const { data, error: deleteError } = await supabase
-      .from('attendance')
-      .delete()
-      .in('id', recordIds)
-      .select();
-
-    if (deleteError) {
-      console.error('Delete error:', deleteError);
-      return {
-        success: false,
-        error: deleteError.message || 'Failed to delete records'
-      };
-    }
-
-    // Verify deletion was successful
-    const { data: verifyDeletion, error: checkError } = await supabase
-      .from('attendance')
-      .select('id')
-      .in('id', recordIds);
-
-    if (checkError) {
-      console.error('Post-deletion verification error:', checkError);
-    } else if (verifyDeletion && verifyDeletion.length > 0) {
-      console.warn('Some records were not deleted:', verifyDeletion);
-      return {
-        success: false,
-        error: 'Some records could not be deleted'
-      };
-    }
+    if (error) throw error;
 
     return {
       success: true,
       deletedCount: recordIds.length,
-      deletedRecords: data
+      message: 'Records deleted successfully'
     };
   } catch (error) {
-    console.error('Unexpected delete attendance error:', error);
-    return {
-      success: false,
-      error: 'An unexpected error occurred while deleting records'
-    };
+    console.error('Error in deleteAttendance:', error);
+    throw new Error(error instanceof Error ? error.message : 'Failed to delete records');
   }
 };
 
@@ -851,75 +827,139 @@ export const manualCheckOut = async (employeeId: string) => {
     }
 
     // Ensure the record hasn't been checked out already
-    if (todayRecords.check_out_time) {
-      throw new AttendanceError('You have already checked out today');
+    if (todayRecords.second_check_out_time) {
+      throw new AttendanceError('You have already completed your attendance for today');
     }
 
-    const checkInTime = new Date(todayRecords.check_in_time);
-    
-    // Ensure minimum time between check-in and check-out (15 minutes)
-    const minCheckOutTime = new Date(checkInTime.getTime() + 15 * 60 * 1000);
+    // If first check-in exists but no first check-out
+    if (!todayRecords.first_check_out_time) {
+      // Check if 5 minutes have passed since first check-in
+      const firstCheckInTime = new Date(todayRecords.first_check_in_time);
+      const minCheckOutTime = new Date(firstCheckInTime.getTime() + 5 * 60 * 1000);
     if (now < minCheckOutTime) {
-      throw new AttendanceError('Cannot check out less than 15 minutes after check-in');
+        throw new AttendanceError('Cannot check out less than 5 minutes after first check-in');
+      }
+
+      // Record first check-out
+      const { data: result } = await supabase.rpc('process_double_attendance', { 
+        p_employee_id: employeeId,
+        p_current_time: new Date().toISOString()
+      }) as unknown as { data: any };
+
+      return result;
     }
 
-    // Generate a unique timestamp for check-out that ensures proper spacing
-    const uniqueCheckOutTime = await generateUniqueTimestamp(employeeId, now, 'check-out');
+    // If first check-out exists but no second check-in
+    if (!todayRecords.second_check_in_time) {
+      // Check if 3 minutes have passed since first check-out
+      const firstCheckOutTime = new Date(todayRecords.first_check_out_time);
+      const minSecondCheckInTime = new Date(firstCheckOutTime.getTime() + 3 * 60 * 1000);
+      if (now < minSecondCheckInTime) {
+        throw new AttendanceError('Please wait 3 minutes before second check-in');
+      }
 
-    // Double check the time difference after getting unique timestamp
-    const timeDiffMinutes = (uniqueCheckOutTime.getTime() - checkInTime.getTime()) / (1000 * 60);
-    if (timeDiffMinutes < 15) {
-      throw new AttendanceError('Invalid check-out time: Must be at least 15 minutes after check-in');
+      // Record second check-in
+      const { data: result } = await supabase.rpc('process_double_attendance', { 
+        p_employee_id: employeeId,
+        p_current_time: new Date().toISOString()
+      }) as unknown as { data: any };
+
+      return result;
     }
 
-    const checkOutMetrics = calculateAttendanceMetrics(checkInTime, uniqueCheckOutTime);
+    // If second check-in exists but no second check-out
+    if (!todayRecords.second_check_out_time) {
+      // Record second check-out
+      const { data: result } = await supabase.rpc('process_double_attendance', { 
+        p_employee_id: employeeId,
+        p_current_time: new Date().toISOString()
+      }) as unknown as { data: any };
 
-    // Prepare check-out record
-    const checkOutRecord: Partial<Attendance> = {
-      check_out_time: uniqueCheckOutTime.toISOString(),
-      working_duration: checkOutMetrics.totalHours.toFixed(2),
-      status: checkOutMetrics.status === 'checked-out-overtime' ? 'checked-out' : checkOutMetrics.status,
-      overtime: checkOutMetrics.overtime
-    };
-
-    // Update the attendance record
-    const { data, error } = await supabase
-      .from('attendance')
-      .update(checkOutRecord)
-      .eq('id', todayRecords.id)
-      .select()
-      .single();
-
-    if (error) {
-      throw new AttendanceError(`Check-out failed: ${error.message}`);
+      return result;
     }
 
-    // Log the check-out
-    attendanceLogger.log('check-out', employeeId, {
-      status: checkOutMetrics.status,
-      total_hours: checkOutMetrics.totalHours,
-      overtime: checkOutMetrics.overtime
-    });
-
-    // Fetch employee name
-    const { data: employeeData } = await supabase
-      .from('employees')
-      .select('name')
-      .eq('id', employeeId)
-      .single();
-
-    return {
-      action: 'check-out',
-      check_in_time: todayRecords.check_in_time,
-      check_out_time: uniqueCheckOutTime.toISOString(),
-      employeeId,
-      employeeName: employeeData?.name || 'Unknown Employee',
-      totalHours: checkOutMetrics.totalHours,
-      status: 'checked-out',
-      overtime: checkOutMetrics.overtime
-    };
+    throw new AttendanceError('Invalid attendance state');
   } catch (error) {
-    console.error('Manual check-out error:', error);
+    console.error('Manual Check-out Error:', error);
     throw error;
+  }
+};
+
+// Calculate working time for an attendance record
+export const calculateWorkingTime = (record: Attendance): string => {
+  let totalMinutes = 0;
+
+  try {
+    // For backward compatibility, check both old and new timestamp fields
+    const firstCheckIn = record.check_in_time;
+    const firstCheckOut = record.check_out_time;
+    const secondCheckIn = record.second_check_in_time;
+    const secondCheckOut = record.second_check_out_time;
+
+    // Calculate first session duration
+    if (firstCheckIn) {
+      const firstStart = new Date(firstCheckIn);
+      let firstEnd;
+      
+      if (firstCheckOut) {
+        firstEnd = new Date(firstCheckOut);
+      } else if (record.status !== 'checked-out') {
+        // If still in first session
+        firstEnd = new Date();
+      }
+
+      if (firstEnd && firstEnd >= firstStart) {
+        const sessionMinutes = Math.floor((firstEnd.getTime() - firstStart.getTime()) / (1000 * 60));
+        totalMinutes += sessionMinutes;
+      }
+    }
+
+    // Calculate second session duration
+    if (secondCheckIn) {
+      const secondStart = new Date(secondCheckIn);
+      let secondEnd;
+
+      if (secondCheckOut) {
+        secondEnd = new Date(secondCheckOut);
+      } else if (record.status !== 'checked-out') {
+        // If still in second session
+        secondEnd = new Date();
+      }
+
+      if (secondEnd && secondEnd >= secondStart) {
+        const sessionMinutes = Math.floor((secondEnd.getTime() - secondStart.getTime()) / (1000 * 60));
+        totalMinutes += sessionMinutes;
+      }
+    }
+
+    // Subtract break duration if available
+    if (record.break_duration) {
+      try {
+        // Handle different break duration formats
+        let breakMinutes = 0;
+        if (typeof record.break_duration === 'string') {
+          // If format is "Xm" or "X minutes"
+          const match = record.break_duration.match(/(\d+)/);
+          if (match) {
+            breakMinutes = parseInt(match[1], 10);
+          }
+        } else if (typeof record.break_duration === 'number') {
+          breakMinutes = record.break_duration;
+        }
+        totalMinutes = Math.max(0, totalMinutes - breakMinutes);
+  } catch (error) {
+        console.error('Error processing break duration:', error);
+      }
+    }
+
+    // Convert minutes to hours and minutes format
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = Math.floor(totalMinutes % 60);
+    
+    // Format with leading zeros for minutes
+    return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+  } catch (error) {
+    console.error('Error calculating working time:', error);
+    return '0h 00m';
   }
 };

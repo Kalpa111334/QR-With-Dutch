@@ -20,10 +20,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Attendance } from '@/types';
 import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2, Trash2, UserX } from 'lucide-react';
-import { getAttendanceRecords, deleteAttendance } from '@/utils/attendanceUtils';
+import { getAttendanceRecords, deleteAttendance, deleteAttendanceRecord } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 import { Document, Page, Text, View, PDFDownloadLink } from '@react-pdf/renderer';
-import { StyleSheet, Image as PDFImage } from '@react-pdf/renderer/lib/react-pdf';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -40,190 +39,225 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { formatDistanceStrict, format } from 'date-fns';
+import { calculateWorkingTime } from '@/utils/attendanceUtils';
 
 interface AttendanceTableProps {
   attendanceRecords?: Attendance[] | Promise<Attendance[]>;
 }
 
-// Company logo as base64 string
-const COMPANY_LOGO = 'data:image/png;base64,YOUR_BASE64_STRING_HERE';
-
 // Define styles for PDF
-const styles = StyleSheet.create({
+const styles = {
+  // Color Palette
+  colors: {
+    primary: '#2c3e50',
+    secondary: '#3498db',
+    background: '#f4f6f7',
+    text: '#2c3e50',
+    muted: '#7f8c8d',
+    accent: '#27ae60',
+    warning: '#e74c3c',
+  },
+
+  // Page Layout
   page: {
-    padding: 30,
+    padding: 40,
     flexDirection: 'column',
     backgroundColor: '#ffffff',
     fontFamily: 'Helvetica',
+    lineHeight: 1.5,
   },
+
+  // Header Design
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 30,
-    borderBottom: '2px solid #e0e0e0',
-    paddingBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 2,
+    borderBottomColor: '#e0e0e0',
+  },
+  headerLeft: {
+    flexDirection: 'column',
+    flex: 2,
+  },
+  headerRight: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    flex: 1,
+  },
+  headerLogo: {
+    // Removed logo-specific styles
   },
   headerTitle: {
     fontSize: 24,
-    color: '#1a1a1a',
-    marginBottom: 8,
-    textAlign: 'center',
     fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 5,
   },
   headerSubtitle: {
     fontSize: 14,
-    color: '#666666',
-    textAlign: 'center',
-    marginBottom: 4,
+    color: '#7f8c8d',
   },
   dateRange: {
     fontSize: 12,
-    color: '#888888',
-    textAlign: 'center',
+    color: '#7f8c8d',
+    fontStyle: 'italic',
   },
+
+  // Summary Section
   summarySection: {
+    backgroundColor: '#f4f6f7',
+    borderRadius: 10,
+    padding: 20,
     marginBottom: 30,
-    padding: 15,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   summaryTitle: {
-    fontSize: 16,
-    color: '#1a1a1a',
-    marginBottom: 15,
+    fontSize: 18,
     fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 15,
+    textAlign: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: '#e0e0e0',
+    paddingBottom: 10,
   },
   summaryGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
   summaryBox: {
     width: '30%',
-    marginBottom: 15,
-    padding: 10,
     backgroundColor: '#ffffff',
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 15,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   summaryLabel: {
     fontSize: 10,
-    color: '#666666',
-    marginBottom: 4,
+    color: '#7f8c8d',
+    textTransform: 'uppercase',
+    marginBottom: 5,
+    letterSpacing: 1,
   },
   summaryValue: {
-    fontSize: 16,
-    color: '#1a1a1a',
+    fontSize: 20,
     fontWeight: 'bold',
+    color: '#2c3e50',
   },
   summaryPercent: {
     fontSize: 12,
-    color: '#888888',
-    marginTop: 2,
+    color: '#27ae60',
+    marginTop: 5,
   },
+
+  // Table Styles
   table: {
     marginTop: 20,
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#2c3e50',
     borderBottomWidth: 2,
-    borderBottomColor: '#e0e0e0',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderBottomColor: '#34495e',
+    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 5,
   },
   tableHeaderCell: {
     flex: 1,
-    padding: 8,
-    paddingHorizontal: 12,
-    marginHorizontal: 4,
-    fontSize: 10,
-    color: '#666666',
+    padding: 10,
+    fontSize: 11,
     fontWeight: 'bold',
-    textAlign: 'left',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
+    color: '#ffffff',
+    textTransform: 'uppercase',
+    textAlign: 'center',
+    letterSpacing: 1,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-    minHeight: 32,
-    backgroundColor: '#ffffff',
-    marginVertical: 2,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   tableRowAlt: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f9f9f9',
   },
   tableCell: {
     flex: 1,
+    fontSize: 10,
+    color: '#2c3e50',
     padding: 8,
-    paddingHorizontal: 12,
-    marginHorizontal: 4,
-    fontSize: 9,
-    color: '#333333',
+    textAlign: 'center',
+  },
+  nameCellStyle: {
+    flex: 1.4,
+    fontSize: 10,
+    color: '#2c3e50',
+    padding: 8,
+    fontWeight: '500',
     textAlign: 'left',
-    backgroundColor: '#ffffff',
+  },
+  statusCell: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 4,
   },
+  statusPresent: {
+    backgroundColor: 'rgba(39, 174, 96, 0.2)',
+    color: '#27ae60',
+  },
+  statusLate: {
+    backgroundColor: 'rgba(231, 76, 60, 0.2)',
+    color: '#e74c3c',
+  },
+
+  // Footer
   footer: {
-    position: 'absolute',
-    bottom: 30,
-    left: 30,
-    right: 30,
+    marginTop: 20,
+    paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
-    paddingTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   footerText: {
     fontSize: 8,
-    color: '#888888',
-    textAlign: 'center',
+    color: '#7f8c8d',
   },
-  statusBadge: {
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-    borderRadius: 3,
+  pageNumber: {
     fontSize: 8,
-  },
-  statusPresent: {
-    backgroundColor: '#dcf7dc',
-    color: '#0a5f0a',
-  },
-  statusLate: {
-    backgroundColor: '#fff3cd',
-    color: '#856404',
-  },
-  statusAbsent: {
-    backgroundColor: '#f8d7da',
-    color: '#721c24',
-  },
-  companyName: {
-    fontSize: 28,
-    color: '#1a1a1a',
-    textAlign: 'center',
-    marginBottom: 5,
-    fontWeight: 'bold',
-    fontFamily: 'Helvetica-Bold',
-  },
-  companyTagline: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    marginBottom: 15,
-    fontStyle: 'italic',
-  },
-});
+    color: '#7f8c8d',
+  }
+} as const;
 
 // Add a helper function to format the status badge
-const getStatusStyle = (status: string) => {
-  switch (status?.toLowerCase()) {
+const getStatusStyle = (status: string | undefined | null) => {
+  if (!status) return {};
+
+  switch(status.toLowerCase()) {
     case 'present':
       return styles.statusPresent;
     case 'late':
       return styles.statusLate;
     case 'absent':
-      return styles.statusAbsent;
+      return {
+        backgroundColor: 'rgba(231, 76, 60, 0.2)',
+        color: '#e74c3c'
+      };
     default:
       return {};
   }
@@ -238,21 +272,24 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   attendanceRecords: propAttendanceRecords
 }) => {
   const today = new Date().toISOString().split('T')[0];
-  const [startDate, setStartDate] = useState(today);
-  const [endDate, setEndDate] = useState(today);
-  const [department, setDepartment] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [startDate, setStartDate] = useState<string>(today);
+  const [endDate, setEndDate] = useState<string>(today);
+  const [department, setDepartment] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const [departments, setDepartments] = useState<string[]>(['all']);
   const [records, setRecords] = useState<Attendance[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
-  const [sharing, setSharing] = useState(false);
-  const [showAbsentDialog, setShowAbsentDialog] = useState(false);
+  const [sharing, setSharing] = useState<boolean>(false);
+  const [showAbsentDialog, setShowAbsentDialog] = useState<boolean>(false);
   const [deletionType, setDeletionType] = useState<DeletionType>({ type: null });
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+  const [analyzedRecords, setAnalyzedRecords] = useState<Attendance[]>([]);
   
   useEffect(() => {
     const fetchData = async () => {
       try {
+        setLoading(true);
         // Fetch departments
         const deptData = await getDepartments();
         setDepartments(['all', ...deptData]);
@@ -267,13 +304,50 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
         setRecords(attendanceData);
       } catch (error) {
         console.error('Error loading attendance data:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load attendance records',
+          variant: 'destructive'
+        });
       } finally {
         setLoading(false);
       }
     };
     
     fetchData();
-  }, [propAttendanceRecords]);
+  }, [propAttendanceRecords, refreshTrigger]);
+  
+  useEffect(() => {
+    if (!records || records.length === 0) return;
+
+    const analyzeRecords = () => {
+      const updatedRecords = records.map(record => {
+        // Ensure all required date fields are properly formatted
+        const processedRecord = {
+          ...record,
+          // Use existing properties
+          check_in_time: record.check_in_time,
+          check_out_time: record.check_out_time,
+          second_check_in_time: record.second_check_in_time,
+          second_check_out_time: record.second_check_out_time
+        };
+
+        // Calculate working time
+        const workingTime = calculateWorkingTime(processedRecord);
+        console.log('Record:', processedRecord);
+        console.log('Calculated working time:', workingTime);
+
+        return {
+          ...processedRecord,
+          working_duration: workingTime
+        };
+      });
+
+      setAnalyzedRecords(updatedRecords);
+    };
+
+    analyzeRecords();
+  }, [records]);
   
   const filteredRecords = records.filter(record => {
     // Normalize dates for comparison
@@ -335,7 +409,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   };
 
   const exportToPdf = () => {
-    if (filteredRecords.length === 0) return;
+    if (filteredRecords.length === 0) return null;
 
     // Calculate summary statistics
     const totalEmployees = filteredRecords.length;
@@ -349,131 +423,141 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     const checkedOutEmployees = filteredRecords.filter(r => r.status === 'checked-out').length;
     const stillWorkingEmployees = filteredRecords.filter(r => r.status === 'present').length;
 
-    const AttendancePDF = () => (
+    // Chunk records for multi-page support
+    const chunkSize = 20; // Adjust based on page space
+    const recordChunks: Attendance[][] = [];
+    for (let i = 0; i < filteredRecords.length; i += chunkSize) {
+      recordChunks.push(filteredRecords.slice(i, i + chunkSize));
+    }
+
+    const AttendancePDF = (): React.ReactElement => (
       <Document>
-        <Page size="A4" style={styles.page}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>Attendance Report</Text>
-            <Text style={styles.headerSubtitle}>QR Attendance System</Text>
-            <Text style={styles.dateRange}>
-              {startDate === endDate 
-                ? format(new Date(startDate), 'MMMM d, yyyy')
-                : `${format(new Date(startDate), 'MMM d, yyyy')} - ${format(new Date(endDate), 'MMM d, yyyy')}`}
-            </Text>
-            </View>
+        {recordChunks.map((chunk: Attendance[], pageIndex: number) => (
+          <Page key={pageIndex} size="A4" style={styles.page}>
+            {/* Header (only on first page) */}
+            {pageIndex === 0 && (
+              <View style={styles.header}>
+                <View style={styles.headerLeft}>
+                  <Text style={styles.headerTitle}>Attendance Report</Text>
+                  <Text style={styles.headerSubtitle}>QR Attendance System</Text>
+                </View>
+                <View style={styles.headerRight}>
+                  <Text style={styles.dateRange}>
+                    {startDate === endDate 
+                      ? format(new Date(startDate), 'MMMM d, yyyy')
+                      : `${format(new Date(startDate), 'MMM d, yyyy')} - ${format(new Date(endDate), 'MMM d, yyyy')}`}
+                  </Text>
+                </View>
+              </View>
+            )}
             
-          {/* Summary Section */}
-          <View style={styles.summarySection}>
-            <Text style={styles.summaryTitle}>Attendance Summary</Text>
-            <View style={styles.summaryGrid}>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>Total Employees</Text>
-                <Text style={styles.summaryValue}>{totalEmployees}</Text>
+            {/* Summary Section (only on first page) */}
+            {pageIndex === 0 && (
+              <View style={styles.summarySection}>
+                <Text style={styles.summaryTitle}>Attendance Overview</Text>
+                <View style={styles.summaryGrid}>
+                  <View style={styles.summaryBox}>
+                    <Text style={styles.summaryLabel}>Total Employees</Text>
+                    <Text style={styles.summaryValue}>{totalEmployees}</Text>
+                  </View>
+                  <View style={styles.summaryBox}>
+                    <Text style={styles.summaryLabel}>On Time</Text>
+                    <Text style={styles.summaryValue}>{onTimeEmployees}</Text>
+                    <Text style={styles.summaryPercent}>
+                      {((onTimeEmployees/totalEmployees)*100).toFixed(1)}%
+                    </Text>
+                  </View>
+                  <View style={styles.summaryBox}>
+                    <Text style={styles.summaryLabel}>Late Arrivals</Text>
+                    <Text style={styles.summaryValue}>{lateEmployees}</Text>
+                    <Text style={styles.summaryPercent}>
+                      {((lateEmployees/totalEmployees)*100).toFixed(1)}%
+                    </Text>
+                  </View>
+                </View>
               </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>On Time</Text>
-                <Text style={styles.summaryValue}>{onTimeEmployees}</Text>
-                <Text style={styles.summaryPercent}>
-                  {((onTimeEmployees/totalEmployees)*100).toFixed(1)}%
-                </Text>
-              </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>Late Arrivals</Text>
-                <Text style={styles.summaryValue}>{lateEmployees}</Text>
-                <Text style={styles.summaryPercent}>
-                  {((lateEmployees/totalEmployees)*100).toFixed(1)}%
-                </Text>
-              </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>Average Break</Text>
-                <Text style={styles.summaryValue}>
-                  {calculateAverageBreakDuration(filteredRecords)}
-                </Text>
-              </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>Average Working Time</Text>
-                <Text style={styles.summaryValue}>
-                  {calculateAverageWorkingTime(filteredRecords)}
-                </Text>
-              </View>
-            </View>
-          </View>
+            )}
 
-          {/* Attendance Table */}
-          <View style={styles.table}>
-            <View style={styles.tableHeader}>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Date</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1.2 }]}>Employee</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>First Check-In</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>First Check-Out</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Second Check-In</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Second Check-Out</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Break</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Status</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Late</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Working Time</Text>
-            </View>
+            {/* Attendance Table */}
+            <View style={styles.table}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Date</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 1.4 }]}>Employee</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>1st In</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>1st Out</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>2nd In</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>2nd Out</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Break</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Status</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Late</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>Duration</Text>
+              </View>
 
-            {filteredRecords.map((record, index) => (
-              <View key={index} style={[
-                styles.tableRow,
-                index % 2 === 1 && styles.tableRowAlt
-              ]}>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {format(new Date(record.date), 'MMM d, yyyy')}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 1.2 }]}>
-                  {record.employee_name}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {record.check_in_time 
-                    ? format(new Date(record.check_in_time), 'h:mm a')
-                    : 'N/A'}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {record.check_out_time
-                    ? format(new Date(record.check_out_time), 'h:mm a')
-                    : 'N/A'}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {record.second_check_in_time
-                    ? format(new Date(record.second_check_in_time), 'h:mm a')
-                    : 'N/A'}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {record.second_check_out_time
-                    ? format(new Date(record.second_check_out_time), 'h:mm a')
-                    : 'N/A'}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {formatBreakDuration(record.break_duration)}
-                </Text>
-                <Text style={[
-                  styles.tableCell,
-                  { flex: 0.6 },
-                  styles.statusBadge,
-                  getStatusStyle(record.status)
+              {chunk.map((record: Attendance, index: number) => (
+                <View key={index} style={[
+                  styles.tableRow,
+                  index % 2 === 1 && styles.tableRowAlt
                 ]}>
-                  {record.status || 'N/A'}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.6 }]}>
-                  {record.minutes_late ? `${record.minutes_late}m` : '-'}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {record.working_duration || 'N/A'}
-                </Text>
-              </View>
-            ))}
-          </View>
+                  <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                    {format(new Date(record.date), 'MMM d, yyyy')}
+                  </Text>
+                  <Text style={[styles.nameCellStyle, { flex: 1.4 }]}>
+                    {record.employee_name}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                    {record.check_in_time 
+                      ? format(new Date(record.check_in_time), 'h:mm a')
+                      : 'N/A'}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                    {record.check_out_time
+                      ? format(new Date(record.check_out_time), 'h:mm a')
+                      : 'N/A'}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                    {record.second_check_in_time
+                      ? format(new Date(record.second_check_in_time), 'h:mm a')
+                      : 'N/A'}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                    {record.second_check_out_time
+                      ? format(new Date(record.second_check_out_time), 'h:mm a')
+                      : 'N/A'}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                    {formatBreakDuration(record.break_duration)}
+                  </Text>
+                  <Text style={[
+                    styles.tableCell,
+                    { flex: 0.7 },
+                    getStatusStyle(record.status)
+                  ]}>
+                    {record.status || 'N/A'}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.6 }]}>
+                    {record.minutes_late ? `${record.minutes_late}m` : '-'}
+                  </Text>
+                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                    {calculateWorkingTime(record)}
+                  </Text>
+                </View>
+              ))}
+            </View>
 
-          {/* Footer */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              Generated on {format(new Date(), 'MMMM d, yyyy h:mm a')} • QR Attendance System
-            </Text>
-          </View>
-        </Page>
+            {/* Footer */}
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>
+                Generated by QR Attendance System
+              </Text>
+              <Text style={styles.pageNumber}>
+                {pageIndex > 0 ? `Page ${pageIndex + 1} of ${recordChunks.length}` : ''}
+              </Text>
+              <Text style={styles.footerText}>
+                {format(new Date(), 'MMMM d, yyyy h:mm a')}
+              </Text>
+            </View>
+          </Page>
+        ))}
       </Document>
     );
 
@@ -719,82 +803,117 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
   };
 
   const handleDeleteSingleRecord = async (recordId: string) => {
-    // Create the custom dialog content
-    const { value: formValues } = await Swal.fire({
-      title: 'Delete Attendance Record',
-      html: `
-        <div class="text-center">
-          <p class="mb-4">Select what you want to delete:</p>
-          <div class="flex flex-col items-start gap-4 text-left">
-            <div class="flex items-center space-x-2">
-              <input type="radio" id="check_in" name="deletion_type" value="check_in" class="w-4 h-4">
-              <label for="check_in">Delete Check-in Record</label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <input type="radio" id="check_out" name="deletion_type" value="check_out" class="w-4 h-4">
-              <label for="check_out">Delete Check-out Record</label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <input type="radio" id="complete" name="deletion_type" value="complete" class="w-4 h-4">
-              <label for="complete">Delete Complete Record</label>
+    try {
+      const { value: deletionType } = await Swal.fire({
+        title: 'Delete Attendance Record',
+        html: `
+          <div class="text-center">
+            <p class="mb-4">Select what you want to delete:</p>
+            <div class="flex flex-col items-start gap-4 text-left">
+              <div class="flex items-center space-x-2">
+                <input type="radio" id="complete" name="deletion_type" value="complete" class="w-4 h-4">
+                <label for="complete">Delete Complete Record</label>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="radio" id="first_check_in" name="deletion_type" value="first_check_in" class="w-4 h-4">
+                <label for="first_check_in">Delete First Check-in Record</label>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="radio" id="first_check_out" name="deletion_type" value="first_check_out" class="w-4 h-4">
+                <label for="first_check_out">Delete First Check-out Record</label>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="radio" id="second_check_in" name="deletion_type" value="second_check_in" class="w-4 h-4">
+                <label for="second_check_in">Delete Second Check-in Record</label>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="radio" id="second_check_out" name="deletion_type" value="second_check_out" class="w-4 h-4">
+                <label for="second_check_out">Delete Second Check-out Record</label>
+              </div>
             </div>
           </div>
-        </div>
-      `,
-      showCancelButton: true,
-      confirmButtonText: 'Delete',
-      cancelButtonText: 'Cancel',
-      preConfirm: () => {
-        const selectedType = document.querySelector('input[name="deletion_type"]:checked') as HTMLInputElement;
-        if (!selectedType) {
-          Swal.showValidationMessage('Please select a deletion type');
-          return false;
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'Delete',
+        confirmButtonColor: '#dc2626',
+        cancelButtonText: 'Cancel',
+        reverseButtons: true,
+        preConfirm: () => {
+          const selectedType = document.querySelector('input[name="deletion_type"]:checked') as HTMLInputElement;
+          if (!selectedType) {
+            Swal.showValidationMessage('Please select a deletion type');
+            return false;
+            }
+          return selectedType.value as 'first_check_in' | 'first_check_out' | 'second_check_in' | 'second_check_out' | 'complete';
         }
-        return selectedType.value;
+      });
+
+      if (!deletionType) return;
+
+      const confirmResult = await Swal.fire({
+        title: 'Are you sure?',
+        text: 'This action cannot be undone!',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc2626',
+        cancelButtonColor: '#6b7280',
+        confirmButtonText: 'Yes, delete it!',
+        cancelButtonText: 'Cancel',
+        reverseButtons: true
+      });
+
+      if (!confirmResult.isConfirmed) return;
+
+      // Show loading state
+      Swal.fire({
+        title: 'Processing...',
+        text: 'Please wait while we process your request.',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        allowEnterKey: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
+
+      // Perform deletion
+      const result = await deleteAttendanceRecord(recordId, deletionType);
+
+      // Update the UI based on the deletion result
+      if (result.isCompletelyDeleted) {
+        // Remove the record from the local state if it was completely deleted
+        setRecords(prevRecords => prevRecords.filter(record => record.id !== recordId));
+      } else if (result.updatedRecord) {
+        // Update the record in the local state if it was partially deleted
+        setRecords(prevRecords => prevRecords.map(record => 
+          record.id === recordId ? { ...record, ...result.updatedRecord } : record
+        ));
       }
-    });
 
-    if (!formValues) {
-      return; // User cancelled
-    }
+      // Close loading dialog
+      Swal.close();
 
-    try {
-      let result;
-      
-      if (formValues === 'complete') {
-        // Complete deletion
-        result = await deleteAttendance([recordId]);
-      } else {
-        // Selective deletion
-        const { data, error } = await supabase
-          .rpc('handle_selective_deletion', {
-            p_record_id: recordId,
-            p_deletion_type: formValues
-          });
+      // Show success message
+      await Swal.fire({
+        icon: 'success',
+        title: 'Success!',
+        text: result.message,
+        timer: 1500,
+        showConfirmButton: false
+      });
 
-        if (error) throw error;
-        result = data;
-      }
-
-      if (result.success) {
-        // Refresh the records
-        const updatedRecords = await getAttendanceRecords();
-        setRecords(updatedRecords);
-
-        toast({
-          title: 'Success',
-          description: result.message || 'Record updated successfully',
-          variant: 'default'
-        });
-      } else {
-        throw new Error(result.error || 'Failed to update record');
-      }
     } catch (error) {
       console.error('Delete operation failed:', error);
-      toast({
+      
+      // Close loading dialog if it's open
+      Swal.close();
+
+      // Show error message
+      await Swal.fire({
+        icon: 'error',
         title: 'Error',
-        description: error instanceof Error ? error.message : 'An unexpected error occurred',
-        variant: 'destructive'
+        text: error instanceof Error ? error.message : 'Failed to delete record',
+        confirmButtonText: 'OK'
       });
     }
   };
@@ -823,69 +942,60 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
         confirmButtonColor: '#d33',
         cancelButtonColor: '#3085d6',
         confirmButtonText: 'Yes, Delete All',
-        cancelButtonText: 'Cancel',
-        showLoaderOnConfirm: true,
-        preConfirm: async () => {
-          try {
-            const deleteResult = await deleteAttendance(selectedRecords);
-            if (!deleteResult.success) {
-              throw new Error(deleteResult.error);
-            }
-            return deleteResult;
-          } catch (error) {
-            Swal.showValidationMessage(
-              error instanceof Error ? error.message : 'Failed to delete records'
-            );
-          }
-        },
-        allowOutsideClick: () => !Swal.isLoading()
+        cancelButtonText: 'Cancel'
       });
 
-      if (result.isConfirmed && result.value.success) {
-        // Remove deleted records from the local state
-        setRecords(prevRecords => 
-          prevRecords.filter(record => !selectedRecords.includes(record.id))
-        );
-        
-        // Clear selected records
+      if (!result.isConfirmed) return;
+
+      // Show loading state
+      Swal.fire({
+        title: 'Processing...',
+        text: 'Please wait while we delete the records.',
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
+
+      const deleteResult = await deleteAttendance(selectedRecords);
+
+      // Immediately update local state
+      setRecords(prevRecords => prevRecords.filter(record => !selectedRecords.includes(record.id)));
         setSelectedRecords([]);
+      
+      // Trigger a refresh
+      setRefreshTrigger(prev => prev + 1);
+
+      // Close loading dialog
+      Swal.close();
 
         // Show success message
-        toast({
-          title: 'Records Deleted',
-          description: `Successfully deleted ${result.value.deletedCount} attendance record(s).`,
-          variant: 'default'
-        });
+      await Swal.fire({
+        icon: 'success',
+        title: 'Success',
+        text: `Successfully deleted ${selectedRecords.length} record(s)`,
+        timer: 1500,
+        showConfirmButton: false
+      });
 
-        // Refresh the data to ensure consistency
-        const updatedRecords = await getAttendanceRecords();
-        setRecords(updatedRecords);
-      }
     } catch (error) {
-      console.error('Bulk delete operation failed:', error);
-      toast({
-        title: 'Deletion Failed',
-        description: error instanceof Error ? error.message : 'An unexpected error occurred',
-        variant: 'destructive'
+      console.error('Bulk delete failed:', error);
+      
+      // Close loading dialog
+      Swal.close();
+
+      // Show error message
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: error instanceof Error ? error.message : 'Failed to delete records',
+        confirmButtonText: 'OK'
       });
     }
   };
 
-  const formatTime = (timeString: string) => {
-    if (!timeString) return '-';
-    const time = new Date(timeString);
-    return time.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true
-    });
-  };
-
-  const formatBreakDuration = (duration: string | null | undefined) => {
+  // Local implementation of formatBreakDuration
+  const formatBreakDuration = (duration: string | null | undefined): string => {
     if (!duration) return 'N/A';
     
     try {
@@ -943,11 +1053,26 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
         }
       }
       
-      // Fallback: return the original duration if no parsing worked
+      // Fallback: return original duration if no parsing worked
       return duration || 'N/A';
     } catch {
       return 'N/A';
     }
+  };
+
+  // Local implementation of formatTime
+  const formatTime = (timeString: string) => {
+    if (!timeString) return '-';
+    const time = new Date(timeString);
+    return time.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
   };
 
   const calculateAverageBreakDuration = (records: Attendance[]): string => {
@@ -1323,7 +1448,7 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                                       ? 'text-green-600'
                                     : ''
                               }`}>
-                                {record.working_duration}
+                                {calculateWorkingTime(record)}
                               </div>
                               <div className="text-xs text-muted-foreground whitespace-nowrap hidden sm:block">
                                 {record.full_time_range}
