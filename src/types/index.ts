@@ -95,7 +95,7 @@ export interface WorkTimeInfo {
 }
 
 export interface ExtendedWorkTimeInfo {
-  check_in_time: string;
+  check_in_time?: string;
   check_out_time?: string;
   first_check_in_time?: string;
   first_check_out_time?: string;

@@ -19,7 +19,7 @@ interface AdminContactInfo {
 }
 
 // Custom Error Class for Attendance-related Errors
-class AttendanceError extends Error {
+export class AttendanceError extends Error {
   constructor(
     message: string, 
     public code: string = 'ATTENDANCE_ERROR',
@@ -262,8 +262,8 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
       
       case 'second_check_in':
     return {
-          check_in_time: attendanceResult.timestamp || new Date().toISOString(),
-          check_out_time: attendanceResult.first_check_out_time,
+          check_in_time: attendanceResult.timestamp,
+          check_out_time: null,
       status: 'present',
           sequence_number: 2,
           action: 'check-in',
@@ -274,8 +274,8 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
       
       case 'second_check_out':
         return {
-          check_in_time: attendanceResult.first_check_in_time || new Date().toISOString(),
-          check_out_time: attendanceResult.timestamp || new Date().toISOString(),
+          check_in_time: attendanceResult.second_check_in_time,
+          check_out_time: attendanceResult.timestamp,
           status: 'checked-out',
           sequence_number: 2,
           action: 'check-out',
