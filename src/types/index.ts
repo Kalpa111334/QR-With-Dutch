@@ -42,9 +42,12 @@ export interface Attendance {
   full_time_range?: string;
   sequence_number: number;
   overtime?: number;
-  second_check_in_time?: string;
-  second_check_out_time?: string;
+  first_check_in_time: string;
+  first_check_out_time?: string;
   break_duration?: string;
+  is_second_session: boolean;
+  previous_session_id?: string;
+  previous_session?: Attendance;
 }
 
 export interface ExtendedAttendance extends Attendance {

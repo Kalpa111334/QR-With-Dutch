@@ -411,7 +411,7 @@ export default function RosterManagement() {
     try {
       setLoading(true);
       setError(null);
-
+      
       // Validate dates
       if (data.endDate < data.startDate) {
         throw new Error('End date must be after start date');
@@ -459,7 +459,7 @@ export default function RosterManagement() {
       if (!result) {
         throw new Error('Failed to create roster - no response from server');
       }
-
+      
       console.log('Roster creation successful:', result);
 
       // Update local state and close dialog
@@ -737,11 +737,11 @@ export default function RosterManagement() {
                         <div className="flex justify-between items-center">
                           <div className="flex flex-col">
                             <h3 className="font-semibold text-lg">
-                              {employee?.name || roster.employee_id}
-                            </h3>
-                            <p className="text-sm text-gray-500">
-                              {format(new Date(roster.start_date), 'PP')} - {format(new Date(roster.end_date), 'PP')}
-                            </p>
+                                {employee?.name || roster.employee_id}
+                              </h3>
+                              <p className="text-sm text-gray-500">
+                                {format(new Date(roster.start_date), 'PP')} - {format(new Date(roster.end_date), 'PP')}
+                              </p>
                           </div>
                           <div className={cn(
                             "px-4 py-1 rounded-full text-sm font-semibold",
@@ -956,15 +956,15 @@ export default function RosterManagement() {
                                   </FormControl>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-auto p-0" align="start">
-                                  <Calendar
-                                    mode="single"
-                                    selected={field.value}
+                                <Calendar
+                                  mode="single"
+                                  selected={field.value}
                                     onSelect={field.onChange}
-                                    disabled={(date) =>
+                                  disabled={(date) =>
                                       date < new Date()
-                                    }
+                                  }
                                     initialFocus
-                                  />
+                                />
                                 </PopoverContent>
                               </Popover>
                               <FormMessage />
@@ -998,15 +998,15 @@ export default function RosterManagement() {
                                   </FormControl>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-auto p-0" align="start">
-                                  <Calendar
-                                    mode="single"
-                                    selected={field.value}
+                                <Calendar
+                                  mode="single"
+                                  selected={field.value}
                                     onSelect={field.onChange}
-                                    disabled={(date) =>
+                                  disabled={(date) =>
                                       date < form.getValues("startDate")
-                                    }
+                                  }
                                     initialFocus
-                                  />
+                                />
                                 </PopoverContent>
                               </Popover>
                               <FormMessage />
@@ -1042,32 +1042,32 @@ export default function RosterManagement() {
 
                       {form.watch("rosterType") === "working" && (
                         <>
-                          <FormField
-                            control={form.control}
-                            name="shift"
-                            render={({ field }) => (
-                              <FormItem>
+                      <FormField
+                        control={form.control}
+                        name="shift"
+                        render={({ field }) => (
+                          <FormItem>
                                 <FormLabel>Shift</FormLabel>
-                                <Select
-                                  value={field.value}
+                            <Select
+                              value={field.value}
                                   onValueChange={field.onChange}
-                                >
-                                  <FormControl>
-                                    <SelectTrigger>
+                            >
+                              <FormControl>
+                                <SelectTrigger>
                                       <SelectValue placeholder="Select shift" />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent>
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
                                     <SelectItem value="morning">Morning Shift</SelectItem>
                                     <SelectItem value="evening">Evening Shift</SelectItem>
                                     <SelectItem value="night">Night Shift</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      
                           <div className="space-y-4">
                             <div className="flex items-center justify-between">
                               <FormLabel className="text-base">Custom Time</FormLabel>
@@ -1080,49 +1080,49 @@ export default function RosterManagement() {
 
                             {isCustomTime && (
                               <div className="grid grid-cols-2 gap-4">
-                                <FormField
-                                  control={form.control}
+                          <FormField
+                            control={form.control}
                                   name="customStartTime"
-                                  render={({ field }) => (
-                                    <FormItem>
+                            render={({ field }) => (
+                              <FormItem>
                                       <FormLabel>Custom Start Time</FormLabel>
-                                      <FormControl>
-                                        <Input
-                                          type="time"
-                                          {...field}
-                                          placeholder="HH:mm"
+                                <FormControl>
+                                  <Input
+                                    type="time"
+                                    {...field}
+                                    placeholder="HH:mm"
                                           required
-                                        />
-                                      </FormControl>
-                                      <FormDescription>
-                                        24-hour format (e.g., 09:00)
-                                      </FormDescription>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
-                                />
-                                <FormField
-                                  control={form.control}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  24-hour format (e.g., 09:00)
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
                                   name="customEndTime"
-                                  render={({ field }) => (
-                                    <FormItem>
+                            render={({ field }) => (
+                              <FormItem>
                                       <FormLabel>Custom End Time</FormLabel>
-                                      <FormControl>
-                                        <Input
-                                          type="time"
-                                          {...field}
-                                          placeholder="HH:mm"
+                                <FormControl>
+                                  <Input
+                                    type="time"
+                                    {...field}
+                                    placeholder="HH:mm"
                                           required
-                                        />
-                                      </FormControl>
-                                      <FormDescription>
-                                        24-hour format (e.g., 17:00)
-                                      </FormDescription>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
-                                />
-                              </div>
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  24-hour format (e.g., 17:00)
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
                             )}
                           </div>
                         </>

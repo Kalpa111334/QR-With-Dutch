@@ -1,10 +1,22 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { supabase } from '@/lib/supabase';
-import { differenceInMinutes } from 'date-fns';
-import { calculateWorkingTime } from '@/utils/attendanceUtils';
+import { differenceInMinutes, parseISO, isSameMinute } from 'date-fns';
 
-const COOLDOWN_PERIOD = 3; // 3 minutes cooldown
-const MINIMUM_FIRST_CHECKIN_DURATION = 5; // 5 minutes minimum before first checkout
+// Configuration for attendance actions
+const ATTENDANCE_CONFIG = {
+  MINIMUM_SESSION_DURATION: 30, // minutes
+  MINIMUM_BREAK_DURATION: 15, // minutes
+  MAXIMUM_DAILY_SESSIONS: 2,
+  MINIMUM_TIME_BETWEEN_ACTIONS: 1 // minimum minutes between any two actions
+};
+
+// Custom error for attendance-related issues
+class AttendanceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AttendanceError';
+  }
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -18,199 +30,258 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const today = now.toISOString().split('T')[0];
 
-    // Get today's attendance record
-    const { data: attendance, error: fetchError } = await supabase
+    // Fetch today's attendance records for this employee
+    const { data: existingRecord, error: fetchError } = await supabase
       .from('attendance')
       .select('*')
-      .eq('employeeId', employeeId)
-      .eq('date', today.toISOString())
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .order('created_at', { ascending: false })
+      .limit(1)
       .single();
 
-    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+    if (fetchError && fetchError.code !== 'PGRST116') {
       throw fetchError;
     }
 
-    let action: 'first_check_in' | 'first_check_out' | 'second_check_in' | 'second_check_out';
-    let cooldownRemaining = 0;
-    let breakDuration = 0;
-    let updatedAttendance;
-
-    // Determine current attendance state and next action
-    const determineAttendanceState = () => {
-      if (!attendance) return 'first_check_in';
-      
-      // Add cooldown check to prevent duplicate timestamps
-      const lastAction = attendance.second_check_out_time || 
-                        attendance.second_check_in_time || 
-                        attendance.first_check_out_time || 
-                        attendance.first_check_in_time;
-                        
-      if (lastAction) {
-        const lastActionTime = new Date(lastAction);
-        const timeDiff = differenceInMinutes(now, lastActionTime);
-        if (timeDiff < COOLDOWN_PERIOD) {
-          throw new Error(`Please wait ${COOLDOWN_PERIOD - timeDiff} minutes before next scan`);
-        }
-      }
-
-      if (attendance.first_check_in_time && !attendance.first_check_out_time) return 'first_check_out';
-      if (attendance.first_check_out_time && !attendance.second_check_in_time) return 'second_check_in';
-      if (attendance.second_check_in_time && !attendance.second_check_out_time) return 'second_check_out';
-      return 'completed';
-    };
-
-    const currentState = determineAttendanceState();
-
-    if (currentState === 'first_check_in') {
-      // Create new attendance record with first check-in
-      const { data, error } = await supabase
-        .from('attendance')
-        .insert([{
-          employeeId,
-          date: today.toISOString(),
-          first_check_in_time: now.toISOString(),
-          status: 'CHECKED_IN'
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-      updatedAttendance = data;
-      action = 'first_check_in';
-
-    } else if (currentState === 'first_check_out') {
-      // Validate minimum duration since first check-in
-      const minutesSinceFirstCheckIn = differenceInMinutes(now, new Date(attendance.first_check_in_time));
-      
-      if (minutesSinceFirstCheckIn < MINIMUM_FIRST_CHECKIN_DURATION) {
-        cooldownRemaining = (MINIMUM_FIRST_CHECKIN_DURATION - minutesSinceFirstCheckIn) * 60;
+    // Check for duplicate timestamps before proceeding
+    if (existingRecord) {
+      const isDuplicateTimestamp = await checkDuplicateTimestamp(existingRecord, now);
+      if (isDuplicateTimestamp) {
         return res.status(400).json({
-          error: 'Too soon for check-out',
-          cooldown_remaining: cooldownRemaining,
-          action: 'first_check_out',
-          timestamp: now.toISOString(),
+          error: 'Cannot record attendance at the same timestamp as previous action',
+          action: 'error',
+          lastActionTime: isDuplicateTimestamp
         });
       }
-
-      // Record first check-out
-      const { data, error } = await supabase
-        .from('attendance')
-        .update({
-          first_check_out_time: now.toISOString(),
-          status: 'ON_BREAK'
-        })
-        .eq('id', attendance.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      updatedAttendance = data;
-      action = 'first_check_out';
-
-    } else if (currentState === 'second_check_in') {
-      // Validate break duration
-      const minutesSinceFirstCheckOut = differenceInMinutes(now, new Date(attendance.first_check_out_time));
-      
-      if (minutesSinceFirstCheckOut < COOLDOWN_PERIOD) {
-        cooldownRemaining = (COOLDOWN_PERIOD - minutesSinceFirstCheckOut) * 60;
-        return res.status(400).json({
-          error: 'Break time not complete',
-          cooldown_remaining: cooldownRemaining,
-          action: 'second_check_in',
-          timestamp: now.toISOString(),
-        });
-      }
-
-      breakDuration = minutesSinceFirstCheckOut;
-      
-      // Record second check-in
-      const { data, error } = await supabase
-        .from('attendance')
-        .update({
-          second_check_in_time: now.toISOString(),
-          break_duration: breakDuration,
-          status: 'CHECKED_IN'
-        })
-        .eq('id', attendance.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      updatedAttendance = data;
-      action = 'second_check_in';
-
-    } else if (currentState === 'second_check_out') {
-      // Record second check-out
-      const { data: checkoutData, error: checkoutError } = await supabase
-        .from('attendance')
-        .update({
-          second_check_out_time: now.toISOString(),
-          status: 'CHECKED_OUT'
-        })
-        .eq('id', attendance.id)
-        .select('*')  // Select all fields to get complete record
-        .single();
-
-      if (checkoutError) throw checkoutError;
-
-      // Calculate total working time including both sessions
-      const firstSessionMinutes = checkoutData.first_check_out_time ? 
-        differenceInMinutes(
-          new Date(checkoutData.first_check_out_time),
-          new Date(checkoutData.first_check_in_time)
-        ) : 0;
-
-      const secondSessionMinutes = checkoutData.second_check_in_time ? 
-        differenceInMinutes(
-          now,
-          new Date(checkoutData.second_check_in_time)
-        ) : 0;
-
-      const totalMinutes = firstSessionMinutes + secondSessionMinutes;
-      const hours = Math.floor(totalMinutes / 60);
-      const minutes = Math.floor(totalMinutes % 60);
-      const workingTime = `${hours}h ${minutes}m`;
-
-      // Update working time
-      const { data, error } = await supabase
-        .from('attendance')
-        .update({ 
-          working_duration: workingTime,
-          total_hours: hours + (minutes / 60)
-        })
-        .eq('id', attendance.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      updatedAttendance = data;
-      action = 'second_check_out';
-
-    } else {
-      return res.status(400).json({
-        error: 'All attendance actions completed for today',
-        timestamp: now.toISOString(),
-      });
     }
 
-    // Return response with all timestamps
+    // Determine the next attendance action
+    const nextAction = determineNextAttendanceAction(existingRecord);
+
+    // Perform the attendance action
+    const updatedRecord = await performAttendanceAction(
+      employeeId, 
+      nextAction, 
+      existingRecord, 
+      now
+    );
+
     return res.status(200).json({
-      action,
-      timestamp: now.toISOString(),
-      break_duration: breakDuration || undefined,
-      cooldown_remaining: cooldownRemaining,
-      first_check_in: updatedAttendance.first_check_in_time,
-      first_check_out: updatedAttendance.first_check_out_time,
-      second_check_in: updatedAttendance.second_check_in_time,
-      second_check_out: updatedAttendance.second_check_out_time,
-      total_hours: updatedAttendance.total_hours,
-      status: updatedAttendance.status
+      message: `Successfully recorded ${nextAction}`,
+      action: nextAction,
+      record: updatedRecord
     });
 
   } catch (error) {
     console.error('Attendance recording error:', error);
-    return res.status(500).json({ error: 'Failed to record attendance' });
+    
+    if (error instanceof AttendanceError) {
+      return res.status(400).json({ 
+        error: error.message,
+        action: 'error'
+      });
+    }
+
+    return res.status(500).json({ 
+      error: 'Failed to record attendance',
+      action: 'error'
+    });
   }
+}
+
+async function checkDuplicateTimestamp(existingRecord: any, currentTime: Date): Promise<string | false> {
+  const timestamps = [
+    existingRecord.first_check_in_time,
+    existingRecord.first_check_out_time,
+    existingRecord.second_check_in_time,
+    existingRecord.second_check_out_time
+  ].filter(Boolean);
+
+  // Check if current time is too close to any existing timestamp
+  for (const timestamp of timestamps) {
+    const existingTime = parseISO(timestamp);
+    if (isSameMinute(currentTime, existingTime) || 
+        Math.abs(differenceInMinutes(currentTime, existingTime)) < ATTENDANCE_CONFIG.MINIMUM_TIME_BETWEEN_ACTIONS) {
+      return timestamp;
+    }
+  }
+
+  return false;
+}
+
+function determineNextAttendanceAction(existingRecord: any): 
+  'first_check_in' | 'first_check_out' | 'second_check_in' | 'second_check_out' {
+  // No record exists for today
+  if (!existingRecord) {
+    return 'first_check_in';
+        }
+
+  // First session check-out pending
+  if (!existingRecord.first_check_out_time && !existingRecord.is_second_session) {
+    return 'first_check_out';
+  }
+
+  // First session completed, no second session started
+  if (existingRecord.first_check_out_time && !existingRecord.is_second_session) {
+    return 'second_check_in';
+  }
+
+  // Second session check-out pending
+  if (existingRecord.is_second_session && !existingRecord.first_check_out_time) {
+    return 'second_check_out';
+  }
+
+  // All actions completed
+  throw new AttendanceError('Maximum daily attendance actions reached');
+}
+
+async function performAttendanceAction(
+  employeeId: string, 
+  action: string, 
+  existingRecord: any, 
+  currentTime: Date
+): Promise<any> {
+  // Validate time sequence
+  if (existingRecord) {
+    validateTimeSequence(action, existingRecord, currentTime);
+  }
+
+  switch (action) {
+    case 'first_check_in':
+      return await createFirstCheckIn(employeeId, currentTime);
+    
+    case 'first_check_out':
+      return await recordFirstCheckOut(existingRecord, currentTime);
+    
+    case 'second_check_in':
+      return await recordSecondCheckIn(existingRecord, currentTime);
+    
+    case 'second_check_out':
+      return await recordSecondCheckOut(existingRecord, currentTime);
+    
+    default:
+      throw new AttendanceError('Invalid attendance action');
+  }
+}
+
+function validateTimeSequence(action: string, record: any, currentTime: Date): void {
+  switch (action) {
+    case 'first_check_out':
+      if (record.first_check_in_time && currentTime <= parseISO(record.first_check_in_time)) {
+        throw new AttendanceError('Check-out time must be after check-in time');
+      }
+      break;
+    
+    case 'second_check_in':
+      if (record.first_check_out_time && currentTime <= parseISO(record.first_check_out_time)) {
+        throw new AttendanceError('Second check-in time must be after first check-out time');
+      }
+      break;
+    
+    case 'second_check_out':
+      if (record.second_check_in_time && currentTime <= parseISO(record.second_check_in_time)) {
+        throw new AttendanceError('Second check-out time must be after second check-in time');
+      }
+      break;
+  }
+}
+
+async function createFirstCheckIn(employeeId: string, currentTime: Date) {
+      const { data, error } = await supabase
+        .from('attendance')
+    .insert({
+      employee_id: employeeId,
+      date: currentTime.toISOString().split('T')[0],
+      first_check_in_time: currentTime.toISOString(),
+          status: 'CHECKED_IN'
+    })
+        .select()
+        .single();
+
+      if (error) throw error;
+  return data;
+}
+
+async function recordFirstCheckOut(existingRecord: any, currentTime: Date) {
+  // Validate minimum first session duration
+  const firstCheckInTime = parseISO(existingRecord.first_check_in_time);
+  const sessionDuration = differenceInMinutes(currentTime, firstCheckInTime);
+      
+  if (sessionDuration < ATTENDANCE_CONFIG.MINIMUM_SESSION_DURATION) {
+    throw new AttendanceError(`Minimum first session duration is ${ATTENDANCE_CONFIG.MINIMUM_SESSION_DURATION} minutes`);
+      }
+
+      const { data, error } = await supabase
+        .from('attendance')
+        .update({
+      first_check_out_time: currentTime.toISOString(),
+      status: 'CHECKED_OUT',
+      last_action_time: currentTime.toISOString()
+        })
+    .eq('id', existingRecord.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+  return data;
+}
+
+async function recordSecondCheckIn(existingRecord: any, currentTime: Date) {
+      // Validate break duration
+  const firstCheckOutTime = parseISO(existingRecord.first_check_out_time);
+  const breakDuration = differenceInMinutes(currentTime, firstCheckOutTime);
+
+  if (breakDuration < ATTENDANCE_CONFIG.MINIMUM_BREAK_DURATION) {
+    throw new AttendanceError(`Minimum break duration is ${ATTENDANCE_CONFIG.MINIMUM_BREAK_DURATION} minutes`);
+  }
+
+  // Create a new record for the second session
+      const { data, error } = await supabase
+        .from('attendance')
+    .insert({
+      employee_id: existingRecord.employee_id,
+      date: currentTime.toISOString().split('T')[0],
+      first_check_in_time: currentTime.toISOString(),  // Using first_check_in for the new session
+      previous_session_id: existingRecord.id,  // Reference to the previous session
+      break_duration: `${breakDuration} minutes`,
+      status: 'CHECKED_IN',
+      is_second_session: true  // Flag to indicate this is a second session
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+  return data;
+}
+
+async function recordSecondCheckOut(existingRecord: any, currentTime: Date) {
+  // Validate second session duration
+  const secondCheckInTime = parseISO(existingRecord.first_check_in_time); // Using first_check_in since it's a new record
+  const sessionDuration = differenceInMinutes(currentTime, secondCheckInTime);
+
+  if (sessionDuration < ATTENDANCE_CONFIG.MINIMUM_SESSION_DURATION) {
+    throw new AttendanceError(`Minimum second session duration is ${ATTENDANCE_CONFIG.MINIMUM_SESSION_DURATION} minutes`);
+  }
+
+  // Calculate session duration
+  const currentSessionDuration = sessionDuration;
+
+      const { data, error } = await supabase
+        .from('attendance')
+        .update({ 
+      first_check_out_time: currentTime.toISOString(),  // Using first_check_out for consistency
+      total_worked_time: `${currentSessionDuration} minutes`,
+      total_hours: currentSessionDuration / 60,
+      status: 'CHECKED_OUT',
+      last_action_time: currentTime.toISOString()
+        })
+    .eq('id', existingRecord.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+  return data;
 } 

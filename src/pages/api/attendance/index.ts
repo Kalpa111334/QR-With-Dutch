@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { supabase } from '@/lib/supabase';
+import { calculateTotalWorkingTime } from '@/utils/attendanceUtils';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'GET') {
@@ -18,15 +19,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (error) throw error;
 
-      // Process the records to ensure all required fields are present
-      const processedData = data.map(record => ({
-        ...record,
-        employee_name: record.employee?.name || 'Unknown',
-        first_check_in_time: record.first_check_in_time || record.check_in_time,
-        first_check_out_time: record.first_check_out_time || record.check_out_time,
-        working_duration: record.working_duration || '0h 00m',
-        status: record.status || 'unknown'
-      }));
+      // Process the records to ensure all required fields are present and calculate working duration
+      const processedData = data.map(record => {
+        // Calculate working duration if not already present
+        const workingDuration = record.working_duration || calculateTotalWorkingTime(record);
+
+        return {
+          ...record,
+          employee_name: record.employee?.name || 'Unknown',
+          first_check_in_time: record.first_check_in_time || record.check_in_time,
+          first_check_out_time: record.first_check_out_time || record.check_out_time,
+          working_duration: workingDuration,
+          status: record.status || 'unknown'
+        };
+      });
 
       return res.status(200).json(processedData);
     } catch (error) {

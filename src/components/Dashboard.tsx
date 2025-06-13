@@ -70,7 +70,15 @@ const Dashboard: React.FC = () => {
   const [isSharing, setIsSharing] = useState(false);
   
   // Today's summary
-  const [summary, setSummary] = useState<any>(null);
+  const [summary, setSummary] = useState<any>({
+    totalEmployees: 0,
+    presentCount: 0,
+    checkedOutCount: 0,
+    absentCount: 0,
+    stillWorking: 0,
+    absentRate: '0.0',
+    presentRate: '0.0'
+  });
   
   const today = new Date().toISOString().split('T')[0];
   
@@ -286,7 +294,7 @@ const Dashboard: React.FC = () => {
                   <Users className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats.totalEmployees}</div>
+                  <div className="text-2xl font-bold">{summary.totalEmployees}</div>
                   <p className="text-xs text-muted-foreground">Active employees in system</p>
                 </CardContent>
               </Card>
@@ -297,10 +305,10 @@ const Dashboard: React.FC = () => {
                   <UserCheck className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats.present + stats.late}</div>
-                  {stats.totalEmployees > 0 && (
+                  <div className="text-2xl font-bold">{summary.presentCount}</div>
+                  {summary.totalEmployees > 0 && (
                     <p className="text-xs text-green-600">
-                      Present Rate: {((stats.present + stats.late) / stats.totalEmployees * 100).toFixed(1)}%
+                      Present Rate: {summary.presentRate}%
                     </p>
                   )}
                 </CardContent>
@@ -312,10 +320,10 @@ const Dashboard: React.FC = () => {
                   <LogOut className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats.checkedOut}</div>
+                  <div className="text-2xl font-bold">{summary.checkedOutCount}</div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">
-                      Still Working: {stats.stillWorking}
+                      Still Working: {summary.stillWorking}
                     </p>
                   </div>
                 </CardContent>
@@ -327,13 +335,13 @@ const Dashboard: React.FC = () => {
                   <UserX className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats.absent}</div>
+                  <div className="text-2xl font-bold">{summary.absentCount}</div>
                   <div className="space-y-1">
                     <p className="text-xs text-red-600">
-                      Absence Rate: {stats.absentRate}%
+                      Absence Rate: {summary.absentRate}%
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Out of {stats.totalEmployees} total employees
+                      Out of {summary.totalEmployees} total employees
                     </p>
                   </div>
                 </CardContent>
@@ -349,10 +357,12 @@ const Dashboard: React.FC = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-xl font-bold text-green-700 dark:text-green-300">{stats.present + stats.late}</div>
+                  <div className="text-xl font-bold text-green-700 dark:text-green-300">
+                    {summary.presentCount + summary.checkedOutCount}
+                  </div>
                   <p className="text-xs text-green-600/80 dark:text-green-400/80">
-                    {stats.totalEmployees > 0
-                      ? `${((stats.present + stats.late) / stats.totalEmployees * 100).toFixed(1)}% present today`
+                    {summary.totalEmployees > 0
+                      ? `${summary.presentRate}% present today`
                       : 'No employees in the system'}
                   </p>
                 </CardContent>
@@ -368,10 +378,10 @@ const Dashboard: React.FC = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-xl font-bold text-red-700 dark:text-red-300">{stats.absent}</div>
+                  <div className="text-xl font-bold text-red-700 dark:text-red-300">{summary.absentCount}</div>
                   <p className="text-xs text-red-600/80 dark:text-red-400/80">
-                    {stats.totalEmployees > 0
-                      ? `${stats.absentRate}% absence rate today (${stats.absent} out of ${stats.totalEmployees} employees)`
+                    {summary.totalEmployees > 0
+                      ? `${summary.absentRate}% absence rate today (${summary.absentCount} out of ${summary.totalEmployees} employees)`
                       : 'No employees in the system'}
                   </p>
                 </CardContent>

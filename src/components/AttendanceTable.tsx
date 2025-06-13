@@ -39,7 +39,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { formatDistanceStrict, format } from 'date-fns';
-import { calculateWorkingTime } from '@/utils/attendanceUtils';
+import { calculateTotalWorkingTime } from '../utils/attendanceUtils';
 
 interface AttendanceTableProps {
   attendanceRecords?: Attendance[] | Promise<Attendance[]>;
@@ -332,8 +332,8 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
           second_check_out_time: record.second_check_out_time
         };
 
-        // Calculate working time
-        const workingTime = calculateWorkingTime(processedRecord);
+        // Calculate working time using the standardized function
+        const workingTime = calculateTotalWorkingTime(processedRecord);
         console.log('Record:', processedRecord);
         console.log('Calculated working time:', workingTime);
 
@@ -436,117 +436,117 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
           <Page key={pageIndex} size="A4" style={styles.page}>
             {/* Header (only on first page) */}
             {pageIndex === 0 && (
-              <View style={styles.header}>
+          <View style={styles.header}>
                 <View style={styles.headerLeft}>
-                  <Text style={styles.headerTitle}>Attendance Report</Text>
-                  <Text style={styles.headerSubtitle}>QR Attendance System</Text>
+            <Text style={styles.headerTitle}>Attendance Report</Text>
+            <Text style={styles.headerSubtitle}>QR Attendance System</Text>
                 </View>
                 <View style={styles.headerRight}>
-                  <Text style={styles.dateRange}>
-                    {startDate === endDate 
-                      ? format(new Date(startDate), 'MMMM d, yyyy')
-                      : `${format(new Date(startDate), 'MMM d, yyyy')} - ${format(new Date(endDate), 'MMM d, yyyy')}`}
-                  </Text>
-                </View>
+            <Text style={styles.dateRange}>
+              {startDate === endDate 
+                ? format(new Date(startDate), 'MMMM d, yyyy')
+                : `${format(new Date(startDate), 'MMM d, yyyy')} - ${format(new Date(endDate), 'MMM d, yyyy')}`}
+            </Text>
+            </View>
               </View>
             )}
             
             {/* Summary Section (only on first page) */}
             {pageIndex === 0 && (
-              <View style={styles.summarySection}>
+          <View style={styles.summarySection}>
                 <Text style={styles.summaryTitle}>Attendance Overview</Text>
-                <View style={styles.summaryGrid}>
-                  <View style={styles.summaryBox}>
-                    <Text style={styles.summaryLabel}>Total Employees</Text>
-                    <Text style={styles.summaryValue}>{totalEmployees}</Text>
-                  </View>
-                  <View style={styles.summaryBox}>
-                    <Text style={styles.summaryLabel}>On Time</Text>
-                    <Text style={styles.summaryValue}>{onTimeEmployees}</Text>
-                    <Text style={styles.summaryPercent}>
-                      {((onTimeEmployees/totalEmployees)*100).toFixed(1)}%
-                    </Text>
-                  </View>
-                  <View style={styles.summaryBox}>
-                    <Text style={styles.summaryLabel}>Late Arrivals</Text>
-                    <Text style={styles.summaryValue}>{lateEmployees}</Text>
-                    <Text style={styles.summaryPercent}>
-                      {((lateEmployees/totalEmployees)*100).toFixed(1)}%
-                    </Text>
-                  </View>
-                </View>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>Total Employees</Text>
+                <Text style={styles.summaryValue}>{totalEmployees}</Text>
+              </View>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>On Time</Text>
+                <Text style={styles.summaryValue}>{onTimeEmployees}</Text>
+                <Text style={styles.summaryPercent}>
+                  {((onTimeEmployees/totalEmployees)*100).toFixed(1)}%
+                </Text>
+              </View>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryLabel}>Late Arrivals</Text>
+                <Text style={styles.summaryValue}>{lateEmployees}</Text>
+                <Text style={styles.summaryPercent}>
+                  {((lateEmployees/totalEmployees)*100).toFixed(1)}%
+                </Text>
+              </View>
+              </View>
               </View>
             )}
 
-            {/* Attendance Table */}
-            <View style={styles.table}>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Date</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 1.4 }]}>Employee</Text>
+          {/* Attendance Table */}
+          <View style={styles.table}>
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Date</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 1.4 }]}>Employee</Text>
                 <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>1st In</Text>
                 <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>1st Out</Text>
                 <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>2nd In</Text>
                 <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>2nd Out</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Break</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Status</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Late</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>Duration</Text>
-              </View>
-
-              {chunk.map((record: Attendance, index: number) => (
-                <View key={index} style={[
-                  styles.tableRow,
-                  index % 2 === 1 && styles.tableRowAlt
-                ]}>
-                  <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                    {format(new Date(record.date), 'MMM d, yyyy')}
-                  </Text>
-                  <Text style={[styles.nameCellStyle, { flex: 1.4 }]}>
-                    {record.employee_name}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                    {record.check_in_time 
-                      ? format(new Date(record.check_in_time), 'h:mm a')
-                      : 'N/A'}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                    {record.check_out_time
-                      ? format(new Date(record.check_out_time), 'h:mm a')
-                      : 'N/A'}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                    {record.second_check_in_time
-                      ? format(new Date(record.second_check_in_time), 'h:mm a')
-                      : 'N/A'}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                    {record.second_check_out_time
-                      ? format(new Date(record.second_check_out_time), 'h:mm a')
-                      : 'N/A'}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                    {formatBreakDuration(record.break_duration)}
-                  </Text>
-                  <Text style={[
-                    styles.tableCell,
-                    { flex: 0.7 },
-                    getStatusStyle(record.status)
-                  ]}>
-                    {record.status || 'N/A'}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 0.6 }]}>
-                    {record.minutes_late ? `${record.minutes_late}m` : '-'}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                    {calculateWorkingTime(record)}
-                  </Text>
-                </View>
-              ))}
+              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Break</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>Duration</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Status</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Late</Text>
             </View>
 
-            {/* Footer */}
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
+              {chunk.map((record: Attendance, index: number) => (
+              <View key={index} style={[
+                styles.tableRow,
+                index % 2 === 1 && styles.tableRowAlt
+              ]}>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {format(new Date(record.date), 'MMM d, yyyy')}
+                </Text>
+                  <Text style={[styles.nameCellStyle, { flex: 1.4 }]}>
+                  {record.employee_name}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                  {record.check_in_time 
+                    ? format(new Date(record.check_in_time), 'h:mm a')
+                    : 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                  {record.check_out_time
+                    ? format(new Date(record.check_out_time), 'h:mm a')
+                    : 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                  {record.second_check_in_time
+                    ? format(new Date(record.second_check_in_time), 'h:mm a')
+                    : 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                  {record.second_check_out_time
+                    ? format(new Date(record.second_check_out_time), 'h:mm a')
+                    : 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                  {formatBreakDuration(record.break_duration)}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                  {calculateTotalWorkingTime(record)}
+                </Text>
+                <Text style={[
+                  styles.tableCell,
+                  { flex: 0.7 },
+                  getStatusStyle(record.status)
+                ]}>
+                  {record.status || 'N/A'}
+                </Text>
+                <Text style={[styles.tableCell, { flex: 0.6 }]}>
+                  {record.minutes_late ? `${record.minutes_late}m` : '-'}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>
                 Generated by QR Attendance System
               </Text>
               <Text style={styles.pageNumber}>
@@ -554,9 +554,9 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
               </Text>
               <Text style={styles.footerText}>
                 {format(new Date(), 'MMMM d, yyyy h:mm a')}
-              </Text>
-            </View>
-          </Page>
+            </Text>
+          </View>
+        </Page>
         ))}
       </Document>
     );
@@ -1271,19 +1271,13 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                       <TableHead className="min-w-[160px]">Second Check-In</TableHead>
                       <TableHead className="min-w-[160px]">Second Check-Out</TableHead>
                       <TableHead className="min-w-[120px]">Break Duration</TableHead>
+                      <TableHead className="min-w-[140px]">Working Duration</TableHead>
                       <TableHead className="min-w-[140px]">Status</TableHead>
                       <TableHead className="min-w-[140px]">
                         <div className="flex items-center">
                           <Clock className="mr-1 h-4 w-4" />
                           <span className="hidden sm:inline">Late Duration</span>
                           <span className="sm:hidden">Late</span>
-                        </div>
-                      </TableHead>
-                      <TableHead className="min-w-[140px]">
-                        <div className="flex items-center">
-                          <Timer className="mr-1 h-4 w-4" />
-                          <span className="hidden sm:inline">Working Time</span>
-                          <span className="sm:hidden">Time</span>
                         </div>
                       </TableHead>
                       <TableHead className="min-w-[100px] sticky right-0 bg-background">Actions</TableHead>
@@ -1363,6 +1357,11 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                             </div>
                           </TableCell>
                           <TableCell>
+                            <div className="whitespace-nowrap">
+                              {record.working_duration || calculateTotalWorkingTime(record)}
+                            </div>
+                          </TableCell>
+                          <TableCell>
                             <div className="flex flex-col gap-1">
                               <Badge 
                                 variant={
@@ -1436,29 +1435,6 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                                 })()}
                               </div>
                             ) : '-'}
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <div className={`font-medium whitespace-nowrap ${
-                                record.status === 'checked-out-overtime'
-                                  ? 'text-blue-600'
-                                  : record.status === 'half-day' || record.status === 'early-departure'
-                                    ? 'text-yellow-600'
-                                    : record.status === 'present'
-                                      ? 'text-green-600'
-                                    : ''
-                              }`}>
-                                {calculateWorkingTime(record)}
-                              </div>
-                              <div className="text-xs text-muted-foreground whitespace-nowrap hidden sm:block">
-                                {record.full_time_range}
-                                {record.status === 'early-departure' && (
-                                  <span className="text-yellow-600 ml-1">
-                                    (Early)
-                                  </span>
-                                )}
-                              </div>
-                            </div>
                           </TableCell>
                           <TableCell className="sticky right-0 bg-background">
                             <Button

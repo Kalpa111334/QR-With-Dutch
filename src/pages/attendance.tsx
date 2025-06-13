@@ -18,7 +18,9 @@ import {
   Trash2,
   X,
   Clock,
-  Calendar
+  Calendar,
+  Loader2,
+  Download
 } from 'lucide-react';
 import { 
   Table, 
@@ -42,6 +44,8 @@ import {
 } from '@/utils/attendanceUtils';
 import { format } from 'date-fns';
 import AbsentEmployeeDownload from '@/components/AbsentEmployeeDownload';
+import { PDFDownloadLink } from '@react-pdf/renderer';
+import EnhancedAttendanceReport from '@/components/EnhancedAttendanceReport';
 
 // Dynamically import QR Scanner to avoid SSR issues
 const QrScanner = dynamic(() => import('react-qr-scanner'), {
@@ -467,7 +471,7 @@ export default function Attendance() {
   const filteredRecords = attendanceRecords.filter(record => {
     // Basic filters
     const matchesSearch = record.employeeName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDepartment = department === 'All Departments' || record.department === department;
+    const matchesDepartment = department === 'All Departments' || record.employee?.department === department;
     const recordDate = new Date(record.date);
     const matchesDateRange = 
       recordDate >= new Date(startDate) && 
@@ -552,9 +556,41 @@ export default function Attendance() {
     document.body.removeChild(link);
   };
 
-  // Export to PDF (placeholder - would require a PDF generation library)
+  // Export to PDF
   const handleExportPDF = () => {
-    toast('PDF export functionality will be added soon');
+    return (
+      <PDFDownloadLink
+        document={
+          <EnhancedAttendanceReport
+            attendanceRecords={filteredRecords}
+            absentEmployees={absentEmployees}
+            startDate={new Date(startDate)}
+            endDate={new Date(endDate)}
+          />
+        }
+        fileName={`attendance_report_${format(new Date(startDate), 'yyyy-MM-dd')}_to_${format(new Date(endDate), 'yyyy-MM-dd')}.pdf`}
+      >
+        {({ loading }) => (
+          <Button
+            variant="default"
+            className="flex items-center gap-2"
+            disabled={loading || filteredRecords.length === 0}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Generating PDF...
+              </>
+            ) : (
+              <>
+                <FileText className="h-4 w-4" />
+                Export to PDF
+              </>
+            )}
+          </Button>
+        )}
+      </PDFDownloadLink>
+    );
   };
 
   // Function to clear all filters and selections
@@ -663,33 +699,16 @@ export default function Attendance() {
           </CardContent>
         </Card>
 
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold">Attendance Records</h1>
-          <div className="flex space-x-2">
-            <Button 
-              variant="destructive" 
-              size="sm" 
-              onClick={handleDeleteRecords}
-              disabled={selectedRecords.length === 0}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Clear Selected
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <h1 className="text-2xl font-bold">Attendance Management</h1>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleExportCSV} disabled={filteredRecords.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
             </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleExportCSV}
-            >
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Export to CSV
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleExportPDF}
-            >
-              <FileText className="mr-2 h-4 w-4" />
-              Export to PDF
+            {handleExportPDF()}
+            <Button onClick={handleClearFilters} variant="outline">
+              Clear Filters
             </Button>
           </div>
         </div>
