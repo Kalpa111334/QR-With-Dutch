@@ -92,7 +92,18 @@ const formatTime = (timestamp: string | null | undefined) => {
   return format(new Date(timestamp), 'hh:mm:ss a');
 };
 
+// Memoize video constraints
+const createVideoConstraints = (facingMode: 'environment' | 'user') => ({
+  facingMode,
+  width: { ideal: SCAN_RESOLUTION.width * 2 },
+  height: { ideal: SCAN_RESOLUTION.height * 2 },
+  frameRate: { ideal: 30, min: 15 },
+  aspectRatio: { ideal: 1.777778 },
+});
+
+// Optimized QR Scanner component
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendance' }) => {
+  // Refs for better performance
   const webcamRef = useRef<Webcam>(null);
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -102,25 +113,31 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
+  // States
   const [scanning, setScanning] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const [cooldownTimer, setCooldownTimer] = useState<number | null>(null);
 
+  // Memoize video constraints
+  const videoConstraints = useMemo(() => createVideoConstraints(facingMode), [facingMode]);
+
   // Initialize canvas once
   useEffect(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = SCAN_RESOLUTION.width;
-    canvas.height = SCAN_RESOLUTION.height;
-    canvasRef.current = canvas;
-    
-    const ctx = canvas.getContext('2d', {
-      willReadFrequently: true,
-      alpha: false,
-      desynchronized: true
-    });
-    ctxRef.current = ctx;
+    if (!canvasRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = SCAN_RESOLUTION.width;
+      canvas.height = SCAN_RESOLUTION.height;
+      canvasRef.current = canvas;
+      
+      const ctx = canvas.getContext('2d', {
+        willReadFrequently: true,
+        alpha: false,
+        desynchronized: true
+      });
+      ctxRef.current = ctx;
+    }
   }, []);
 
   // Initialize speech synthesis with preferred voice
@@ -197,35 +214,32 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
     return employee;
   }, []);
 
-  // Memoized video constraints
-  const videoConstraints = useMemo(() => ({
-    facingMode,
-    width: { ideal: SCAN_RESOLUTION.width * 2 },
-    height: { ideal: SCAN_RESOLUTION.height * 2 },
-    frameRate: { ideal: 30, min: 15 },
-    aspectRatio: { ideal: 1.777778 },
-  }), [facingMode]);
+  // Optimized QR scanning function with debouncing
+  const scanQRCode = useCallback(
+    debounce(() => {
+      if (!scanning || !webcamRef.current?.video || isProcessing || !ctxRef.current || !canvasRef.current) return;
 
-  // Optimized QR scanning function
-  const scanQRCode = useCallback(() => {
-    if (!scanning || !webcamRef.current?.video || isProcessing || !ctxRef.current || !canvasRef.current) return;
+      const video = webcamRef.current.video;
+      if (video.readyState !== 4) return;
 
-    const video = webcamRef.current.video;
-    if (video.readyState !== 4) return;
+      const ctx = ctxRef.current;
+      const canvas = canvasRef.current;
 
-    const ctx = ctxRef.current;
-    const canvas = canvasRef.current;
+      // Use requestAnimationFrame for smoother rendering
+      requestAnimationFrame(() => {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    // Process QR code in worker
-    qrWorker.postMessage({
-      data: imageData.data,
-      width: canvas.width,
-      height: canvas.height
-    });
-  }, [scanning, isProcessing]);
+        // Process QR code in worker
+        qrWorker.postMessage({
+          data: imageData.data,
+          width: canvas.width,
+          height: canvas.height
+        });
+      });
+    }, 50),
+    [scanning, isProcessing]
+  );
 
   // Optimized QR processing
   const processQRCode = useCallback(async (qrData: string) => {
@@ -459,6 +473,19 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
     };
   }, [cooldownTimer]);
 
+  // Utility function for debouncing
+  function debounce<T extends (...args: any[]) => any>(
+    func: T,
+    wait: number
+  ): (...args: Parameters<T>) => void {
+    let timeout: NodeJS.Timeout | null = null;
+    
+    return (...args: Parameters<T>) => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  }
+
   // Optimized render with minimal state updates
   return (
     <Card className="w-full max-w-2xl mx-auto bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/50 dark:to-slate-800/50 shadow-lg border border-slate-200 dark:border-slate-700">
@@ -517,6 +544,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
             videoConstraints={videoConstraints}
             className="w-full h-full object-cover"
             screenshotQuality={SCAN_QUALITY}
+            screenshotFormat="image/jpeg"
           />
           
           {scanning && (

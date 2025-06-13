@@ -1,14 +1,15 @@
 export interface Employee {
   id: string;
   name: string;
-  status: string;
-  department?: string | null;
-  first_name?: string;
-  last_name?: string;
-  email?: string | null;
-  position?: string | null;
-  phone?: string | null;
-  join_date?: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  department: string;
+  department_id?: string;
+  position: string | null;
+  phone: string | null;
+  join_date: string;
+  status: 'active' | 'inactive';
   created_at?: string;
   updated_at?: string;
 }

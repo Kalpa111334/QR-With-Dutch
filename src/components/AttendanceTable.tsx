@@ -20,7 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Attendance } from '@/types';
 import { Calendar, Download, Search, Clock, Timer, FileText, Share2, Loader2, Trash2, UserX } from 'lucide-react';
-import { getAttendanceRecords, deleteAttendance, deleteAttendanceRecord } from '@/utils/attendanceUtils';
+import { getAttendanceRecords, deleteAttendance, deleteAttendanceRecord, createTestAttendanceRecord } from '@/utils/attendanceUtils';
 import { getDepartments } from '@/utils/employeeUtils';
 import { Document, Page, Text, View, PDFDownloadLink } from '@react-pdf/renderer';
 import { toast } from '@/components/ui/use-toast';
@@ -271,8 +271,10 @@ interface DeletionType {
 const AttendanceTable: React.FC<AttendanceTableProps> = ({ 
   attendanceRecords: propAttendanceRecords
 }) => {
+  // Get today and 7 days ago for default date range
   const today = new Date().toISOString().split('T')[0];
-  const [startDate, setStartDate] = useState<string>(today);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const [startDate, setStartDate] = useState<string>(sevenDaysAgo);
   const [endDate, setEndDate] = useState<string>(today);
   const [department, setDepartment] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -292,6 +294,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
         setLoading(true);
         // Fetch departments
         const deptData = await getDepartments();
+        console.log('Fetched departments:', deptData);
         setDepartments(['all', ...deptData]);
         
         // Fetch attendance records if not provided as props
@@ -301,6 +304,14 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
         } else {
           attendanceData = await getAttendanceRecords();
         }
+        console.log('Fetched attendance records:', attendanceData);
+        
+        // Ensure each record has a date field
+        attendanceData = attendanceData.map(record => ({
+          ...record,
+          date: record.date || new Date(record.check_in_time || record.first_check_in_time).toISOString().split('T')[0]
+        }));
+        
         setRecords(attendanceData);
       } catch (error) {
         console.error('Error loading attendance data:', error);
@@ -351,15 +362,36 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   
   const filteredRecords = records.filter(record => {
     // Normalize dates for comparison
-    const recordDate = new Date(record.date).toISOString().split('T')[0];
-    const startISO = new Date(startDate).toISOString().split('T')[0];
-    const endISO = new Date(endDate).toISOString().split('T')[0];
+    const recordDate = record.date ? new Date(record.date) : 
+      new Date(record.check_in_time || record.first_check_in_time || Date.now());
+    const startISO = new Date(startDate);
+    const endISO = new Date(endDate);
+    endISO.setHours(23, 59, 59, 999); // Include the entire end date
     
     const matchesDate = recordDate >= startISO && recordDate <= endISO;
-    const matchesDepartment = department === 'all' || 
-      (record.employee?.department || '').toLowerCase() === department.toLowerCase();
-    const matchesSearch = searchTerm === '' || 
-      (record.employee_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Case-insensitive department matching
+    const recordDepartment = (record.employee?.department || '').toLowerCase().trim();
+    const selectedDepartment = department.toLowerCase().trim();
+    const matchesDepartment = department === 'all' || recordDepartment === selectedDepartment;
+    
+    // Case-insensitive name search
+    const employeeName = (record.employee_name || record.employee?.name || '').toLowerCase().trim();
+    const searchQuery = searchTerm.toLowerCase().trim();
+    const matchesSearch = !searchQuery || employeeName.includes(searchQuery);
+    
+    // Debug logging for filtered out records
+    if (!matchesDate || !matchesDepartment || !matchesSearch) {
+      console.debug('Record filtered out:', {
+        id: record.id,
+        employee: employeeName,
+        date: recordDate,
+        department: recordDepartment,
+        matchesDate,
+        matchesDepartment,
+        matchesSearch
+      });
+    }
     
     return matchesDate && matchesDepartment && matchesSearch;
   });
@@ -1123,29 +1155,36 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
     return `${Math.round(averageMinutes)}m`;
   };
 
+  const handleCreateTestRecord = async () => {
+    try {
+      await createTestAttendanceRecord();
+      // Refresh the records
+      setRefreshTrigger(prev => prev + 1);
+      toast({
+        title: 'Success',
+        description: 'Test record created successfully',
+      });
+    } catch (error) {
+      console.error('Error creating test record:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to create test record',
+        variant: 'destructive'
+      });
+    }
+  };
+
   return (
     <Card className="w-full">
       <CardHeader>
         <CardTitle className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <span>Attendance Records</span>
-          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-            <Dialog open={showAbsentDialog} onOpenChange={setShowAbsentDialog}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="w-full sm:w-auto">
-                  <UserX className="mr-2 h-4 w-4" />
-                  Absent Report
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Absent Employees Report</DialogTitle>
-                  <DialogDescription>
-                    Generate and share reports of absent employees
-                  </DialogDescription>
-                </DialogHeader>
-                <AbsentEmployeeDownload />
-              </DialogContent>
-            </Dialog>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold">Attendance Records</h2>
+            <Button onClick={handleCreateTestRecord} variant="outline" size="sm" className="ml-4">
+              Create Test Record
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Button 
               onClick={exportToCsv} 
               disabled={filteredRecords.length === 0}

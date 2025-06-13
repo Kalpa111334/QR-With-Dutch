@@ -295,6 +295,7 @@ export const recordAttendance = async (qrData: string): Promise<ExtendedWorkTime
 // Fetch Attendance Records
 export const getAttendanceRecords = async (): Promise<Attendance[]> => {
   try {
+    console.log('Fetching attendance records...');
     const { data, error } = await supabase
       .from('attendance')
       .select(`
@@ -309,52 +310,80 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
         break_duration,
         date,
         status,
-        action,
-        minutes_late,
-        working_duration,
-        overtime,
+        total_hours,
+        late_duration,
         sequence_number,
-        employee:employees!inner (
+        created_at,
+        early_departure,
+        overtime,
+        employee:employees (
           id,
           name,
+          department_id,
           departments (
+            id,
             name
           )
         )
       `)
-      .is('deleted_at', null)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(500);
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase error fetching attendance:', error);
+      throw error;
+    }
 
-    return (data || []).map(record => ({
-      id: record.id,
-      employee_id: record.employee_id,
-      employee_name: (record.employee as any)?.name || 'Unknown',
-      employee: {
-        id: record.employee_id,
-        name: (record.employee as any)?.name || 'Unknown',
-        department: (record.employee as any)?.departments?.[0]?.name || null,
-        status: 'active'
-      },
-      check_in_time: record.check_in_time || record.first_check_in_time,
-      check_out_time: record.check_out_time || record.first_check_out_time,
-      first_check_in_time: record.first_check_in_time || record.check_in_time,
-      first_check_out_time: record.first_check_out_time || record.check_out_time,
-      second_check_in_time: record.second_check_in_time,
-      second_check_out_time: record.second_check_out_time,
-      break_duration: record.break_duration,
-      date: record.date,
-      status: record.status,
-      action: record.action,
-      minutes_late: record.minutes_late,
-      working_duration: record.working_duration,
-      overtime: record.overtime,
-      sequence_number: record.sequence_number,
-      is_second_session: !!record.second_check_in_time
-    }));
+    console.log('Raw attendance data:', data);
+
+    const processedRecords = (data || []).map(record => {
+      const status = record.status || 'present';
+      const action: AttendanceAction = record.check_out_time ? 'check-out' : 'check-in';
+
+      // Calculate working duration if not provided
+      let workingDuration = record.total_hours?.toString() || '0';
+      if (!record.total_hours) {
+        const minutes = calculateWorkingDuration(
+          record.first_check_in_time ? new Date(record.first_check_in_time) : null,
+          record.first_check_out_time ? new Date(record.first_check_out_time) : null,
+          record.second_check_in_time ? new Date(record.second_check_in_time) : null,
+          record.second_check_out_time ? new Date(record.second_check_out_time) : null
+        );
+        workingDuration = formatWorkingDuration(minutes);
+      }
+
+      return {
+        id: record.id,
+        employee_id: record.employee_id,
+        employee_name: (record.employee as any)?.name || 'Unknown',
+        employee: {
+          id: record.employee_id,
+          name: (record.employee as any)?.name || 'Unknown',
+          department: (record.employee as any)?.departments?.name || null,
+          status: 'active'
+        },
+        check_in_time: record.check_in_time,
+        check_out_time: record.check_out_time,
+        first_check_in_time: record.first_check_in_time || record.check_in_time,
+        first_check_out_time: record.first_check_out_time || record.check_out_time,
+        second_check_in_time: record.second_check_in_time,
+        second_check_out_time: record.second_check_out_time,
+        break_duration: record.break_duration || 0,
+        date: record.date,
+        status: status as AttendanceStatus,
+        action: action,
+        minutes_late: record.late_duration || 0,
+        working_duration: workingDuration,
+        overtime: record.overtime || 0,
+        sequence_number: record.sequence_number || 1,
+        is_second_session: !!record.second_check_in_time,
+        early_departure: record.early_departure || false
+      };
+    });
+
+    console.log('Processed attendance records:', processedRecords);
+    return processedRecords;
   } catch (error) {
     console.error('Error fetching attendance records:', error);
     return [];
@@ -907,45 +936,35 @@ export const calculateWorkingTime = (record: Attendance): string => {
   let totalMinutes = 0;
 
   try {
-    // For backward compatibility, check both old and new timestamp fields
-    const firstCheckIn = record.check_in_time;
-    const firstCheckOut = record.check_out_time;
-    const secondCheckIn = record.second_check_in_time;
-    const secondCheckOut = record.second_check_out_time;
-
     // Calculate first session duration
-    if (firstCheckIn) {
-      const firstStart = new Date(firstCheckIn);
-      let firstEnd;
+    if (record.first_check_in_time) {
+      const firstCheckIn = new Date(record.first_check_in_time);
       
-      if (firstCheckOut) {
-        firstEnd = new Date(firstCheckOut);
+      if (record.first_check_out_time) {
+        const firstCheckOut = new Date(record.first_check_out_time);
+        if (firstCheckOut >= firstCheckIn) {
+          totalMinutes = Math.floor((firstCheckOut.getTime() - firstCheckIn.getTime()) / (1000 * 60));
+        }
       } else if (record.status !== 'checked-out') {
-        // If still in first session
-        firstEnd = new Date();
-      }
-
-      if (firstEnd && firstEnd >= firstStart) {
-        const sessionMinutes = Math.floor((firstEnd.getTime() - firstStart.getTime()) / (1000 * 60));
-        totalMinutes += sessionMinutes;
+        // If still in first session and not checked out, calculate until now
+        const now = new Date();
+        totalMinutes = Math.floor((now.getTime() - firstCheckIn.getTime()) / (1000 * 60));
       }
     }
 
-    // Calculate second session duration
-    if (secondCheckIn) {
-      const secondStart = new Date(secondCheckIn);
-      let secondEnd;
-
-      if (secondCheckOut) {
-        secondEnd = new Date(secondCheckOut);
+    // Calculate second session duration if it exists
+    if (record.second_check_in_time) {
+      const secondCheckIn = new Date(record.second_check_in_time);
+      
+      if (record.second_check_out_time) {
+        const secondCheckOut = new Date(record.second_check_out_time);
+        if (secondCheckOut >= secondCheckIn) {
+          totalMinutes += Math.floor((secondCheckOut.getTime() - secondCheckIn.getTime()) / (1000 * 60));
+        }
       } else if (record.status !== 'checked-out') {
-        // If still in second session
-        secondEnd = new Date();
-      }
-
-      if (secondEnd && secondEnd >= secondStart) {
-        const sessionMinutes = Math.floor((secondEnd.getTime() - secondStart.getTime()) / (1000 * 60));
-        totalMinutes += sessionMinutes;
+        // If still in second session and not checked out, calculate until now
+        const now = new Date();
+        totalMinutes += Math.floor((now.getTime() - secondCheckIn.getTime()) / (1000 * 60));
       }
     }
 
@@ -969,14 +988,396 @@ export const calculateWorkingTime = (record: Attendance): string => {
       }
     }
 
-    // Convert minutes to hours and minutes format
+    // Format the duration
     const hours = Math.floor(totalMinutes / 60);
-    const minutes = Math.floor(totalMinutes % 60);
+    const minutes = totalMinutes % 60;
     
-    // Format with leading zeros for minutes
     return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
   } catch (error) {
     console.error('Error calculating working time:', error);
     return '0h 00m';
+  }
+};
+
+// Create a test department
+export const createTestDepartment = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('departments')
+      .insert([
+        {
+          name: 'Test Department',
+          created_at: new Date().toISOString()
+        }
+      ])
+      .select();
+
+    if (error) {
+      console.error('Error creating test department:', error);
+      throw error;
+    }
+
+    console.log('Created test department:', data);
+    return data?.[0];
+  } catch (error) {
+    console.error('Error in createTestDepartment:', error);
+    throw error;
+  }
+};
+
+// Create a test employee
+export const createTestEmployee = async () => {
+  try {
+    // First, get or create the test department
+    const testDepartment = 'Test Department';
+    const { data: deptData, error: deptError } = await supabase
+      .from('departments')
+      .select('id, name')
+      .eq('name', testDepartment)
+      .single();
+
+    let departmentId;
+    if (deptError && deptError.message.includes('no rows')) {
+      // Create test department
+      const { data: newDept, error: createError } = await supabase
+        .from('departments')
+        .insert({ name: testDepartment })
+        .select('id, name')
+        .single();
+
+      if (createError) {
+        console.error('Error creating test department:', createError);
+        throw new Error('Failed to create test department');
+      }
+      departmentId = newDept.id;
+    } else if (deptError) {
+      console.error('Error fetching test department:', deptError);
+      throw new Error('Failed to fetch test department');
+    } else {
+      departmentId = deptData.id;
+    }
+
+    // Create employee
+    const { data, error } = await supabase
+      .from('employees')
+      .insert([
+        {
+          first_name: 'Test',
+          last_name: 'Employee',
+          name: 'Test Employee',
+          email: `test.employee.${Date.now()}@example.com`,
+          status: 'active',
+          department_id: departmentId,
+          position: 'Test Position',
+          join_date: new Date().toISOString().split('T')[0],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      ])
+      .select(`
+        *,
+        departments (
+          name
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('Error creating test employee:', error);
+      throw error;
+    }
+
+    console.log('Created test employee:', data);
+    return {
+      ...data,
+      department: data.departments?.name || testDepartment
+    };
+  } catch (error) {
+    console.error('Error in createTestEmployee:', error);
+    throw error;
+  }
+};
+
+// Calculate working duration in minutes
+const calculateWorkingDuration = (
+  firstCheckIn: Date | null,
+  firstCheckOut: Date | null,
+  secondCheckIn: Date | null,
+  secondCheckOut: Date | null
+): number => {
+  let totalMinutes = 0;
+
+  // Calculate first session
+  if (firstCheckIn && firstCheckOut) {
+    totalMinutes += Math.max(0, (firstCheckOut.getTime() - firstCheckIn.getTime()) / 60000);
+  }
+
+  // Calculate second session
+  if (secondCheckIn && secondCheckOut) {
+    totalMinutes += Math.max(0, (secondCheckOut.getTime() - secondCheckIn.getTime()) / 60000);
+  }
+
+  return Math.floor(totalMinutes);
+};
+
+// Format working duration
+const formatWorkingDuration = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes.toString().padStart(2, '0')}m`;
+};
+
+// Determine attendance status
+const determineStatus = (
+  checkInTime: Date,
+  checkOutTime: Date | null,
+  workingMinutes: number
+): string => {
+  const standardWorkHours = 8; // 8 hours standard workday
+  const standardWorkMinutes = standardWorkHours * 60;
+  const lateThresholdMinutes = 15; // 15 minutes late threshold
+  const halfDayThresholdMinutes = standardWorkMinutes / 2;
+
+  // Check if late
+  const startOfDay = new Date(checkInTime);
+  startOfDay.setHours(9, 0, 0, 0); // Assuming work starts at 9 AM
+  const isLate = checkInTime > startOfDay;
+
+  // Check if early departure
+  const endOfDay = new Date(checkInTime);
+  endOfDay.setHours(17, 0, 0, 0); // Assuming work ends at 5 PM
+  const isEarlyDeparture = checkOutTime && checkOutTime < endOfDay;
+
+  // Check if overtime
+  const isOvertime = workingMinutes > standardWorkMinutes;
+
+  if (!checkOutTime) {
+    return isLate ? 'late' : 'present';
+  }
+
+  if (workingMinutes < halfDayThresholdMinutes) {
+    return 'half-day';
+  }
+
+  if (isOvertime) {
+    return 'checked-out-overtime';
+  }
+
+  if (isEarlyDeparture) {
+    return 'early-departure';
+  }
+
+  return 'checked-out';
+};
+
+// Create a test attendance record
+export const createTestAttendanceRecord = async () => {
+  try {
+    // First, get an active employee or create one
+    const { data: employees, error: employeeError } = await supabase
+      .from('employees')
+      .select('id, name')
+      .eq('status', 'active')
+      .limit(1);
+
+    if (employeeError) {
+      console.error('Error fetching employees:', employeeError);
+      throw new Error('Failed to fetch employees');
+    }
+
+    let employee;
+    if (!employees || employees.length === 0) {
+      // Create a test employee
+      employee = await createTestEmployee();
+      if (!employee) {
+        throw new Error('Failed to create test employee');
+      }
+    } else {
+      employee = employees[0];
+    }
+
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    
+    // Check if there's already an attendance record for today
+    const { data: existingRecords, error: existingError } = await supabase
+      .from('attendance')
+      .select(`
+        id,
+        check_in_time,
+        check_out_time,
+        first_check_in_time,
+        first_check_out_time,
+        second_check_in_time,
+        second_check_out_time,
+        sequence_number,
+        last_action_time
+      `)
+      .eq('employee_id', employee.id)
+      .eq('date', today)
+      .order('sequence_number', { ascending: false })
+      .limit(1);
+
+    if (existingError) {
+      console.error('Error checking existing records:', existingError);
+      throw new Error('Failed to check existing records');
+    }
+
+    if (existingRecords && existingRecords.length > 0) {
+      const existingRecord = existingRecords[0];
+      const lastActionTime = existingRecord.last_action_time ? new Date(existingRecord.last_action_time) : null;
+      
+      // Prevent rapid consecutive scans (minimum 1 minute between actions)
+      if (lastActionTime && (now.getTime() - lastActionTime.getTime()) < 60000) {
+        throw new Error('Please wait at least 1 minute between attendance actions');
+      }
+
+      // If first session is not complete
+      if (!existingRecord.first_check_out_time) {
+        // Make sure at least 15 minutes have passed since first check-in
+        const firstCheckIn = new Date(existingRecord.first_check_in_time || existingRecord.check_in_time);
+        const minCheckOutTime = new Date(firstCheckIn.getTime() + 15 * 60 * 1000);
+        const checkOutTime = now < minCheckOutTime ? minCheckOutTime : now;
+
+        // Calculate working duration
+        const workingMinutes = calculateWorkingDuration(
+          firstCheckIn,
+          checkOutTime,
+          null,
+          null
+        );
+
+        // Determine status
+        const status = determineStatus(firstCheckIn, checkOutTime, workingMinutes);
+
+        const { data: updatedRecord, error: updateError } = await supabase
+          .from('attendance')
+          .update({
+            check_out_time: checkOutTime.toISOString(),
+            first_check_out_time: checkOutTime.toISOString(),
+            status,
+            last_action_time: now.toISOString(),
+            working_duration: formatWorkingDuration(workingMinutes),
+            total_hours: workingMinutes / 60,
+            early_departure: status === 'early-departure',
+            overtime: status === 'checked-out-overtime' ? Math.max(0, (workingMinutes - 480) / 60) : 0
+          })
+          .eq('id', existingRecord.id)
+          .select();
+
+        if (updateError) {
+          console.error('Error updating record:', updateError);
+          throw new Error('Failed to update attendance record');
+        }
+
+        console.log('Updated first check-out:', updatedRecord);
+        return updatedRecord;
+      } 
+      // If first session is complete but second hasn't started
+      else if (!existingRecord.second_check_in_time) {
+        // Make sure at least 15 minutes have passed since first check-out
+        const firstCheckOut = new Date(existingRecord.first_check_out_time);
+        const minCheckInTime = new Date(firstCheckOut.getTime() + 15 * 60 * 1000);
+        const checkInTime = now < minCheckInTime ? minCheckInTime : now;
+
+        const { data: updatedRecord, error: updateError } = await supabase
+          .from('attendance')
+          .update({
+            check_in_time: checkInTime.toISOString(),
+            second_check_in_time: checkInTime.toISOString(),
+            status: 'present',
+            last_action_time: now.toISOString(),
+            break_duration: `${Math.floor((checkInTime.getTime() - firstCheckOut.getTime()) / 60000)} minutes`
+          })
+          .eq('id', existingRecord.id)
+          .select();
+
+        if (updateError) {
+          console.error('Error updating record:', updateError);
+          throw new Error('Failed to update attendance record');
+        }
+
+        console.log('Added second check-in:', updatedRecord);
+        return updatedRecord;
+      }
+      // If second session started but not complete
+      else if (!existingRecord.second_check_out_time) {
+        // Make sure at least 15 minutes have passed since second check-in
+        const secondCheckIn = new Date(existingRecord.second_check_in_time);
+        const minCheckOutTime = new Date(secondCheckIn.getTime() + 15 * 60 * 1000);
+        const checkOutTime = now < minCheckOutTime ? minCheckOutTime : now;
+
+        // Calculate working duration
+        const workingMinutes = calculateWorkingDuration(
+          new Date(existingRecord.first_check_in_time),
+          new Date(existingRecord.first_check_out_time),
+          secondCheckIn,
+          checkOutTime
+        );
+
+        // Determine status
+        const status = determineStatus(secondCheckIn, checkOutTime, workingMinutes);
+
+        const { data: updatedRecord, error: updateError } = await supabase
+          .from('attendance')
+          .update({
+            check_out_time: checkOutTime.toISOString(),
+            second_check_out_time: checkOutTime.toISOString(),
+            status,
+            last_action_time: now.toISOString(),
+            working_duration: formatWorkingDuration(workingMinutes),
+            total_hours: workingMinutes / 60,
+            early_departure: status === 'early-departure',
+            overtime: status === 'checked-out-overtime' ? Math.max(0, (workingMinutes - 480) / 60) : 0
+          })
+          .eq('id', existingRecord.id)
+          .select();
+
+        if (updateError) {
+          console.error('Error updating record:', updateError);
+          throw new Error('Failed to update attendance record');
+        }
+
+        console.log('Added second check-out:', updatedRecord);
+        return updatedRecord;
+      } else {
+        throw new Error('Employee has completed both sessions for today');
+      }
+    }
+    
+    // Create new attendance record
+    const firstCheckIn = now;
+    const status = determineStatus(firstCheckIn, null, 0);
+
+    const { data, error } = await supabase
+      .from('attendance')
+      .insert([
+        {
+          employee_id: employee.id,
+          check_in_time: firstCheckIn.toISOString(),
+          first_check_in_time: firstCheckIn.toISOString(),
+          date: today,
+          status,
+          sequence_number: 1,
+          created_at: now.toISOString(),
+          last_action_time: now.toISOString(),
+          working_duration: '0h 00m',
+          total_hours: 0,
+          early_departure: false,
+          overtime: 0
+        }
+      ])
+      .select();
+
+    if (error) {
+      console.error('Error creating test record:', error);
+      throw error;
+    }
+
+    console.log('Created new attendance record:', data);
+    return data;
+  } catch (error) {
+    console.error('Error in createTestAttendanceRecord:', error);
+    throw error;
   }
 };

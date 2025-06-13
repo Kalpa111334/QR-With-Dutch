@@ -4,6 +4,59 @@ import { toast } from '@/components/ui/use-toast';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
+// Define types for database responses
+type Department = {
+  id: string;
+  name: string;
+};
+
+type DatabaseEmployee = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  position: string | null;
+  join_date: string;
+  status: string;
+  department_id: string;
+  departments: {
+    id: string;
+    name: string;
+  };
+  created_at?: string;
+  updated_at?: string;
+  name?: string;
+};
+
+// Define type for CSV parsing errors
+type CSVError = {
+  row?: number;
+  message: string;
+};
+
+// Define type for database responses
+type DatabaseResponse<T> = {
+  data: T;
+  error: Error | null;
+};
+
+// Define type for Supabase query builder response
+type SupabaseResponse<T> = {
+  data: T | null;
+  error: {
+    message: string;
+    details: string;
+    hint: string;
+    code: string;
+  } | null;
+};
+
+// Define type for Supabase join response
+type WithDepartment<T> = T & {
+  departments: Department;
+};
+
 export const getEmployees = async (): Promise<Employee[]> => {
   try {
     console.log('Fetching employees...');
@@ -19,11 +72,14 @@ export const getEmployees = async (): Promise<Employee[]> => {
         join_date,
         status,
         department_id,
-        departments(name),
+        departments!inner (
+          id,
+          name
+        ),
         created_at,
         updated_at
       `)
-      .eq('status', 'active'); // Only fetch active employees
+      .eq('status', 'active') as SupabaseResponse<DatabaseEmployee[]>;
     
     if (error) {
       console.error('Error fetching employees:', error);
@@ -43,7 +99,7 @@ export const getEmployees = async (): Promise<Employee[]> => {
       first_name: emp.first_name || '',
       last_name: emp.last_name || '',
       email: emp.email,
-      department: emp.departments?.name || null,
+      department: emp.departments.name,
       phone: emp.phone,
       position: emp.position,
       join_date: emp.join_date || new Date().toISOString().split('T')[0],
@@ -61,17 +117,51 @@ export const getEmployees = async (): Promise<Employee[]> => {
 export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Employee | null> => {
   try {
     // Get department_id from department name
+    let departmentData: Department & { id: string } | null = null;
     const { data: deptData, error: deptError } = await supabase
       .from('departments')
-      .select('id')
+      .select('id, name')
       .eq('name', employee.department)
-      .single();
+      .single() as SupabaseResponse<Department & { id: string }>;
     
     if (deptError) {
       console.error('Error finding department:', deptError);
+      
+      // Try to create the department if it doesn't exist
+      if (deptError.message.includes('no rows')) {
+        const { data: newDept, error: createError } = await supabase
+          .from('departments')
+          .insert({ name: employee.department })
+          .select('id, name')
+          .single() as SupabaseResponse<Department & { id: string }>;
+          
+        if (createError) {
+          console.error('Error creating department:', createError);
+          toast({
+            title: 'Error',
+            description: `Failed to create department "${employee.department}"`,
+            variant: 'destructive',
+          });
+          return null;
+        }
+        
+        departmentData = newDept;
+      } else {
+        toast({
+          title: 'Error',
+          description: `Error finding department "${employee.department}"`,
+          variant: 'destructive',
+        });
+        return null;
+      }
+    } else {
+      departmentData = deptData;
+    }
+
+    if (!departmentData) {
       toast({
         title: 'Error',
-        description: `Department "${employee.department}" not found`,
+        description: 'Department data is missing',
         variant: 'destructive',
       });
       return null;
@@ -83,21 +173,26 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
         first_name: employee.first_name,
         last_name: employee.last_name,
         email: employee.email,
-        department_id: deptData.id,
+        department_id: departmentData.id,
         phone: employee.phone,
         position: employee.position,
         join_date: employee.join_date,
         status: employee.status,
-        name: `${employee.first_name} ${employee.last_name}` // Keep name field updated for backward compatibility
+        name: `${employee.first_name} ${employee.last_name}`.trim()
       })
-      .select()
-      .single();
-    
-    if (error) {
+      .select(`
+        *,
+        departments!inner (
+          name
+        )
+      `)
+      .single() as SupabaseResponse<WithDepartment<DatabaseEmployee>>;
+
+    if (error || !data) {
       console.error('Error adding employee:', error);
       toast({
         title: 'Error adding employee',
-        description: error.message,
+        description: error?.message || 'Failed to add employee',
         variant: 'destructive',
       });
       return null;
@@ -109,7 +204,7 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
       first_name: data.first_name || '',
       last_name: data.last_name || '',
       email: data.email,
-      department: employee.department,
+      department: data.departments.name,
       phone: data.phone,
       position: data.position,
       join_date: data.join_date,
@@ -118,6 +213,11 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
     };
   } catch (error) {
     console.error('Error adding employee:', error);
+    toast({
+      title: 'Error',
+      description: 'An unexpected error occurred while adding the employee',
+      variant: 'destructive',
+    });
     return null;
   }
 };
@@ -125,17 +225,51 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
 export const updateEmployee = async (updatedEmployee: Employee): Promise<Employee | null> => {
   try {
     // Get department_id from department name
+    let departmentData: Department & { id: string } | null = null;
     const { data: deptData, error: deptError } = await supabase
       .from('departments')
-      .select('id')
+      .select('id, name')
       .eq('name', updatedEmployee.department)
-      .single();
+      .single() as SupabaseResponse<Department & { id: string }>;
     
     if (deptError) {
       console.error('Error finding department:', deptError);
+      
+      // Try to create the department if it doesn't exist
+      if (deptError.message.includes('no rows')) {
+        const { data: newDept, error: createError } = await supabase
+          .from('departments')
+          .insert({ name: updatedEmployee.department })
+          .select('id, name')
+          .single() as SupabaseResponse<Department & { id: string }>;
+          
+        if (createError) {
+          console.error('Error creating department:', createError);
+          toast({
+            title: 'Error',
+            description: `Failed to create department "${updatedEmployee.department}"`,
+            variant: 'destructive',
+          });
+          return null;
+        }
+        
+        departmentData = newDept;
+      } else {
+        toast({
+          title: 'Error',
+          description: `Error finding department "${updatedEmployee.department}"`,
+          variant: 'destructive',
+        });
+        return null;
+      }
+    } else {
+      departmentData = deptData;
+    }
+
+    if (!departmentData) {
       toast({
         title: 'Error',
-        description: `Department "${updatedEmployee.department}" not found`,
+        description: 'Department data is missing',
         variant: 'destructive',
       });
       return null;
@@ -147,23 +281,28 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<Employe
         first_name: updatedEmployee.first_name,
         last_name: updatedEmployee.last_name,
         email: updatedEmployee.email,
-        department_id: deptData.id,
+        department_id: departmentData.id,
         phone: updatedEmployee.phone,
         position: updatedEmployee.position,
         join_date: updatedEmployee.join_date,
         status: updatedEmployee.status,
-        name: `${updatedEmployee.first_name} ${updatedEmployee.last_name}`,
-        updated_at: new Date().toISOString(),
+        name: `${updatedEmployee.first_name} ${updatedEmployee.last_name}`.trim(),
+        updated_at: new Date().toISOString()
       })
       .eq('id', updatedEmployee.id)
-      .select()
-      .single();
-    
-    if (error) {
+      .select(`
+        *,
+        departments!inner (
+          name
+        )
+      `)
+      .single() as SupabaseResponse<WithDepartment<DatabaseEmployee>>;
+
+    if (error || !data) {
       console.error('Error updating employee:', error);
       toast({
         title: 'Error updating employee',
-        description: error.message,
+        description: error?.message || 'Failed to update employee',
         variant: 'destructive',
       });
       return null;
@@ -174,16 +313,21 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<Employe
       id: data.id,
       first_name: data.first_name || '',
       last_name: data.last_name || '',
-      email: data.email || '',
-      department: updatedEmployee.department,
-      phone: data.phone || '',
-      position: data.position || '',
+      email: data.email,
+      department: data.departments.name,
+      phone: data.phone,
+      position: data.position,
       join_date: data.join_date,
       status: data.status as 'active' | 'inactive',
-      name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
+      name: `${data.first_name || ''} ${data.last_name || ''}`.trim()
     };
   } catch (error) {
     console.error('Error updating employee:', error);
+    toast({
+      title: 'Error',
+      description: 'An unexpected error occurred while updating the employee',
+      variant: 'destructive',
+    });
     return null;
   }
 };
@@ -225,12 +369,12 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
         position,
         join_date,
         status,
-        departments(name)
+        departments!inner(name)
       `)
       .eq('id', id)
-      .single();
+      .single() as SupabaseResponse<WithDepartment<DatabaseEmployee>>;
     
-    if (error) {
+    if (error || !data) {
       console.error('Error fetching employee:', error);
       return null;
     }
@@ -241,18 +385,46 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
       first_name: data.first_name || '',
       last_name: data.last_name || '',
       email: data.email || '',
-      department: data.departments?.name || '',
+      department: data.departments.name,
       phone: data.phone || '',
       position: data.position || '',
       join_date: data.join_date,
       status: data.status as 'active' | 'inactive',
-      name: `${data.first_name || ''} ${data.last_name || ''}`.trim(), // Ensure name is set
+      name: `${data.first_name || ''} ${data.last_name || ''}`.trim()
     };
   } catch (error) {
     console.error('Error fetching employee:', error);
     return null;
   }
 };
+
+// Define a single source of truth for default departments
+export const DEFAULT_DEPARTMENTS = [
+  'Dutch Activity',
+  'Kitchen',
+  'Food & Beverage Department',
+  'Butchery',
+  'Operations',
+  'Maintenance',
+  'Reservations',
+  'House Keeping',
+  'Pastry Kitchen',
+  'Stores',
+  'Purchasing & Stores',
+  'Accounts Department',
+  'Administration',
+  'Security Department',
+  'Transport Section',
+  'Human Resources',
+  'IT',
+  'Finance',
+  'Marketing',
+  'Sales',
+  'Engineering',
+  'Research',
+  'Development',
+  'Customer Service'
+].sort();
 
 let cachedDepartments: string[] | null = null;
 let lastFetchTime = 0;
@@ -265,26 +437,6 @@ export const getDepartments = async (): Promise<string[]> => {
     if (cachedDepartments && (now - lastFetchTime) < CACHE_DURATION) {
       return cachedDepartments;
     }
-
-    // Default departments list
-    const defaultDepartments = [
-      'Dutch Activity',
-      'Kitchen',
-      'Food & Beverage Department',
-      'Butchery',
-      'Operations',
-      'Maintenance',
-      'Reservations',
-      'House Keeping',
-      'Pastry Kitchen',
-      'Stores',
-      'Purchasing & Stores',
-      'Accounts Department',
-      'Administration',
-      'Security Department',
-      'Transport Section',
-      'Human Resources',
-    ];
 
     console.log('Fetching departments from database...');
     const { data, error } = await supabase
@@ -300,16 +452,25 @@ export const getDepartments = async (): Promise<string[]> => {
     if (!data || data.length === 0) {
       console.log('No departments found, creating default departments...');
       
-      // Create departments one by one to handle RLS gracefully
-      for (const deptName of defaultDepartments) {
-        const { error: insertError } = await supabase
-          .from('departments')
-          .insert({ name: deptName })
-          .select('name')
-          .single();
+      // Create all departments in a single transaction if possible
+      const { error: insertError } = await supabase
+        .from('departments')
+        .insert(DEFAULT_DEPARTMENTS.map(name => ({ name })));
+      
+      if (insertError) {
+        console.warn('Failed to create departments in bulk, falling back to one-by-one:', insertError);
         
-        if (insertError) {
-          console.warn(`Failed to create department ${deptName}:`, insertError);
+        // Fall back to creating departments one by one
+        for (const deptName of DEFAULT_DEPARTMENTS) {
+          const { error: singleInsertError } = await supabase
+            .from('departments')
+            .insert({ name: deptName })
+            .select('name')
+            .single();
+          
+          if (singleInsertError && !singleInsertError.message.includes('duplicate')) {
+            console.warn(`Failed to create department ${deptName}:`, singleInsertError);
+          }
         }
       }
 
@@ -321,9 +482,9 @@ export const getDepartments = async (): Promise<string[]> => {
 
       if (refetchError || !refetchedData) {
         console.warn('Failed to fetch departments after creation:', refetchError);
-        cachedDepartments = defaultDepartments;
+        cachedDepartments = DEFAULT_DEPARTMENTS;
         lastFetchTime = now;
-        return defaultDepartments;
+        return DEFAULT_DEPARTMENTS;
       }
 
       cachedDepartments = refetchedData.map(dept => dept.name);
@@ -337,58 +498,47 @@ export const getDepartments = async (): Promise<string[]> => {
     
     // Check if we need to add any missing departments
     const existingDepts = new Set(cachedDepartments);
-    const missingDepts = defaultDepartments.filter(dept => !existingDepts.has(dept));
+    const missingDepts = DEFAULT_DEPARTMENTS.filter(dept => !existingDepts.has(dept));
     
     if (missingDepts.length > 0) {
       console.log('Adding missing departments:', missingDepts);
       
-      // Add missing departments one by one
-      for (const deptName of missingDepts) {
-        const { error: insertError } = await supabase
-          .from('departments')
-          .insert({ name: deptName })
-          .select('name')
-          .single();
+      // Try to add all missing departments in a single transaction
+      const { error: bulkInsertError } = await supabase
+        .from('departments')
+        .insert(missingDepts.map(name => ({ name })));
+      
+      if (bulkInsertError) {
+        console.warn('Failed to add missing departments in bulk, falling back to one-by-one:', bulkInsertError);
         
-        if (insertError) {
-          console.warn(`Failed to create department ${deptName}:`, insertError);
-        } else {
-          cachedDepartments.push(deptName);
+        // Fall back to adding missing departments one by one
+        for (const deptName of missingDepts) {
+          const { error: insertError } = await supabase
+            .from('departments')
+            .insert({ name: deptName })
+            .select('name')
+            .single();
+          
+          if (insertError && !insertError.message.includes('duplicate')) {
+            console.warn(`Failed to create department ${deptName}:`, insertError);
+          } else if (!insertError) {
+            cachedDepartments.push(deptName);
+          }
         }
+      } else {
+        // Add successful insertions to cache
+        cachedDepartments.push(...missingDepts);
       }
     }
     
+    // Sort departments alphabetically
+    cachedDepartments.sort();
     console.log('Available departments:', cachedDepartments);
     return cachedDepartments;
   } catch (error) {
     console.error('Error in getDepartments:', error);
     // Return cached departments if available, otherwise return default list
-    return cachedDepartments || [
-      'IT',
-      'HR',
-      'Finance',
-      'Marketing',
-      'Sales',
-      'Operations',
-      'Engineering',
-      'Research',
-      'Development',
-      'Customer Service',
-      'Administration',
-      'Transport',
-      'Maintenance',
-      'Security',
-      'Dutch Activity',
-      'Kitchen',
-      'Food & Beverage Department',
-      'Butchery',
-      'Reservations',
-      'House Keeping',
-      'Pastry Kitchen',
-      'Stores',
-      'Purchasing & Stores',
-      'Accounts Department'
-    ];
+    return cachedDepartments || DEFAULT_DEPARTMENTS;
   }
 };
 
@@ -505,7 +655,7 @@ async function parseFileToEmployees(file: File): Promise<Partial<Employee>[]> {
           try {
             if (results.errors && results.errors.length > 0) {
               const errorMessage = results.errors
-                .map(err => `Row ${err.row + 1}: ${err.message}`)
+                .map(err => `Row ${(err.row ?? 0) + 1}: ${err.message}`)
                 .join('\n');
               reject(new Error(`CSV parsing errors:\n${errorMessage}`));
               return;
@@ -544,8 +694,9 @@ async function parseFileToEmployees(file: File): Promise<Partial<Employee>[]> {
           
           const employees = data.map(mapRowToEmployee);
           resolve(employees);
-        } catch (error) {
-          reject(new Error(`Failed to parse Excel file: ${error.message || 'Unknown error'}`));
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+          reject(new Error(`Failed to parse Excel file: ${errorMessage}`));
         }
       })();
     } else {
