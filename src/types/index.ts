@@ -1,14 +1,14 @@
 export interface Employee {
   id: string;
-  first_name: string;
-  last_name: string;
-  email: string | null;
-  department: string | null;
-  position: string | null;
-  phone: string | null;
-  join_date: string;
-  status: 'active' | 'inactive';
   name: string;
+  status: string;
+  department?: string | null;
+  first_name?: string;
+  last_name?: string;
+  email?: string | null;
+  position?: string | null;
+  phone?: string | null;
+  join_date?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -26,12 +26,15 @@ export interface Attendance {
   id: string;
   employee_id: string;
   check_in_time: string;
-  check_out_time?: string;
+  check_out_time?: string | null;
+  first_check_in_time: string;
+  first_check_out_time?: string | null;
+  second_check_in_time?: string | null;
+  second_check_out_time?: string | null;
   date: string;
   created_at?: string;
   status: AttendanceStatus;
   employee?: Employee;
-  // Additional properties used in components
   employee_name?: string;
   minutes_late?: number;
   late_duration?: string;
@@ -42,12 +45,11 @@ export interface Attendance {
   full_time_range?: string;
   sequence_number: number;
   overtime?: number;
-  first_check_in_time: string;
-  first_check_out_time?: string;
-  break_duration?: string;
+  break_duration?: string | number;
   is_second_session: boolean;
   previous_session_id?: string;
   previous_session?: Attendance;
+  action?: AttendanceAction;
 }
 
 export interface ExtendedAttendance extends Attendance {
@@ -98,18 +100,14 @@ export interface WorkTimeInfo {
 }
 
 export interface ExtendedWorkTimeInfo {
-  check_in_time?: string;
-  check_out_time?: string;
-  first_check_in_time?: string;
-  first_check_out_time?: string;
-  second_check_in_time?: string;
-  break_duration?: string;
-  status: 'present' | 'checked-out';
+  check_in_time: string;
+  check_out_time?: string | null;
+  status: AttendanceStatus;
   sequence_number: number;
-  total_hours?: number;
+  action: AttendanceAction;
   late_duration: number;
-  action: 'check-in' | 'check-out';
-  [key: string]: string | number | undefined; // Allow additional properties
+  timestamp?: string;
+  break_duration?: string;
 }
 
 export interface CustomPostgrestResponse<T> {

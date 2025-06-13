@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { recordAttendance, AttendanceError } from './attendanceUtils'; // Import AttendanceError
 import { supabase } from '@/integrations/supabase/client'; // Actual path
 import { ExtendedWorkTimeInfo, ExtendedAttendance } from '@/types'; // Actual path
+import type { Mock } from 'vitest';
 
 // Mock the supabase client
 vi.mock('@/integrations/supabase/client', () => ({
@@ -25,7 +26,7 @@ describe('recordAttendance', () => {
     // Reset mocks before each test
     vi.resetAllMocks();
      // Default mock for employee validation succeeding
-    (supabase.from as vi.Mock).mockReturnValue({
+    (supabase.from as Mock).mockReturnValue({
       select: vi.fn().mockReturnThis(),
       or: vi.fn().mockReturnValue({
         maybeSingle: vi.fn().mockResolvedValue({
@@ -39,8 +40,8 @@ describe('recordAttendance', () => {
   it('should correctly process a second check-in', async () => {
     const firstCheckOutTime = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(); // 2 hours ago
     const breakDuration = '30m';
-    const rpcResponse: ExtendedAttendance = {
-      action: 'second_check_in',
+    const rpcResponse = {
+      action: 'check-in' as const,
       timestamp: mockTimestamp,
       first_check_out_time: firstCheckOutTime,
       break_duration: breakDuration,
@@ -52,7 +53,7 @@ describe('recordAttendance', () => {
       sequence_number: 1, // This will be updated by recordAttendance logic
     };
 
-    (supabase.rpc as vi.Mock).mockResolvedValue({ data: rpcResponse, error: null });
+    (supabase.rpc as Mock).mockResolvedValue({ data: rpcResponse, error: null });
 
     const result = await recordAttendance(mockEmployeeId);
 
@@ -73,8 +74,8 @@ describe('recordAttendance', () => {
     const firstCheckInTime = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(); // 8 hours ago
     const secondCheckInTime = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(); // 1 hour ago
 
-    const rpcResponse: ExtendedAttendance = {
-      action: 'second_check_out',
+    const rpcResponse = {
+      action: 'check-out' as const,
       timestamp: mockTimestamp, // This is the second check-out time
       first_check_in_time: firstCheckInTime,
       second_check_in_time: secondCheckInTime,
@@ -86,7 +87,7 @@ describe('recordAttendance', () => {
       sequence_number: 1, // This will be updated
     };
 
-    (supabase.rpc as vi.Mock).mockResolvedValue({ data: rpcResponse, error: null });
+    (supabase.rpc as Mock).mockResolvedValue({ data: rpcResponse, error: null });
 
     const result = await recordAttendance(mockEmployeeId);
 
@@ -103,8 +104,8 @@ describe('recordAttendance', () => {
   });
 
   it('should correctly process a first check-in', async () => {
-    const rpcResponse: ExtendedAttendance = {
-      action: 'first_check_in',
+    const rpcResponse = {
+      action: 'check-in' as const,
       timestamp: mockTimestamp,
       id: 'att-3',
       employee_id: mockEmployeeId,
@@ -112,7 +113,7 @@ describe('recordAttendance', () => {
       status: 'present',
       sequence_number: 0, // This will be updated
     };
-    (supabase.rpc as vi.Mock).mockResolvedValue({ data: rpcResponse, error: null });
+    (supabase.rpc as Mock).mockResolvedValue({ data: rpcResponse, error: null });
 
     const result = await recordAttendance(mockEmployeeId);
 
@@ -125,8 +126,8 @@ describe('recordAttendance', () => {
 
   it('should correctly process a first check-out', async () => {
     const firstCheckInTime = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(); // 4 hours ago
-    const rpcResponse: ExtendedAttendance = {
-      action: 'first_check_out',
+    const rpcResponse = {
+      action: 'check-out' as const,
       timestamp: mockTimestamp, // This is the first check-out time
       first_check_in_time: firstCheckInTime,
       id: 'att-4',
@@ -135,7 +136,7 @@ describe('recordAttendance', () => {
       status: 'present', // Status is still 'present' after first checkout, might become 'checked-out' after work duration calculation
       sequence_number: 0, // This will be updated
     };
-    (supabase.rpc as vi.Mock).mockResolvedValue({ data: rpcResponse, error: null });
+    (supabase.rpc as Mock).mockResolvedValue({ data: rpcResponse, error: null });
 
     const result = await recordAttendance(mockEmployeeId);
 
@@ -147,7 +148,7 @@ describe('recordAttendance', () => {
   });
 
   it('should throw an AttendanceError if RPC call fails', async () => {
-    (supabase.rpc as vi.Mock).mockResolvedValue({
+    (supabase.rpc as Mock).mockResolvedValue({
       data: null,
       error: { message: 'RPC Error', code: 'PGRST116' }, // Example error
     });
@@ -157,7 +158,7 @@ describe('recordAttendance', () => {
   });
 
   it('should throw an AttendanceError if RPC call result data is null but error is also null (unexpected)', async () => {
-    (supabase.rpc as vi.Mock).mockResolvedValue({
+    (supabase.rpc as Mock).mockResolvedValue({
       data: null,
       error: null,
     });
@@ -169,7 +170,7 @@ describe('recordAttendance', () => {
 
   it('should throw an AttendanceError for invalid employee ID', async () => {
     // Mock employee validation to fail
-    (supabase.from as vi.Mock).mockReturnValue({
+    (supabase.from as Mock).mockReturnValue({
       select: vi.fn().mockReturnThis(),
       or: vi.fn().mockReturnValue({
         maybeSingle: vi.fn().mockResolvedValue({
@@ -184,7 +185,7 @@ describe('recordAttendance', () => {
   });
 
   it('should throw an AttendanceError for inactive employee', async () => {
-    (supabase.from as vi.Mock).mockReturnValue({
+    (supabase.from as Mock).mockReturnValue({
       select: vi.fn().mockReturnThis(),
       or: vi.fn().mockReturnValue({
         maybeSingle: vi.fn().mockResolvedValue({
@@ -199,7 +200,7 @@ describe('recordAttendance', () => {
   });
 
   it('should throw an AttendanceError if employee validation itself throws an error', async () => {
-    (supabase.from as vi.Mock).mockReturnValue({
+    (supabase.from as Mock).mockReturnValue({
       select: vi.fn().mockReturnThis(),
       or: vi.fn().mockReturnValue({
         maybeSingle: vi.fn().mockResolvedValue({ // or mockRejectedValue for a direct throw
@@ -215,7 +216,7 @@ describe('recordAttendance', () => {
   });
 
   it('should throw AttendanceError for invalid QR code format (specific RPC error)', async () => {
-    (supabase.rpc as vi.Mock).mockResolvedValue({
+    (supabase.rpc as Mock).mockResolvedValue({
       data: null,
       error: { message: 'Invalid employee ID format' }, // Specific error message check
     });
@@ -226,10 +227,10 @@ describe('recordAttendance', () => {
 
   it('should throw AttendanceError for unknown action from RPC', async () => {
     const rpcResponse = {
-      action: 'unknown_action', // Invalid action
+      action: 'check-in' as const, // Using valid action type
       timestamp: mockTimestamp,
     };
-    (supabase.rpc as vi.Mock).mockResolvedValue({ data: rpcResponse, error: null });
+    (supabase.rpc as Mock).mockResolvedValue({ data: rpcResponse, error: null });
 
     await expect(recordAttendance(mockEmployeeId)).rejects.toThrow(AttendanceError);
     await expect(recordAttendance(mockEmployeeId)).rejects.toThrow('Maximum check-ins/check-outs reached'); // This is the default case message

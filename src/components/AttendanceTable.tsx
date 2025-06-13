@@ -39,7 +39,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { formatDistanceStrict, format } from 'date-fns';
-import { calculateTotalWorkingTime } from '../utils/attendanceUtils';
+import { calculateWorkingTime } from '@/utils/attendanceUtils';
 
 interface AttendanceTableProps {
   attendanceRecords?: Attendance[] | Promise<Attendance[]>;
@@ -333,7 +333,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
         };
 
         // Calculate working time using the standardized function
-        const workingTime = calculateTotalWorkingTime(processedRecord);
+        const workingTime = calculateWorkingTime(processedRecord);
         console.log('Record:', processedRecord);
         console.log('Calculated working time:', workingTime);
 
@@ -528,7 +528,7 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
                   {formatBreakDuration(record.break_duration)}
                 </Text>
                 <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                  {calculateTotalWorkingTime(record)}
+                  {calculateWorkingTime(record)}
                 </Text>
                 <Text style={[
                   styles.tableCell,
@@ -865,14 +865,18 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
       if (!confirmResult.isConfirmed) return;
 
       // Show loading state
-      Swal.fire({
+      await Swal.fire({
         title: 'Processing...',
         text: 'Please wait while we process your request.',
         allowOutsideClick: false,
         allowEscapeKey: false,
         allowEnterKey: false,
+        showConfirmButton: true,
         didOpen: () => {
-          Swal.showLoading();
+          const confirmButton = Swal.getConfirmButton();
+          if (confirmButton) {
+            Swal.showLoading(confirmButton);
+          }
         }
       });
 
@@ -948,12 +952,16 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
       if (!result.isConfirmed) return;
 
       // Show loading state
-      Swal.fire({
+      await Swal.fire({
         title: 'Processing...',
         text: 'Please wait while we delete the records.',
         allowOutsideClick: false,
+        showConfirmButton: true,
         didOpen: () => {
-          Swal.showLoading();
+          const confirmButton = Swal.getConfirmButton();
+          if (confirmButton) {
+            Swal.showLoading(confirmButton);
+          }
         }
       });
 
@@ -994,9 +1002,9 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
     }
   };
 
-  // Local implementation of formatBreakDuration
-  const formatBreakDuration = (duration: string | null | undefined): string => {
-    if (!duration) return 'N/A';
+  // Update formatBreakDuration function
+  const formatBreakDuration = (duration: string | number | null | undefined): string => {
+    if (duration === undefined || duration === null) return 'N/A';
     
     try {
       // Handle numeric input (assuming minutes)
@@ -1014,7 +1022,7 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
         return `${minutes}m`;
       }
 
-      // Parse string input
+      // Handle string input
       const trimmedDuration = duration.trim().toLowerCase();
       
       // Handle 'N/A' or empty string cases
@@ -1053,8 +1061,8 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
         }
       }
       
-      // Fallback: return original duration if no parsing worked
-      return duration || 'N/A';
+      // Fallback: return original string duration
+      return duration;
     } catch {
       return 'N/A';
     }
@@ -1080,11 +1088,19 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
     
     const totalMinutes = records.reduce((total, record) => {
       const duration = record.break_duration;
-      if (duration) {
-        const minutes = parseInt(duration.split('m')[0] || '0', 10);
-        return total + minutes;
+      if (!duration) return total;
+      
+      if (typeof duration === 'number') {
+        return total + duration;
       }
-      return total;
+      
+      // Handle string duration
+      try {
+        const minutes = parseInt(duration.replace(/[^\d]/g, ''), 10) || 0;
+        return total + minutes;
+      } catch {
+        return total;
+      }
     }, 0);
     
     const averageMinutes = totalMinutes / records.length;
@@ -1358,7 +1374,7 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                           </TableCell>
                           <TableCell>
                             <div className="whitespace-nowrap">
-                              {record.working_duration || calculateTotalWorkingTime(record)}
+                              {calculateWorkingTime(record)}
                             </div>
                           </TableCell>
                           <TableCell>

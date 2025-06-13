@@ -302,6 +302,8 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
         employee_id,
         check_in_time,
         check_out_time,
+        first_check_in_time,
+        first_check_out_time,
         second_check_in_time,
         second_check_out_time,
         break_duration,
@@ -312,9 +314,15 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
         working_duration,
         overtime,
         sequence_number,
-        employee:employees (name)
+        employee:employees!inner (
+          id,
+          name,
+          departments (
+            name
+          )
+        )
       `)
-      .is('deleted_at', null) // Only get non-deleted records
+      .is('deleted_at', null)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(500);
@@ -325,8 +333,16 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
       id: record.id,
       employee_id: record.employee_id,
       employee_name: (record.employee as any)?.name || 'Unknown',
-      check_in_time: record.check_in_time,
-      check_out_time: record.check_out_time,
+      employee: {
+        id: record.employee_id,
+        name: (record.employee as any)?.name || 'Unknown',
+        department: (record.employee as any)?.departments?.[0]?.name || null,
+        status: 'active'
+      },
+      check_in_time: record.check_in_time || record.first_check_in_time,
+      check_out_time: record.check_out_time || record.first_check_out_time,
+      first_check_in_time: record.first_check_in_time || record.check_in_time,
+      first_check_out_time: record.first_check_out_time || record.check_out_time,
       second_check_in_time: record.second_check_in_time,
       second_check_out_time: record.second_check_out_time,
       break_duration: record.break_duration,
@@ -336,7 +352,8 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
       minutes_late: record.minutes_late,
       working_duration: record.working_duration,
       overtime: record.overtime,
-      sequence_number: record.sequence_number
+      sequence_number: record.sequence_number,
+      is_second_session: !!record.second_check_in_time
     }));
   } catch (error) {
     console.error('Error fetching attendance records:', error);
