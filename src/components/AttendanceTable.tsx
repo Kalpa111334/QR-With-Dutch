@@ -741,15 +741,31 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
         return;
       }
 
-      const message = formatRecordsForWhatsApp(selectedAttendanceRecords);
-      const encodedMessage = encodeURIComponent(message);
-      const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedMessage}`;
-      
-      window.open(whatsappUrl, '_blank');
+      // Split records into chunks if needed (WhatsApp has URL length limits)
+      const chunkSize = 50;
+      const recordChunks = [];
+      for (let i = 0; i < selectedAttendanceRecords.length; i += chunkSize) {
+        recordChunks.push(selectedAttendanceRecords.slice(i, i + chunkSize));
+      }
+
+      // Process each chunk
+      for (let i = 0; i < recordChunks.length; i++) {
+        const chunk = recordChunks[i];
+        const message = formatRecordsForWhatsApp(chunk);
+        const encodedMessage = encodeURIComponent(message);
+        const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedMessage}`;
+        
+        window.open(whatsappUrl, '_blank');
+        
+        // Add a small delay between chunks to prevent browser blocking
+        if (i < recordChunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
       
       toast({
         title: "Sharing Records",
-        description: "WhatsApp has been opened with the selected records.",
+        description: `WhatsApp has been opened with ${selectedAttendanceRecords.length} records.`,
       });
     } catch (error) {
       toast({
