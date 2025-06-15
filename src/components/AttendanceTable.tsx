@@ -60,11 +60,9 @@ const styles = {
 
   // Page Layout
   page: {
-    padding: 40,
-    flexDirection: 'column',
+    padding: '15 10',
     backgroundColor: '#ffffff',
     fontFamily: 'Helvetica',
-    lineHeight: 1.5,
   },
 
   // Header Design
@@ -72,9 +70,9 @@ const styles = {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 30,
-    paddingBottom: 15,
-    borderBottomWidth: 2,
+    marginBottom: 10,
+    paddingBottom: 5,
+    borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   headerLeft: {
@@ -86,162 +84,117 @@ const styles = {
     alignItems: 'flex-end',
     flex: 1,
   },
-  headerLogo: {
-    // Removed logo-specific styles
-  },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#2c3e50',
-    marginBottom: 5,
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 10,
     color: '#7f8c8d',
   },
   dateRange: {
-    fontSize: 12,
+    fontSize: 9,
     color: '#7f8c8d',
-    fontStyle: 'italic',
   },
 
   // Summary Section
   summarySection: {
-    backgroundColor: '#f4f6f7',
-    borderRadius: 10,
-    padding: 20,
-    marginBottom: 30,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  summaryTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 15,
-    textAlign: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: '#e0e0e0',
-    paddingBottom: 10,
+    backgroundColor: '#f8f9fa',
+    padding: 8,
+    marginBottom: 10,
   },
   summaryGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   summaryBox: {
-    width: '30%',
+    width: '32%',
     backgroundColor: '#ffffff',
-    borderRadius: 8,
-    padding: 15,
+    padding: 5,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
   },
   summaryLabel: {
-    fontSize: 10,
+    fontSize: 8,
     color: '#7f8c8d',
-    textTransform: 'uppercase',
-    marginBottom: 5,
-    letterSpacing: 1,
+    marginBottom: 2,
   },
   summaryValue: {
-    fontSize: 20,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#2c3e50',
   },
   summaryPercent: {
-    fontSize: 12,
+    fontSize: 8,
     color: '#27ae60',
-    marginTop: 5,
   },
 
   // Table Styles
   table: {
-    marginTop: 20,
+    flex: 1,
   },
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#2c3e50',
-    borderBottomWidth: 2,
-    borderBottomColor: '#34495e',
-    marginBottom: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 5,
+    padding: '3 2',
+    marginBottom: 2,
   },
   tableHeaderCell: {
-    flex: 1,
-    padding: 10,
-    fontSize: 11,
+    fontSize: 8,
     fontWeight: 'bold',
     color: '#ffffff',
     textTransform: 'uppercase',
     textAlign: 'center',
-    letterSpacing: 1,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    paddingVertical: 8,
+    borderBottomColor: '#ecf0f1',
+    padding: '2 1',
+    minHeight: 16,
     alignItems: 'center',
   },
   tableRowAlt: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#f8f9fa',
   },
   tableCell: {
-    flex: 1,
-    fontSize: 10,
+    fontSize: 7,
     color: '#2c3e50',
-    padding: 8,
     textAlign: 'center',
   },
   nameCellStyle: {
-    flex: 1.4,
-    fontSize: 10,
+    fontSize: 7,
     color: '#2c3e50',
-    padding: 8,
     fontWeight: '500',
     textAlign: 'left',
   },
   statusCell: {
-    fontSize: 10,
+    fontSize: 7,
     fontWeight: 'bold',
     textTransform: 'uppercase',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+    textAlign: 'center',
   },
   statusPresent: {
-    backgroundColor: 'rgba(39, 174, 96, 0.2)',
     color: '#27ae60',
   },
   statusLate: {
-    backgroundColor: 'rgba(231, 76, 60, 0.2)',
     color: '#e74c3c',
   },
 
   // Footer
   footer: {
-    marginTop: 20,
-    paddingTop: 10,
+    marginTop: 5,
+    paddingTop: 3,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: '#ecf0f1',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   footerText: {
-    fontSize: 8,
+    fontSize: 6,
     color: '#7f8c8d',
   },
-  pageNumber: {
-    fontSize: 8,
-    color: '#7f8c8d',
-  }
 } as const;
 
 // Add a helper function to format the status badge
@@ -287,6 +240,8 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const [deletionType, setDeletionType] = useState<DeletionType>({ type: null });
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
   const [analyzedRecords, setAnalyzedRecords] = useState<Attendance[]>([]);
+  const [lastDeletedId, setLastDeletedId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   
   useEffect(() => {
     const fetchData = async () => {
@@ -455,148 +410,121 @@ const AttendanceTable: React.FC<AttendanceTableProps> = ({
     const checkedOutEmployees = filteredRecords.filter(r => r.status === 'checked-out').length;
     const stillWorkingEmployees = filteredRecords.filter(r => r.status === 'present').length;
 
-    // Chunk records for multi-page support
-    const chunkSize = 20; // Adjust based on page space
-    const recordChunks: Attendance[][] = [];
-    for (let i = 0; i < filteredRecords.length; i += chunkSize) {
-      recordChunks.push(filteredRecords.slice(i, i + chunkSize));
-    }
+    // More aggressive font size scaling based on record count
+    const getFontSize = (count: number) => {
+      if (count <= 15) return { base: 9, header: 16 };
+      if (count <= 25) return { base: 8, header: 14 };
+      if (count <= 35) return { base: 7, header: 12 };
+      if (count <= 45) return { base: 6, header: 10 };
+      return { base: 5, header: 8 };
+    };
+
+    const sizes = getFontSize(filteredRecords.length);
+    const padding = Math.max(10, 30 - Math.floor(filteredRecords.length / 10) * 5);
 
     const AttendancePDF = (): React.ReactElement => (
       <Document>
-        {recordChunks.map((chunk: Attendance[], pageIndex: number) => (
-          <Page key={pageIndex} size="A4" style={styles.page}>
-            {/* Header (only on first page) */}
-            {pageIndex === 0 && (
-          <View style={styles.header}>
-                <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>Attendance Report</Text>
-            <Text style={styles.headerSubtitle}>QR Attendance System</Text>
-                </View>
-                <View style={styles.headerRight}>
-            <Text style={styles.dateRange}>
-              {startDate === endDate 
-                ? format(new Date(startDate), 'MMMM d, yyyy')
-                : `${format(new Date(startDate), 'MMM d, yyyy')} - ${format(new Date(endDate), 'MMM d, yyyy')}`}
-            </Text>
+        <Page size="A4" style={[styles.page, { padding: '15 10' }]}>
+          <View style={[styles.header, { marginBottom: 10, paddingBottom: 5 }]}>
+            <View style={styles.headerLeft}>
+              <Text style={[styles.headerTitle, { fontSize: 14 }]}>Attendance Report</Text>
             </View>
-              </View>
-            )}
-            
-            {/* Summary Section (only on first page) */}
-            {pageIndex === 0 && (
-          <View style={styles.summarySection}>
-                <Text style={styles.summaryTitle}>Attendance Overview</Text>
+            <View style={styles.headerRight}>
+              <Text style={[styles.dateRange, { fontSize: 8 }]}>
+                {startDate === endDate 
+                  ? format(new Date(startDate), 'MM/dd/yy')
+                  : `${format(new Date(startDate), 'MM/dd')} - ${format(new Date(endDate), 'MM/dd/yy')}`}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.summarySection, { padding: 6, marginBottom: 8 }]}>
             <View style={styles.summaryGrid}>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>Total Employees</Text>
-                <Text style={styles.summaryValue}>{totalEmployees}</Text>
-              </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>On Time</Text>
-                <Text style={styles.summaryValue}>{onTimeEmployees}</Text>
-                <Text style={styles.summaryPercent}>
-                  {((onTimeEmployees/totalEmployees)*100).toFixed(1)}%
+              <View style={[styles.summaryBox, { padding: 4 }]}>
+                <Text style={[styles.summaryValue, { fontSize: 10 }]}>
+                  Total: {totalEmployees}
                 </Text>
               </View>
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>Late Arrivals</Text>
-                <Text style={styles.summaryValue}>{lateEmployees}</Text>
-                <Text style={styles.summaryPercent}>
-                  {((lateEmployees/totalEmployees)*100).toFixed(1)}%
+              <View style={[styles.summaryBox, { padding: 4 }]}>
+                <Text style={[styles.summaryValue, { fontSize: 10 }]}>
+                  On Time: {onTimeEmployees} ({((onTimeEmployees/totalEmployees)*100).toFixed(0)}%)
                 </Text>
               </View>
+              <View style={[styles.summaryBox, { padding: 4 }]}>
+                <Text style={[styles.summaryValue, { fontSize: 10 }]}>
+                  Late: {lateEmployees} ({((lateEmployees/totalEmployees)*100).toFixed(0)}%)
+                </Text>
               </View>
-              </View>
-            )}
+            </View>
+          </View>
 
-          {/* Attendance Table */}
           <View style={styles.table}>
-            <View style={styles.tableHeader}>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Date</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1.4 }]}>Employee</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>1st In</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>1st Out</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>2nd In</Text>
-                <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>2nd Out</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.8 }]}>Break</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.9 }]}>Duration</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.7 }]}>Status</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 0.6 }]}>Late</Text>
+            <View style={[styles.tableHeader, { padding: '2 1' }]}>
+              <Text style={[styles.tableHeaderCell, { flex: 0.5, fontSize: 7 }]}>Date</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 1.2, fontSize: 7 }]}>Name</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.5, fontSize: 7 }]}>In</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.5, fontSize: 7 }]}>Out</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.5, fontSize: 7 }]}>2nd In</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.5, fontSize: 7 }]}>2nd Out</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.4, fontSize: 7 }]}>Brk</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.4, fontSize: 7 }]}>Hrs</Text>
+              <Text style={[styles.tableHeaderCell, { flex: 0.4, fontSize: 7 }]}>Sts</Text>
             </View>
 
-              {chunk.map((record: Attendance, index: number) => (
+            {filteredRecords.map((record, index) => (
               <View key={index} style={[
                 styles.tableRow,
+                { padding: '1 1', minHeight: 14 },
                 index % 2 === 1 && styles.tableRowAlt
               ]}>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
-                  {format(new Date(record.date), 'MMM d, yyyy')}
+                <Text style={[styles.tableCell, { flex: 0.5, fontSize: 6 }]}>
+                  {format(new Date(record.date), 'MM/dd')}
                 </Text>
-                  <Text style={[styles.nameCellStyle, { flex: 1.4 }]}>
+                <Text style={[styles.nameCellStyle, { flex: 1.2, fontSize: 6 }]}>
                   {record.employee_name}
                 </Text>
-                <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                  {record.check_in_time 
-                    ? format(new Date(record.check_in_time), 'h:mm a')
-                    : 'N/A'}
+                <Text style={[styles.tableCell, { flex: 0.5, fontSize: 6 }]}>
+                  {record.check_in_time ? format(new Date(record.check_in_time), 'HH:mm') : '-'}
                 </Text>
-                <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                  {record.check_out_time
-                    ? format(new Date(record.check_out_time), 'h:mm a')
-                    : 'N/A'}
+                <Text style={[styles.tableCell, { flex: 0.5, fontSize: 6 }]}>
+                  {record.check_out_time ? format(new Date(record.check_out_time), 'HH:mm') : '-'}
                 </Text>
-                <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                  {record.second_check_in_time
-                    ? format(new Date(record.second_check_in_time), 'h:mm a')
-                    : 'N/A'}
+                <Text style={[styles.tableCell, { flex: 0.5, fontSize: 6 }]}>
+                  {record.second_check_in_time ? format(new Date(record.second_check_in_time), 'HH:mm') : '-'}
                 </Text>
-                <Text style={[styles.tableCell, { flex: 0.9 }]}>
-                  {record.second_check_out_time
-                    ? format(new Date(record.second_check_out_time), 'h:mm a')
-                    : 'N/A'}
+                <Text style={[styles.tableCell, { flex: 0.5, fontSize: 6 }]}>
+                  {record.second_check_out_time ? format(new Date(record.second_check_out_time), 'HH:mm') : '-'}
                 </Text>
-                <Text style={[styles.tableCell, { flex: 0.8 }]}>
+                <Text style={[styles.tableCell, { flex: 0.4, fontSize: 6 }]}>
                   {formatBreakDuration(record.break_duration)}
                 </Text>
-                <Text style={[styles.tableCell, { flex: 0.9 }]}>
+                <Text style={[styles.tableCell, { flex: 0.4, fontSize: 6 }]}>
                   {calculateWorkingTime(record)}
                 </Text>
                 <Text style={[
-                  styles.tableCell,
-                  { flex: 0.7 },
-                  getStatusStyle(record.status)
+                  styles.statusCell,
+                  { flex: 0.4, fontSize: 6 },
+                  record.status?.toLowerCase() === 'present' ? styles.statusPresent : styles.statusLate
                 ]}>
-                  {record.status || 'N/A'}
-                </Text>
-                <Text style={[styles.tableCell, { flex: 0.6 }]}>
-                  {record.minutes_late ? `${record.minutes_late}m` : '-'}
+                  {record.status?.slice(0,3) || '-'}
                 </Text>
               </View>
             ))}
           </View>
 
-          {/* Footer */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>
-                Generated by QR Attendance System
-              </Text>
-              <Text style={styles.pageNumber}>
-                {pageIndex > 0 ? `Page ${pageIndex + 1} of ${recordChunks.length}` : ''}
-              </Text>
-              <Text style={styles.footerText}>
-                {format(new Date(), 'MMMM d, yyyy h:mm a')}
+          <View style={[styles.footer, { marginTop: 4, paddingTop: 2 }]}>
+            <Text style={[styles.footerText, { fontSize: 5 }]}>
+              Generated: {format(new Date(), 'MM/dd/yy HH:mm')}
             </Text>
           </View>
         </Page>
-        ))}
       </Document>
     );
 
     return (
       <PDFDownloadLink
         document={<AttendancePDF />}
-        fileName={`attendance_report_${startDate}_to_${endDate}.pdf`}
+        fileName={`attendance_${startDate}_to_${endDate}.pdf`}
       >
         {({ loading }) => (
           <Button 
@@ -836,130 +764,86 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
 
   const handleDeleteSingleRecord = async (recordId: string) => {
     try {
-      const { value: deletionType } = await Swal.fire({
+      const result = await Swal.fire({
         title: 'Delete Attendance Record',
-        html: `
-          <div class="text-center">
-            <p class="mb-4">Select what you want to delete:</p>
-            <div class="flex flex-col items-start gap-4 text-left">
-              <div class="flex items-center space-x-2">
-                <input type="radio" id="complete" name="deletion_type" value="complete" class="w-4 h-4">
-                <label for="complete">Delete Complete Record</label>
-              </div>
-              <div class="flex items-center space-x-2">
-                <input type="radio" id="first_check_in" name="deletion_type" value="first_check_in" class="w-4 h-4">
-                <label for="first_check_in">Delete First Check-in Record</label>
-              </div>
-              <div class="flex items-center space-x-2">
-                <input type="radio" id="first_check_out" name="deletion_type" value="first_check_out" class="w-4 h-4">
-                <label for="first_check_out">Delete First Check-out Record</label>
-              </div>
-              <div class="flex items-center space-x-2">
-                <input type="radio" id="second_check_in" name="deletion_type" value="second_check_in" class="w-4 h-4">
-                <label for="second_check_in">Delete Second Check-in Record</label>
-              </div>
-              <div class="flex items-center space-x-2">
-                <input type="radio" id="second_check_out" name="deletion_type" value="second_check_out" class="w-4 h-4">
-                <label for="second_check_out">Delete Second Check-out Record</label>
-              </div>
-            </div>
-          </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText: 'Delete',
-        confirmButtonColor: '#dc2626',
-        cancelButtonText: 'Cancel',
-        reverseButtons: true,
-        preConfirm: () => {
-          const selectedType = document.querySelector('input[name="deletion_type"]:checked') as HTMLInputElement;
-          if (!selectedType) {
-            Swal.showValidationMessage('Please select a deletion type');
-            return false;
-            }
-          return selectedType.value as 'first_check_in' | 'first_check_out' | 'second_check_in' | 'second_check_out' | 'complete';
-        }
-      });
-
-      if (!deletionType) return;
-
-      const confirmResult = await Swal.fire({
-        title: 'Are you sure?',
-        text: 'This action cannot be undone!',
+        text: 'Do you want to delete this attendance record?',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonColor: '#dc2626',
-        cancelButtonColor: '#6b7280',
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
         confirmButtonText: 'Yes, delete it!',
-        cancelButtonText: 'Cancel',
-        reverseButtons: true
+        cancelButtonText: 'Cancel'
       });
 
-      if (!confirmResult.isConfirmed) return;
-
-      // Show loading state
-      await Swal.fire({
-        title: 'Processing...',
-        text: 'Please wait while we process your request.',
-        allowOutsideClick: false,
-        allowEscapeKey: false,
-        allowEnterKey: false,
-        showConfirmButton: true,
-        didOpen: () => {
-          const confirmButton = Swal.getConfirmButton();
-          if (confirmButton) {
-            Swal.showLoading(confirmButton);
-          }
-        }
-      });
-
-      // Perform deletion
-      const result = await deleteAttendanceRecord(recordId, deletionType);
-
-      // Update the UI based on the deletion result
-      if (result.isCompletelyDeleted) {
-        // Remove the record from the local state if it was completely deleted
-        setRecords(prevRecords => prevRecords.filter(record => record.id !== recordId));
-      } else if (result.updatedRecord) {
-        // Update the record in the local state if it was partially deleted
-        setRecords(prevRecords => prevRecords.map(record => 
-          record.id === recordId ? { ...record, ...result.updatedRecord } : record
-        ));
-      }
-
-      // Close loading dialog
-      Swal.close();
-
-      // Show success message
+      if (result.isConfirmed) {
+          await Swal.fire({
+            title: 'Deleting...',
+            allowEscapeKey: false,
+            allowOutsideClick: false,
+            showConfirmButton: false
+          });
+        
+        try {
+          // Use deleteAttendance instead of deleteAttendanceRecord for hard delete
+          const result = await deleteAttendance([recordId]);
+          
+          if (result.success) {
+            // Remove the record from local state first
+            setRecords(prev => prev.filter(record => record.id !== recordId));
+            
+            // Trigger a refresh of the data
+            setRefreshTrigger(prev => prev + 1);
+            
       await Swal.fire({
         icon: 'success',
-        title: 'Success!',
-        text: result.message,
-        timer: 1500,
-        showConfirmButton: false
-      });
-
+              title: 'Deleted!',
+              text: 'The attendance record has been deleted.',
+              timer: 1500
+            });
+          } else {
+            throw new Error(result.message || 'Failed to delete record');
+          }
     } catch (error) {
-      console.error('Delete operation failed:', error);
-      
-      // Close loading dialog if it's open
-      Swal.close();
-
-      // Show error message
+          console.error('Error deleting record:', error);
       await Swal.fire({
         icon: 'error',
         title: 'Error',
-        text: error instanceof Error ? error.message : 'Failed to delete record',
-        confirmButtonText: 'OK'
+            text: error instanceof Error ? error.message : 'Failed to delete record'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleDeleteSingleRecord:', error);
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'An unexpected error occurred'
       });
     }
   };
 
+  // Add this useEffect to handle record refreshes
+  useEffect(() => {
+    const refreshRecords = async () => {
+      if (lastDeletedId) {
+        // Wait a moment to ensure deletion is processed
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const freshRecords = await getAttendanceRecords();
+        // Filter out the deleted record if it somehow still exists
+        setRecords(freshRecords.filter(record => record.id !== lastDeletedId));
+        setLastDeletedId(null);
+      }
+    };
+
+    refreshRecords();
+  }, [lastDeletedId]);
+
   const handleBulkDelete = async () => {
     if (selectedRecords.length === 0) {
-      toast({
+      await Swal.fire({
+        icon: 'warning',
         title: 'No Records Selected',
-        description: 'Please select records to delete.',
-        variant: 'destructive'
+        text: 'Please select records to delete.',
       });
       return;
     }
@@ -981,55 +865,52 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
         cancelButtonText: 'Cancel'
       });
 
-      if (!result.isConfirmed) return;
+      if (result.isConfirmed) {
+          await Swal.fire({
+            title: 'Deleting...',
+            allowEscapeKey: false,
+            allowOutsideClick: false,
+            showConfirmButton: false
+          });
 
-      // Show loading state
-      await Swal.fire({
-        title: 'Processing...',
-        text: 'Please wait while we delete the records.',
-        allowOutsideClick: false,
-        showConfirmButton: true,
-        didOpen: () => {
-          const confirmButton = Swal.getConfirmButton();
-          if (confirmButton) {
-            Swal.showLoading(confirmButton);
-          }
-        }
-      });
-
+        try {
       const deleteResult = await deleteAttendance(selectedRecords);
 
+          if (deleteResult.success) {
       // Immediately update local state
-      setRecords(prevRecords => prevRecords.filter(record => !selectedRecords.includes(record.id)));
+            setRecords(prev => prev.filter(record => !selectedRecords.includes(record.id)));
         setSelectedRecords([]);
       
-      // Trigger a refresh
-      setRefreshTrigger(prev => prev + 1);
+            // Set the last deleted IDs for refresh
+            selectedRecords.forEach(id => setLastDeletedId(id));
 
-      // Close loading dialog
-      Swal.close();
-
-        // Show success message
       await Swal.fire({
         icon: 'success',
         title: 'Success',
-        text: `Successfully deleted ${selectedRecords.length} record(s)`,
-        timer: 1500,
-        showConfirmButton: false
-      });
-
+              text: `Successfully deleted ${deleteResult.deletedCount} record(s)`,
+              timer: 1500
+            });
+          } else {
+            await Swal.fire({
+              icon: 'error',
+              title: 'Error',
+              text: deleteResult.message || 'Failed to delete records'
+            });
+          }
     } catch (error) {
-      console.error('Bulk delete failed:', error);
-      
-      // Close loading dialog
-      Swal.close();
-
-      // Show error message
       await Swal.fire({
         icon: 'error',
         title: 'Error',
-        text: error instanceof Error ? error.message : 'Failed to delete records',
-        confirmButtonText: 'OK'
+            text: error instanceof Error ? error.message : 'Failed to delete records'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Delete operation failed:', error);
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Failed to delete records'
       });
     }
   };
@@ -1131,7 +1012,7 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
         const minutes = parseInt(duration.replace(/[^\d]/g, ''), 10) || 0;
         return total + minutes;
       } catch {
-        return total;
+      return total;
       }
     }, 0);
     
@@ -1174,6 +1055,34 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
     }
   };
 
+  const fetchRecords = async () => {
+    try {
+      setIsLoading(true);
+      const records = await getAttendanceRecords();
+      setRecords(records);
+    } catch (error) {
+      console.error('Error fetching records:', error);
+      await Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Failed to fetch attendance records'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add a helper function to format time compactly
+  const formatTimeCompact = (timeString: string | null | undefined): string => {
+    if (!timeString) return '-';
+    return format(new Date(timeString), 'HH:mm');
+  };
+
+  // Add a helper function to format date compactly
+  const formatDateCompact = (dateString: string): string => {
+    return format(new Date(dateString), 'MM/dd');
+  };
+
   return (
     <Card className="w-full">
       <CardHeader>
@@ -1182,22 +1091,43 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
             <h2 className="text-2xl font-bold">Attendance Records</h2>
             <Button onClick={handleCreateTestRecord} variant="outline" size="sm" className="ml-4">
               Create Test Record
-            </Button>
+                </Button>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button 
-              onClick={exportToCsv} 
+          <div className="flex flex-col sm:flex-row gap-2 items-center">
+            <Button
+              onClick={() => exportToCsv()}
               disabled={filteredRecords.length === 0}
-              className="w-full sm:w-auto"
+              className="w-full sm:w-auto flex items-center justify-center"
             >
               <Download className="mr-2 h-4 w-4" />
               Export to CSV
             </Button>
-            {filteredRecords.length > 0 && (
-              <div className="w-full sm:w-auto">
-                {exportToPdf()}
-              </div>
-            )}
+            {filteredRecords.length > 0 && exportToPdf()}
+            <Button
+              onClick={() => setShowAbsentDialog(true)}
+              className="w-full sm:w-auto flex items-center justify-center"
+              variant="outline"
+            >
+              <UserX className="mr-2 h-4 w-4" />
+              Absent Report
+            </Button>
+            <Button
+              onClick={handleShare}
+              disabled={selectedRecords.length === 0 || sharing}
+              className="w-full sm:w-auto flex items-center justify-center"
+            >
+              {sharing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sharing...
+                </>
+              ) : (
+                <>
+                  <Share2 className="mr-2 h-4 w-4" />
+                  Share Selected
+                </>
+              )}
+            </Button>
           </div>
         </CardTitle>
       </CardHeader>
@@ -1293,23 +1223,6 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
                 </Button>
               )}
             </div>
-            <Button
-              onClick={handleShare}
-              disabled={sharing || selectedRecords.length === 0}
-              className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto"
-            >
-              {sharing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Sharing...
-                </>
-              ) : (
-                <>
-                  <Share2 className="mr-2 h-4 w-4" />
-                  Share Selected
-                </>
-              )}
-            </Button>
           </div>
           
           <div className="rounded-md border">
@@ -1512,6 +1425,19 @@ ${record.overtime ? `💪 Overtime: ${record.overtime.toFixed(1)}h` : ''}`;
           </div>
         </div>
       </CardContent>
+
+      {/* Add Absent Report Dialog */}
+      <Dialog open={showAbsentDialog} onOpenChange={setShowAbsentDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Absent Employees Report</DialogTitle>
+            <DialogDescription>
+              View and download the list of absent employees.
+            </DialogDescription>
+          </DialogHeader>
+          <AbsentEmployeeDownload />
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };

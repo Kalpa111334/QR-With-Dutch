@@ -126,17 +126,17 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
   // Initialize canvas once
   useEffect(() => {
     if (!canvasRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = SCAN_RESOLUTION.width;
-      canvas.height = SCAN_RESOLUTION.height;
-      canvasRef.current = canvas;
-      
-      const ctx = canvas.getContext('2d', {
-        willReadFrequently: true,
-        alpha: false,
-        desynchronized: true
-      });
-      ctxRef.current = ctx;
+    const canvas = document.createElement('canvas');
+    canvas.width = SCAN_RESOLUTION.width;
+    canvas.height = SCAN_RESOLUTION.height;
+    canvasRef.current = canvas;
+    
+    const ctx = canvas.getContext('2d', {
+      willReadFrequently: true,
+      alpha: false,
+      desynchronized: true
+    });
+    ctxRef.current = ctx;
     }
   }, []);
 
@@ -217,25 +217,25 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, onError, mode = 'attendan
   // Optimized QR scanning function with debouncing
   const scanQRCode = useCallback(
     debounce(() => {
-      if (!scanning || !webcamRef.current?.video || isProcessing || !ctxRef.current || !canvasRef.current) return;
+    if (!scanning || !webcamRef.current?.video || isProcessing || !ctxRef.current || !canvasRef.current) return;
 
-      const video = webcamRef.current.video;
-      if (video.readyState !== 4) return;
+    const video = webcamRef.current.video;
+    if (video.readyState !== 4) return;
 
-      const ctx = ctxRef.current;
-      const canvas = canvasRef.current;
+    const ctx = ctxRef.current;
+    const canvas = canvasRef.current;
 
       // Use requestAnimationFrame for smoother rendering
       requestAnimationFrame(() => {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        // Process QR code in worker
-        qrWorker.postMessage({
-          data: imageData.data,
-          width: canvas.width,
-          height: canvas.height
-        });
+    // Process QR code in worker
+    qrWorker.postMessage({
+      data: imageData.data,
+      width: canvas.width,
+      height: canvas.height
+    });
       });
     }, 50),
     [scanning, isProcessing]

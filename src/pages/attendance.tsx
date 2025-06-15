@@ -71,6 +71,26 @@ const extractEmployeeId = (qrData: string): string | null => {
   return null;
 };
 
+// Add this before any function that uses fetchRecords
+const fetchRecords = async () => {
+  try {
+    setIsLoading(true);
+    const records = await getAttendanceRecords();
+    console.log('Fetched Attendance Records:', records);
+    setAttendanceRecords(records);
+  } catch (error) {
+    console.error('Error fetching records:', error);
+    toast.error('Failed to fetch attendance records');
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+// Load initial data
+useEffect(() => {
+  fetchRecords();
+}, []);
+
 export default function Attendance() {
   const router = useRouter();
   const [whatsappNumber, setWhatsappNumber] = useState('');
@@ -308,43 +328,6 @@ export default function Attendance() {
     });
   };
 
-  // Fetch attendance records
-  useEffect(() => {
-    const fetchRecords = async () => {
-      try {
-        setIsLoading(true);
-        const records = await getAttendanceRecords();
-        console.log('Fetched Attendance Records:', records);
-        setAttendanceRecords(records);
-      } catch (error) {
-        console.error('Error fetching records:', error);
-        toast.error('Failed to fetch attendance records');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchRecords();
-  }, []);
-
-  // Handle record selection
-  const handleSelectRecord = (recordId: string) => {
-    setSelectedRecords(prev => 
-      prev.includes(recordId) 
-        ? prev.filter(id => id !== recordId)
-        : [...prev, recordId]
-    );
-  };
-
-  // Select all records
-  const handleSelectAll = () => {
-    if (selectedRecords.length === attendanceRecords.length) {
-      setSelectedRecords([]);
-    } else {
-      setSelectedRecords(attendanceRecords.map(record => record.id));
-    }
-  };
-
   // Modify the handleDeleteRecords function to reset dashboard count
   const handleDeleteRecords = async () => {
     if (selectedRecords.length === 0) {
@@ -352,6 +335,7 @@ export default function Attendance() {
       return;
     }
 
+    try {
     // Show confirmation dialog
     const confirmDelete = await Swal.fire({
       title: 'Clear Selected Attendance Records?',
@@ -371,7 +355,9 @@ export default function Attendance() {
 
     // If user confirms deletion
     if (confirmDelete.isConfirmed) {
-      try {
+        // Show loading state
+        toast.loading('Deleting records...');
+
         const result = await deleteAttendance(selectedRecords);
         
         if (result.success) {
@@ -381,89 +367,68 @@ export default function Attendance() {
           );
           setAttendanceRecords(updatedRecords);
           
-          // Reset dashboard summary
-          const resetSummary = {
-            total: 0,
-            present: 0,
-            late: 0,
-            earlyDepartures: 0,
-            averageWorkHours: 0
-          };
-          
           // Clear selected records
           setSelectedRecords([]);
           
-          Swal.fire({
-            title: 'Records Cleared',
-            text: `Successfully deleted ${result.deletedCount} attendance record(s). Dashboard count reset.`,
-            icon: 'success',
-            timer: 2000,
-            showConfirmButton: false
-          });
+          toast.success(`Successfully deleted ${result.deletedCount} attendance record(s)`);
+
+          // Refresh the records
+          await fetchRecords();
         } else {
-          Swal.fire({
-            title: 'Clearing Failed',
-            text: result.error || 'Failed to clear records',
-            icon: 'error'
-          });
+          toast.error(result.message || 'Failed to clear records');
+        }
         }
       } catch (error) {
         console.error('Bulk delete error:', error);
-        
-        Swal.fire({
-          title: 'Unexpected Error',
-          text: 'An unexpected error occurred while clearing records.',
-          icon: 'error'
-        });
-      }
+      toast.error(error instanceof Error ? error.message : 'An unexpected error occurred while clearing records.');
     }
   };
 
   // Add a new function to handle individual record deletion
   const handleDeleteSingleRecord = async (recordId: string) => {
-    // Show confirmation dialog
-    const confirmDelete = await Swal.fire({
-      title: 'Are you sure?',
+    try {
+      const result = await Swal.fire({
+        title: 'Delete Attendance Record',
       text: 'Do you want to delete this attendance record?',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#d33',
       cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Yes, delete it!'
+        confirmButtonText: 'Yes, delete it!',
+        cancelButtonText: 'Cancel'
     });
 
-    // If user confirms deletion
-    if (confirmDelete.isConfirmed) {
-      try {
-        const result = await deleteAttendance([recordId]);
+      if (result.isConfirmed) {
+        const result = await deleteAttendanceRecord(recordId, 'complete');
         
         if (result.success) {
-          // Remove deleted record from the list
-          setAttendanceRecords(prev => 
-            prev.filter(record => record.id !== recordId)
-          );
-          
-          Swal.fire({
-            title: 'Deleted!',
-            text: 'The attendance record has been deleted.',
-            icon: 'success',
-            timer: 2000,
-            showConfirmButton: false
-          });
+          await fetchRecords();
+          toast.success('Record deleted successfully');
         } else {
-          Swal.fire({
-            title: 'Delete Failed',
-            text: result.error || 'Failed to delete record',
-            icon: 'error'
-          });
+          toast.error(result.message || 'Failed to delete record');
+        }
         }
       } catch (error) {
-        Swal.fire({
-          title: 'Error',
-          text: 'An unexpected error occurred',
-          icon: 'error'
-        });
-      }
+      console.error('Delete error:', error);
+      toast.error(error instanceof Error ? error.message : 'An unexpected error occurred');
+    }
+  };
+
+  // Handle record selection
+  const handleSelectRecord = (recordId: string) => {
+    setSelectedRecords(prev => 
+      prev.includes(recordId) 
+        ? prev.filter(id => id !== recordId)
+        : [...prev, recordId]
+    );
+  };
+
+  // Select all records
+  const handleSelectAll = () => {
+    if (selectedRecords.length === attendanceRecords.length) {
+      setSelectedRecords([]);
+    } else {
+      setSelectedRecords(attendanceRecords.map(record => record.id));
     }
   };
 

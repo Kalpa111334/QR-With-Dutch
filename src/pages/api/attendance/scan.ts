@@ -120,17 +120,17 @@ function determineNextAttendanceAction(existingRecord: any):
         }
 
   // First session check-out pending
-  if (!existingRecord.first_check_out_time && !existingRecord.is_second_session) {
+  if (existingRecord.first_check_in_time && !existingRecord.first_check_out_time) {
     return 'first_check_out';
   }
 
   // First session completed, no second session started
-  if (existingRecord.first_check_out_time && !existingRecord.is_second_session) {
+  if (existingRecord.first_check_out_time && !existingRecord.second_check_in_time) {
     return 'second_check_in';
   }
 
   // Second session check-out pending
-  if (existingRecord.is_second_session && !existingRecord.first_check_out_time) {
+  if (existingRecord.second_check_in_time && !existingRecord.second_check_out_time) {
     return 'second_check_out';
   }
 
@@ -238,18 +238,16 @@ async function recordSecondCheckIn(existingRecord: any, currentTime: Date) {
     throw new AttendanceError(`Minimum break duration is ${ATTENDANCE_CONFIG.MINIMUM_BREAK_DURATION} minutes`);
   }
 
-  // Create a new record for the second session
+  // Update the existing record with second check-in
       const { data, error } = await supabase
         .from('attendance')
-    .insert({
-      employee_id: existingRecord.employee_id,
-      date: currentTime.toISOString().split('T')[0],
-      first_check_in_time: currentTime.toISOString(),  // Using first_check_in for the new session
-      previous_session_id: existingRecord.id,  // Reference to the previous session
-      break_duration: `${breakDuration} minutes`,
+        .update({
+      second_check_in_time: currentTime.toISOString(),
       status: 'CHECKED_IN',
-      is_second_session: true  // Flag to indicate this is a second session
+      break_duration: `${breakDuration} minutes`,
+      last_action_time: currentTime.toISOString()
         })
+    .eq('id', existingRecord.id)
         .select()
         .single();
 
@@ -259,22 +257,26 @@ async function recordSecondCheckIn(existingRecord: any, currentTime: Date) {
 
 async function recordSecondCheckOut(existingRecord: any, currentTime: Date) {
   // Validate second session duration
-  const secondCheckInTime = parseISO(existingRecord.first_check_in_time); // Using first_check_in since it's a new record
+  const secondCheckInTime = parseISO(existingRecord.second_check_in_time);
   const sessionDuration = differenceInMinutes(currentTime, secondCheckInTime);
 
   if (sessionDuration < ATTENDANCE_CONFIG.MINIMUM_SESSION_DURATION) {
     throw new AttendanceError(`Minimum second session duration is ${ATTENDANCE_CONFIG.MINIMUM_SESSION_DURATION} minutes`);
   }
 
-  // Calculate session duration
-  const currentSessionDuration = sessionDuration;
+  // Calculate total worked time including both sessions
+  const firstSessionDuration = differenceInMinutes(
+    parseISO(existingRecord.first_check_out_time), 
+    parseISO(existingRecord.first_check_in_time)
+  );
+  const totalWorkedTime = firstSessionDuration + sessionDuration;
 
       const { data, error } = await supabase
         .from('attendance')
         .update({ 
-      first_check_out_time: currentTime.toISOString(),  // Using first_check_out for consistency
-      total_worked_time: `${currentSessionDuration} minutes`,
-      total_hours: currentSessionDuration / 60,
+      second_check_out_time: currentTime.toISOString(),
+      total_worked_time: `${totalWorkedTime} minutes`,
+      total_hours: totalWorkedTime / 60,
       status: 'CHECKED_OUT',
       last_action_time: currentTime.toISOString()
         })

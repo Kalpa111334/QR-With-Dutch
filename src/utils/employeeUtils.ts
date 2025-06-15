@@ -187,7 +187,7 @@ export const addEmployee = async (employee: Omit<Employee, 'id'>): Promise<Emplo
         )
       `)
       .single() as SupabaseResponse<WithDepartment<DatabaseEmployee>>;
-
+    
     if (error || !data) {
       console.error('Error adding employee:', error);
       toast({
@@ -297,7 +297,7 @@ export const updateEmployee = async (updatedEmployee: Employee): Promise<Employe
         )
       `)
       .single() as SupabaseResponse<WithDepartment<DatabaseEmployee>>;
-
+    
     if (error || !data) {
       console.error('Error updating employee:', error);
       toast({
@@ -400,22 +400,22 @@ export const getEmployeeById = async (id: string): Promise<Employee | null> => {
 
 // Define a single source of truth for default departments
 export const DEFAULT_DEPARTMENTS = [
-  'Dutch Activity',
-  'Kitchen',
-  'Food & Beverage Department',
-  'Butchery',
-  'Operations',
-  'Maintenance',
-  'Reservations',
-  'House Keeping',
-  'Pastry Kitchen',
-  'Stores',
-  'Purchasing & Stores',
-  'Accounts Department',
-  'Administration',
-  'Security Department',
-  'Transport Section',
-  'Human Resources',
+      'Dutch Activity',
+      'Kitchen',
+      'Food & Beverage Department',
+      'Butchery',
+      'Operations',
+      'Maintenance',
+      'Reservations',
+      'House Keeping',
+      'Pastry Kitchen',
+      'Stores',
+      'Purchasing & Stores',
+      'Accounts Department',
+      'Administration',
+      'Security Department',
+      'Transport Section',
+      'Human Resources',
   'IT',
   'Finance',
   'Marketing',
@@ -453,7 +453,7 @@ export const getDepartments = async (): Promise<string[]> => {
       console.log('No departments found, creating default departments...');
       
       // Create all departments in a single transaction if possible
-      const { error: insertError } = await supabase
+        const { error: insertError } = await supabase
         .from('departments')
         .insert(DEFAULT_DEPARTMENTS.map(name => ({ name })));
       
@@ -463,11 +463,11 @@ export const getDepartments = async (): Promise<string[]> => {
         // Fall back to creating departments one by one
         for (const deptName of DEFAULT_DEPARTMENTS) {
           const { error: singleInsertError } = await supabase
-            .from('departments')
-            .insert({ name: deptName })
-            .select('name')
-            .single();
-          
+          .from('departments')
+          .insert({ name: deptName })
+          .select('name')
+          .single();
+        
           if (singleInsertError && !singleInsertError.message.includes('duplicate')) {
             console.warn(`Failed to create department ${deptName}:`, singleInsertError);
           }
@@ -512,17 +512,17 @@ export const getDepartments = async (): Promise<string[]> => {
         console.warn('Failed to add missing departments in bulk, falling back to one-by-one:', bulkInsertError);
         
         // Fall back to adding missing departments one by one
-        for (const deptName of missingDepts) {
-          const { error: insertError } = await supabase
-            .from('departments')
-            .insert({ name: deptName })
-            .select('name')
-            .single();
-          
+      for (const deptName of missingDepts) {
+        const { error: insertError } = await supabase
+          .from('departments')
+          .insert({ name: deptName })
+          .select('name')
+          .single();
+        
           if (insertError && !insertError.message.includes('duplicate')) {
-            console.warn(`Failed to create department ${deptName}:`, insertError);
+          console.warn(`Failed to create department ${deptName}:`, insertError);
           } else if (!insertError) {
-            cachedDepartments.push(deptName);
+          cachedDepartments.push(deptName);
           }
         }
       } else {

@@ -354,23 +354,29 @@ export const getAttendanceRecords = async (): Promise<Attendance[]> => {
       }
 
       return {
-        id: record.id,
-        employee_id: record.employee_id,
-        employee_name: (record.employee as any)?.name || 'Unknown',
+      id: record.id,
+      employee_id: record.employee_id,
+      employee_name: (record.employee as any)?.name || 'Unknown',
         employee: {
           id: record.employee_id,
           name: (record.employee as any)?.name || 'Unknown',
+          first_name: (record.employee as any)?.first_name || 'Unknown',
+          last_name: (record.employee as any)?.last_name || 'Unknown',
+          email: (record.employee as any)?.email || 'unknown@example.com',
           department: (record.employee as any)?.departments?.name || null,
-          status: 'active'
+          position: (record.employee as any)?.position || 'Unknown',
+          status: ((record.employee as any)?.status || 'active') as 'active' | 'inactive',
+          join_date: (record.employee as any)?.join_date || new Date().toISOString().split('T')[0],
+          phone: (record.employee as any)?.phone || null
         },
-        check_in_time: record.check_in_time,
-        check_out_time: record.check_out_time,
+      check_in_time: record.check_in_time,
+      check_out_time: record.check_out_time,
         first_check_in_time: record.first_check_in_time || record.check_in_time,
         first_check_out_time: record.first_check_out_time || record.check_out_time,
-        second_check_in_time: record.second_check_in_time,
-        second_check_out_time: record.second_check_out_time,
+      second_check_in_time: record.second_check_in_time,
+      second_check_out_time: record.second_check_out_time,
         break_duration: record.break_duration || 0,
-        date: record.date,
+      date: record.date,
         status: status as AttendanceStatus,
         action: action,
         minutes_late: record.late_duration || 0,
@@ -778,21 +784,40 @@ export const deleteAttendanceRecord = async (recordId: string, deletionType: 'fi
 
 export const deleteAttendance = async (recordIds: string[]) => {
   try {
+    // First verify the records exist
+    const { data: existingRecords, error: checkError } = await supabase
+      .from('attendance')
+      .select('id')
+      .in('id', recordIds);
+
+    if (checkError) {
+      console.error('Error checking records:', checkError);
+      throw new Error(checkError.message);
+    }
+
+    if (!existingRecords || existingRecords.length === 0) {
+      throw new Error('No records found to delete');
+    }
+
+    // Use the RPC function for hard delete
     const { data, error } = await supabase
       .rpc('bulk_delete_attendance', {
         p_record_ids: recordIds
       });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error deleting records:', error);
+      throw error;
+    }
 
     return {
       success: true,
       deletedCount: recordIds.length,
-      message: 'Records deleted successfully'
+      message: `Successfully deleted ${recordIds.length} record(s)`
     };
   } catch (error) {
     console.error('Error in deleteAttendance:', error);
-    throw new Error(error instanceof Error ? error.message : 'Failed to delete records');
+    throw error instanceof Error ? error : new Error('Failed to delete records');
   }
 };
 
@@ -933,55 +958,58 @@ export const manualCheckOut = async (employeeId: string) => {
 
 // Calculate working time for an attendance record
 export const calculateWorkingTime = (record: Attendance): string => {
-  let totalMinutes = 0;
-
   try {
-    // Calculate first session duration
-    if (record.first_check_in_time) {
+    // If checked in but not checked out, return 0h 00m
+    if ((record.first_check_in_time && !record.first_check_out_time) ||
+        (record.second_check_in_time && !record.second_check_out_time)) {
+      return '0h 00m';
+    }
+
+    let totalMinutes = 0;
+
+    // Calculate first session duration (only if completed)
+    if (record.first_check_in_time && record.first_check_out_time) {
       const firstCheckIn = new Date(record.first_check_in_time);
-      
-      if (record.first_check_out_time) {
-        const firstCheckOut = new Date(record.first_check_out_time);
-        if (firstCheckOut >= firstCheckIn) {
-          totalMinutes = Math.floor((firstCheckOut.getTime() - firstCheckIn.getTime()) / (1000 * 60));
-        }
-      } else if (record.status !== 'checked-out') {
-        // If still in first session and not checked out, calculate until now
-        const now = new Date();
-        totalMinutes = Math.floor((now.getTime() - firstCheckIn.getTime()) / (1000 * 60));
+      const firstCheckOut = new Date(record.first_check_out_time);
+
+      if (firstCheckOut >= firstCheckIn) {
+        totalMinutes = Math.floor((firstCheckOut.getTime() - firstCheckIn.getTime()) / (1000 * 60));
       }
     }
 
-    // Calculate second session duration if it exists
-    if (record.second_check_in_time) {
+    // Calculate second session duration if it exists (only if completed)
+    if (record.second_check_in_time && record.second_check_out_time) {
       const secondCheckIn = new Date(record.second_check_in_time);
-      
-      if (record.second_check_out_time) {
-        const secondCheckOut = new Date(record.second_check_out_time);
-        if (secondCheckOut >= secondCheckIn) {
-          totalMinutes += Math.floor((secondCheckOut.getTime() - secondCheckIn.getTime()) / (1000 * 60));
-        }
-      } else if (record.status !== 'checked-out') {
-        // If still in second session and not checked out, calculate until now
-        const now = new Date();
-        totalMinutes += Math.floor((now.getTime() - secondCheckIn.getTime()) / (1000 * 60));
+      const secondCheckOut = new Date(record.second_check_out_time);
+
+      if (secondCheckOut >= secondCheckIn) {
+        totalMinutes += Math.floor((secondCheckOut.getTime() - secondCheckIn.getTime()) / (1000 * 60));
       }
     }
 
     // Subtract break duration if available
     if (record.break_duration) {
       try {
-        // Handle different break duration formats
         let breakMinutes = 0;
-        if (typeof record.break_duration === 'string') {
-          // If format is "Xm" or "X minutes"
-          const match = record.break_duration.match(/(\d+)/);
+        const breakDuration = record.break_duration.toString();
+
+        if (breakDuration.match(/^\d+$/)) {
+          // Plain number (assumed to be minutes)
+          breakMinutes = parseInt(breakDuration, 10);
+        } else if (breakDuration.match(/^\d+m$/)) {
+          // Format: "30m"
+          const match = breakDuration.match(/(\d+)m/);
           if (match) {
             breakMinutes = parseInt(match[1], 10);
           }
-        } else if (typeof record.break_duration === 'number') {
-          breakMinutes = record.break_duration;
+        } else if (breakDuration.match(/^\d+h \d+m$/)) {
+          // Format: "1h 30m"
+          const match = breakDuration.match(/(\d+)h (\d+)m/);
+          if (match) {
+            breakMinutes = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
         }
+        }
+        
         totalMinutes = Math.max(0, totalMinutes - breakMinutes);
   } catch (error) {
         console.error('Error processing break duration:', error);
