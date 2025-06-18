@@ -433,7 +433,7 @@ export const getTodayAttendanceSummary = async () => {
       if (record.first_check_in_time && !record.first_check_out_time) {
         statusCounts.currentlyPresent++;
         if (record.minutes_late > 0) {
-        statusCounts.lateButPresent++;
+          statusCounts.lateButPresent++;
         } else {
           statusCounts.onTimeArrivals++;
         }
@@ -445,8 +445,8 @@ export const getTodayAttendanceSummary = async () => {
       // Handle completed attendance
       else if (record.second_check_out_time || (record.first_check_out_time && !record.second_check_in_time)) {
         statusCounts.checkedOut++;
-      if (record.minutes_late === 0) {
-        statusCounts.onTimeArrivals++;
+        if (record.minutes_late === 0) {
+          statusCounts.onTimeArrivals++;
         }
       }
     });
@@ -459,23 +459,23 @@ export const getTodayAttendanceSummary = async () => {
     const rates = {
       currentPresenceRate: totalEmployees > 0 
         ? ((statusCounts.currentlyPresent / totalEmployees) * 100).toFixed(1) 
-        : '0',
+        : '0.0',
       
       totalPresentRate: totalEmployees > 0 
         ? ((totalPresent / totalEmployees) * 100).toFixed(1) 
-        : '0',
+        : '0.0',
       
       onTimeRate: totalPresent > 0 
         ? ((statusCounts.onTimeArrivals / totalPresent) * 100).toFixed(1) 
-        : '0',
+        : '0.0',
       
       lateRate: totalPresent > 0 
         ? ((statusCounts.lateButPresent / totalPresent) * 100).toFixed(1) 
-        : '0',
+        : '0.0',
       
       absentRate: totalEmployees > 0 
         ? ((statusCounts.absent / totalEmployees) * 100).toFixed(1) 
-        : '0'
+        : '0.0'
     };
 
     // Calculate detailed metrics
@@ -526,7 +526,7 @@ export const getTodayAttendanceSummary = async () => {
   } catch (error) {
     console.error('Error getting attendance summary:', error);
     
-    // Return a default empty summary object
+    // Return a default empty summary object with proper formatting
     return {
       totalEmployees: 0,
       presentCount: 0,
@@ -535,11 +535,11 @@ export const getTodayAttendanceSummary = async () => {
       checkedOutCount: 0,
       onTime: 0,
       stillWorking: 0,
-      currentPresenceRate: '0',
-      totalPresentRate: '0',
-      onTimeRate: '0',
-      lateRate: '0',
-      absentRate: '0',
+      currentPresenceRate: '0.0',
+      totalPresentRate: '0.0',
+      onTimeRate: '0.0',
+      lateRate: '0.0',
+      absentRate: '0.0',
       detailed: {
         onTime: 0,
         lateArrivals: 0,
@@ -548,9 +548,9 @@ export const getTodayAttendanceSummary = async () => {
         earlyDepartures: 0,
         overtime: 0,
         regularHours: 0,
-        attendanceRate: '0',
-        efficiencyRate: '0',
-        punctualityRate: '0'
+        attendanceRate: '0.0',
+        efficiencyRate: '0.0',
+        punctualityRate: '0.0'
       },
       presenceBreakdown: {
         currentlyPresent: 0,

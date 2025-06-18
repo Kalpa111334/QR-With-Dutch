@@ -46,11 +46,43 @@ interface AttendanceData {
 }
 
 const AttendanceStats: React.FC = () => {
-  const [stats, setStats] = useState<AttendanceData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [sharing, setSharing] = useState(false);
-  const [lastPresentCount, setLastPresentCount] = useState(0);
   const [activeView, setActiveView] = useState<'standard' | 'detailed' | 'rates'>('standard');
+  const [sharing, setSharing] = useState(false);
+  const [stats, setStats] = useState<AttendanceData>({
+    totalEmployees: 0,
+    presentCount: 0,
+    lateCount: 0,
+    absentCount: 0,
+    checkedOutCount: 0,
+    onTime: 0,
+    stillWorking: 0,
+    currentPresenceRate: '0.0',
+    totalPresentRate: '0.0',
+    onTimeRate: '0.0',
+    lateRate: '0.0',
+    absentRate: '0.0',
+    detailed: {
+      onTime: 0,
+      lateArrivals: 0,
+      veryLate: 0,
+      halfDay: 0,
+      earlyDepartures: 0,
+      overtime: 0,
+      regularHours: 0,
+      attendanceRate: '0.0',
+      efficiencyRate: '0.0',
+      punctualityRate: '0.0'
+    },
+    presenceBreakdown: {
+      currentlyPresent: 0,
+      lateButPresent: 0,
+      checkedOut: 0,
+      onTimeArrivals: 0,
+      absent: 0
+    }
+  });
+  const [loading, setLoading] = useState(true);
+  const [lastPresentCount, setLastPresentCount] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refreshStats = useCallback(async () => {
@@ -155,7 +187,7 @@ const AttendanceStats: React.FC = () => {
     },
     {
       title: 'Present Today',
-      value: stats?.presentCount || 0,
+      value: (stats?.presentCount || 0) + (stats?.checkedOutCount || 0),
       icon: UserCheck,
       description: `Present Rate: ${stats?.totalPresentRate || '0.0'}%`,
       color: 'text-green-600',
@@ -279,7 +311,9 @@ const AttendanceStats: React.FC = () => {
                 <UserCheck className="h-4 w-4 text-green-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats?.presentCount || 0}</div>
+                <div className="text-2xl font-bold">
+                  {((stats?.presentCount || 0) + (stats?.checkedOutCount || 0))}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   of {stats?.totalEmployees || 0} total employees
                 </p>

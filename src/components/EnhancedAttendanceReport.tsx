@@ -2,6 +2,7 @@ import React from 'react';
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
 import { format } from 'date-fns';
 import { Attendance, Employee } from '@/types';
+import { calculateWorkingTime } from '@/utils/attendanceUtils';
 
 // Dynamic font size calculation based on record count
 const calculateFontSizes = (recordCount: number) => {
@@ -259,10 +260,9 @@ const EnhancedAttendanceReport: React.FC<EnhancedAttendanceReportProps> = ({
     return duration;
   };
 
-  const formatWorkingHours = (duration: string | null) => {
-    if (!duration) return '-';
-    const hours = parseFloat(duration);
-    return hours.toFixed(1) + 'h';
+  const formatWorkingHours = (record: Attendance | null) => {
+    if (!record) return '-';
+    return calculateWorkingTime(record);
   };
 
   const formatTimeWithLabel = (time: string | null | undefined, label: string) => {
@@ -350,7 +350,7 @@ const EnhancedAttendanceReport: React.FC<EnhancedAttendanceReportProps> = ({
 
                 <View style={[styles.durationCell, { flex: 0.5 }]}>
                   <Text style={styles.durationValue}>
-                    {formatWorkingHours(record.working_duration)}
+                    {formatWorkingHours(record)}
                   </Text>
                 </View>
 

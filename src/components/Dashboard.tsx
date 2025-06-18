@@ -305,10 +305,12 @@ const Dashboard: React.FC = () => {
                   <UserCheck className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{summary.presentCount}</div>
-                  {summary.totalEmployees > 0 && (
+                  <div className="text-2xl font-bold">
+                    {((summary?.presentCount || 0) + (summary?.checkedOutCount || 0))}
+                  </div>
+                  {summary?.totalEmployees > 0 && (
                     <p className="text-xs text-green-600">
-                      Present Rate: {summary.presentRate}%
+                      Present Rate: {summary?.totalPresentRate || '0'}%
                     </p>
                   )}
                 </CardContent>
@@ -358,11 +360,11 @@ const Dashboard: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-xl font-bold text-green-700 dark:text-green-300">
-                    {summary.presentCount + summary.checkedOutCount}
+                    {((summary?.presentCount || 0) + (summary?.checkedOutCount || 0))}
                   </div>
                   <p className="text-xs text-green-600/80 dark:text-green-400/80">
-                    {summary.totalEmployees > 0
-                      ? `${summary.presentRate}% present today`
+                    {summary?.totalEmployees > 0
+                      ? `${summary?.totalPresentRate || '0'}% present today`
                       : 'No employees in the system'}
                   </p>
                 </CardContent>
