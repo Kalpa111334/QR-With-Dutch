@@ -13,12 +13,17 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     outDir: 'dist',
+    sourcemap: mode === 'production' ? false : true,
+    minify: mode === 'production' ? 'terser' : false,
     rollupOptions: {
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'ui-vendor': ['@radix-ui/react-slot', '@radix-ui/react-toast'],
-        }
+        },
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]'
       }
     }
   },
@@ -100,27 +105,12 @@ export default defineConfig(({ mode }) => ({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
         navigateFallback: 'index.html',
-        navigateFallbackAllowlist: [/^(?!\/__).*/],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-stylesheets'
-            }
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-webfonts'
-            }
-          }
-        ]
+        navigateFallbackAllowlist: [/^(?!\/__).*/]
       }
     })
   ].filter(Boolean),
   define: {
-    'process.env': {}
+    'process.env.NODE_ENV': JSON.stringify(mode),
+    'import.meta.env.VITE_APP_ENVIRONMENT': JSON.stringify(mode)
   }
 }));
