@@ -16,8 +16,8 @@ export default defineConfig(({ mode }) => ({
     componentTagger(),
     VitePWA({
       strategies: 'injectManifest',
-      srcDir: 'public',
-      filename: 'sw.js',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'prompt',
       injectRegister: 'auto',
       includeAssets: ['favicon.ico', 'robots.txt', 'icons/*.png'],
@@ -72,6 +72,9 @@ export default defineConfig(({ mode }) => ({
       devOptions: {
         enabled: true,
         type: 'module'
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,json}']
       }
     })
   ].filter(Boolean),
