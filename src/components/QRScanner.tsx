@@ -127,7 +127,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onScanError }) => 
             >
               {attendanceResult.complianceRate?.toFixed(1)}% Compliance
             </Badge>
-          </div>
+              </div>
         ),
         duration: 3000
       });
@@ -140,7 +140,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onScanError }) => 
       
       // Optimized error handling with voice feedback
       if (voiceEnabled && attendanceSpeechService.isSupported()) {
-        const errorMessage = error instanceof Error ? error.message : "Failed to process attendance";
+          const errorMessage = error instanceof Error ? error.message : "Failed to process attendance";
         attendanceSpeechService.speak(errorMessage)
           .catch(console.warn);
       }
@@ -218,38 +218,38 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onScanError }) => 
         )}
         
         <div className="relative">
-          {isScanning ? (
+        {isScanning ? (
             <>
-              <Scanner
-                onScan={handleScan}
+            <Scanner
+              onScan={handleScan}
                 onError={console.error}
                 {...scannerSettings}
-              />
-              <Button
-                onClick={() => {
-                  setIsScanning(false);
-                  if (scanTimeoutRef.current) {
-                    clearTimeout(scanTimeoutRef.current);
-                  }
-                }}
-                variant="destructive"
-                className="w-full mt-4"
-              >
-                Stop Scanning
-              </Button>
-            </>
-          ) : (
+            />
             <Button
+              onClick={() => {
+                setIsScanning(false);
+                if (scanTimeoutRef.current) {
+                  clearTimeout(scanTimeoutRef.current);
+                }
+              }}
+              variant="destructive"
+              className="w-full mt-4"
+            >
+              Stop Scanning
+            </Button>
+            </>
+        ) : (
+          <Button
               onClick={() => {
                 setIsScanning(true);
                 processingRef.current = false;
                 lastScannedCodeRef.current = null;
               }}
-              className="w-full mt-4"
-            >
-              Start Scanning
-            </Button>
-          )}
+            className="w-full mt-4"
+          >
+            Start Scanning
+          </Button>
+        )}
         </div>
       </div>
     </Card>

@@ -6,9 +6,21 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  base: '/',
   server: {
     host: "::",
     port: 8080,
+  },
+  build: {
+    outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'ui-vendor': ['@radix-ui/react-icons', '@radix-ui/react-slot', '@radix-ui/react-toast'],
+        }
+      }
+    }
   },
   plugins: [
     react(),
@@ -26,6 +38,7 @@ export default defineConfig(({ mode }) => ({
         short_name: 'Attendance',
         description: 'Employee attendance tracking and management system',
         theme_color: '#ffffff',
+        start_url: '/',
         icons: [
           {
             src: '/icons/icon-72x72.png',
@@ -74,7 +87,25 @@ export default defineConfig(({ mode }) => ({
         type: 'module'
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,json}']
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
+        navigateFallback: 'index.html',
+        navigateFallbackAllowlist: [/^(?!\/__).*/],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-stylesheets'
+            }
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts'
+            }
+          }
+        ]
       }
     })
   ].filter(Boolean),

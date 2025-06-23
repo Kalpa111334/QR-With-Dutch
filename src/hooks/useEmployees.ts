@@ -58,16 +58,16 @@ export function useEmployees(options: UseEmployeesOptions = {}) {
   // Normalize employee data
   const normalizeEmployeeData = useCallback((data: any[]): Employee[] => {
     return data.map(emp => ({
-      id: emp.id,
-      name: emp.name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
-      first_name: emp.first_name || '',
-      last_name: emp.last_name || '',
-      email: emp.email,
-      phone: emp.phone,
-      position: emp.position,
-      status: emp.status as 'active' | 'inactive',
-      join_date: emp.join_date,
-      department: emp.department_name || 'Unknown'
+          id: emp.id,
+        name: emp.name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+          first_name: emp.first_name || '',
+          last_name: emp.last_name || '',
+          email: emp.email,
+          phone: emp.phone,
+        position: emp.position,
+        status: emp.status as 'active' | 'inactive',
+          join_date: emp.join_date,
+        department: emp.department_name || 'Unknown'
     }));
   }, []);
 

@@ -17,7 +17,7 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.svg;
   }
-
+  
   try {
     const QRCode = await import('qrcode');
     const qrCodeData = typeof data === 'string' ? data : JSON.stringify(data);
@@ -85,14 +85,14 @@ export const validateEmployeeQR = async (qrData: string): Promise<boolean> => {
       return false;
     }
 
-    const [, employeeId] = legacyMatch;
-    
-    const { data: employee, error } = await supabase
-      .from('employees')
-      .select('id, status')
-      .eq('id', employeeId)
-      .eq('status', 'active')
-      .single();
+      const [, employeeId] = legacyMatch;
+      
+      const { data: employee, error } = await supabase
+        .from('employees')
+        .select('id, status')
+        .eq('id', employeeId)
+        .eq('status', 'active')
+        .single();
 
     const isValid = !error && !!employee;
     validationCache.set(qrData, { result: isValid, timestamp: Date.now() });
@@ -229,29 +229,29 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
   document.body.appendChild(progressElement);
   
   try {
-    for (let i = 0; i < totalEmployees; i += batchSize) {
-      const batch = employees.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(async (employee) => {
-          try {
-            const svgData = await generateEmployeeQRSVG(employee);
-            const pngBlob = await svgToPng(svgData);
-            
+  for (let i = 0; i < totalEmployees; i += batchSize) {
+    const batch = employees.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(async (employee) => {
+        try {
+          const svgData = await generateEmployeeQRSVG(employee);
+          const pngBlob = await svgToPng(svgData);
+          
             const safeFileName = `${employee.id}_${(employee.name || `${employee.first_name}_${employee.last_name}`)
               .replace(/[^\w\s]/gi, '_')
               .replace(/\s+/g, '_')}_QRCode.png`;
             
             zip.file(safeFileName, pngBlob);
-            processedCount++;
-            progressElement.textContent = `Processing QR Codes: ${processedCount}/${totalEmployees}`;
-          } catch (error) {
+          processedCount++;
+          progressElement.textContent = `Processing QR Codes: ${processedCount}/${totalEmployees}`;
+        } catch (error) {
             console.error(`Error processing QR code for employee ${employee.id}:`, error);
-          }
-        })
-      );
-    }
-    
-    progressElement.textContent = 'Creating ZIP file...';
+        }
+      })
+    );
+  }
+  
+  progressElement.textContent = 'Creating ZIP file...';
     const zipBlob = await zip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
@@ -260,10 +260,10 @@ export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> =
       }
     });
     
-    const downloadLink = document.createElement('a');
-    downloadLink.href = URL.createObjectURL(zipBlob);
+  const downloadLink = document.createElement('a');
+  downloadLink.href = URL.createObjectURL(zipBlob);
     downloadLink.download = `employee_qr_codes_${Date.now()}.zip`;
-    downloadLink.click();
+  downloadLink.click();
     URL.revokeObjectURL(downloadLink.href);
   } finally {
     document.body.removeChild(progressElement);
