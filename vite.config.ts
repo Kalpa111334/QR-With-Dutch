@@ -22,6 +22,15 @@ export default defineConfig(({ mode }) => ({
       }
     }
   },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      "@radix-ui/react-icons": "@radix-ui/react-icons/dist/index.mjs"
+    },
+    dedupe: [
+      '@radix-ui/react-icons'
+    ]
+  },
   plugins: [
     react(),
     mode === 'development' &&
@@ -109,11 +118,6 @@ export default defineConfig(({ mode }) => ({
       }
     })
   ].filter(Boolean),
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
   define: {
     'process.env': {}
   }
