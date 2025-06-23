@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
@@ -26,82 +26,110 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onScanError }) => 
   const [lastScanTime, setLastScanTime] = useState(0);
   const { toast } = useToast();
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const processingRef = useRef(false);
+  const lastScannedCodeRef = useRef<string | null>(null);
+
+  // Optimized video constraints
+  const videoConstraints = useMemo(() => ({
+    facingMode: 'environment',
+    width: { min: 640, ideal: 1280, max: 1920 },
+    height: { min: 480, ideal: 720, max: 1080 },
+    aspectRatio: { ideal: 1.7777777778 },
+    frameRate: { ideal: 30, min: 15 },
+    focusMode: 'continuous',
+    exposureMode: 'continuous',
+    whiteBalanceMode: 'continuous'
+  }), []);
+
+  // Optimized scanner settings
+  const scannerSettings = useMemo(() => ({
+    scanDelay: 100,
+    constraints: videoConstraints,
+    formats: ['qr_code'],
+    components: {
+      audio: false,
+      finder: true,
+      onOff: false,
+      torch: true,
+      zoom: false
+    },
+    styles: {
+      container: {
+        width: '100%',
+        height: '300px'
+      },
+      finderBorder: 40
+    }
+  }), [videoConstraints]);
 
   const handleScan = useCallback(async (detectedCodes: any[]) => {
-    if (!detectedCodes.length || isLoading) return;
+    if (!detectedCodes.length || isLoading || processingRef.current) return;
 
     const result = detectedCodes[0].rawValue;
-    if (!result) return;
+    if (!result || result === lastScannedCodeRef.current) return;
 
-    // Debounce scanning to prevent duplicate scans
+    // Debounce scanning with improved timing
     const currentTime = Date.now();
-    if (currentTime - lastScanTime < 2000) return;
+    if (currentTime - lastScanTime < 1500) return;
+    
+    processingRef.current = true;
+    lastScannedCodeRef.current = result;
     setLastScanTime(currentTime);
 
     try {
       setIsLoading(true);
       setIsScanning(false);
 
-      // Parse QR code data
+      // Parse QR code data with error handling
       const qrData = parseQRCodeData(result);
       if (qrData.type !== 'employee' || !qrData.id) {
         throw new Error('Invalid QR code format');
       }
 
-      // Record attendance
+      // Record attendance with optimized error handling
       const attendanceResult = await recordAttendance(qrData.id);
 
-      // Show success message with roster compliance info
-      const {
-        action,
-        employeeName,
-        isLate,
-        lateMinutes,
-        earlyDepartureMinutes,
-        actualHours,
-        expectedHours,
-        complianceRate
-      } = attendanceResult;
-
-      // Update attendance state
+      // Update attendance state asynchronously
       const newState = await getCurrentAttendanceState(qrData.id);
       setAttendanceState(newState);
 
-      // Voice announcement if enabled
+      // Optimized voice feedback
       if (voiceEnabled && attendanceSpeechService.isSupported()) {
-        try {
-          await attendanceSpeechService.speakAttendanceResult(attendanceResult);
-        } catch (voiceError) {
-          console.warn('Voice announcement failed:', voiceError);
-        }
+        attendanceSpeechService.speakAttendanceResult(attendanceResult)
+          .catch(console.warn);
       }
 
+      // Show optimized success message
       toast({
-        title: `${action.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')} Successful`,
+        title: `${attendanceResult.action.split('_').map((word: string) => 
+          word.charAt(0).toUpperCase() + word.slice(1)).join(' ')} Successful`,
         description: (
-          <div className="mt-2">
-            <p>Employee: {employeeName}</p>
-            {isLate ? (
-              <div className="flex items-center text-destructive mt-1">
+          <div className="mt-2 space-y-2">
+            <p className="font-medium">{attendanceResult.employeeName}</p>
+            {attendanceResult.isLate ? (
+              <div className="flex items-center text-destructive">
                 <AlertTriangle className="w-4 h-4 mr-1" />
-                <span>{lateMinutes} minutes late</span>
+                <span>{attendanceResult.lateMinutes} minutes late</span>
               </div>
             ) : (
-              <div className="flex items-center text-success mt-1">
+              <div className="flex items-center text-success">
                 <CheckCircle className="w-4 h-4 mr-1" />
                 <span>On time</span>
               </div>
             )}
-            <div className="flex items-center mt-1">
+            <div className="flex items-center">
               <Clock className="w-4 h-4 mr-1" />
-              <span>{actualHours?.toFixed(1) || 0} / {expectedHours?.toFixed(1)} hours</span>
+              <span>{attendanceResult.actualHours?.toFixed(1) || 0} / {attendanceResult.expectedHours?.toFixed(1)} hours</span>
             </div>
-            <Badge variant={complianceRate >= 90 ? "default" : "destructive"} className="mt-2">
-              {complianceRate?.toFixed(1)}% Compliance
+            <Badge 
+              variant={attendanceResult.complianceRate >= 90 ? "default" : "destructive"} 
+              className="mt-1"
+            >
+              {attendanceResult.complianceRate?.toFixed(1)}% Compliance
             </Badge>
-              </div>
+          </div>
         ),
-        duration: 5000
+        duration: 3000
       });
 
       if (onScanSuccess) {
@@ -110,21 +138,18 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onScanError }) => 
     } catch (error) {
       console.error('Scan error:', error);
       
-      // Voice error announcement if enabled
+      // Optimized error handling with voice feedback
       if (voiceEnabled && attendanceSpeechService.isSupported()) {
-        try {
-          const errorMessage = error instanceof Error ? error.message : "Failed to process attendance";
-          await attendanceSpeechService.speak(`Error: ${errorMessage}`);
-        } catch (voiceError) {
-          console.warn('Voice error announcement failed:', voiceError);
-        }
+        const errorMessage = error instanceof Error ? error.message : "Failed to process attendance";
+        attendanceSpeechService.speak(errorMessage)
+          .catch(console.warn);
       }
 
       toast({
         variant: "destructive",
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to process attendance",
-        duration: 3000
+        duration: 2000
       });
 
       if (onScanError) {
@@ -132,22 +157,28 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onScanError }) => 
       }
     } finally {
       setIsLoading(false);
-      // Clear any existing timeout
+      processingRef.current = false;
+      
+      // Clear existing timeout and restart scanning
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
       }
-      // Restart scanning after a brief delay
-      scanTimeoutRef.current = setTimeout(() => setIsScanning(true), 2000);
+      scanTimeoutRef.current = setTimeout(() => {
+        setIsScanning(true);
+        lastScannedCodeRef.current = null;
+      }, 1500);
     }
   }, [isLoading, lastScanTime, voiceEnabled, onScanSuccess, onScanError, toast]);
 
-  // Cleanup timeout on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
       }
       attendanceSpeechService.stop();
+      processingRef.current = false;
+      lastScannedCodeRef.current = null;
     };
   }, []);
 
@@ -186,70 +217,43 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onScanError }) => 
           </div>
         )}
         
-        {isScanning ? (
-          <div className="relative">
-            <Scanner
-              onScan={handleScan}
-              onError={(error) => {
-                console.error('Scanner error:', error);
-                toast({
-                  variant: "destructive",
-                  title: "Scanner Error",
-                  description: "Failed to access camera",
-                  duration: 3000
-                });
-              }}
-              constraints={{
-                facingMode: 'environment',
-                // Optimized video constraints for better performance
-                video: {
-                  width: { ideal: 1280 },
-                  height: { ideal: 720 }
-                }
-              }}
-              // Increased scan frequency for faster detection
-              scanDelay={100}
-              // Enhanced QR detection formats
-              formats={['qr_code', 'data_matrix']}
-              components={{
-                audio: false,
-                finder: true,
-                onOff: false,
-                torch: true,
-                zoom: false
-              }}
-              styles={{
-                container: {
-                  width: '100%',
-                  height: '300px'
-                },
-                finderBorder: 40
-              }}
-            />
+        <div className="relative">
+          {isScanning ? (
+            <>
+              <Scanner
+                onScan={handleScan}
+                onError={console.error}
+                {...scannerSettings}
+              />
+              <Button
+                onClick={() => {
+                  setIsScanning(false);
+                  if (scanTimeoutRef.current) {
+                    clearTimeout(scanTimeoutRef.current);
+                  }
+                }}
+                variant="destructive"
+                className="w-full mt-4"
+              >
+                Stop Scanning
+              </Button>
+            </>
+          ) : (
             <Button
               onClick={() => {
-                setIsScanning(false);
-                if (scanTimeoutRef.current) {
-                  clearTimeout(scanTimeoutRef.current);
-                }
+                setIsScanning(true);
+                processingRef.current = false;
+                lastScannedCodeRef.current = null;
               }}
-              variant="destructive"
               className="w-full mt-4"
             >
-              Stop Scanning
+              Start Scanning
             </Button>
-          </div>
-        ) : (
-          <Button
-            onClick={() => setIsScanning(true)}
-            className="w-full mt-4"
-          >
-            Start Scanning
-          </Button>
-        )}
+          )}
+        </div>
       </div>
     </Card>
   );
 };
 
-export default QRScanner; 
+export default React.memo(QRScanner);

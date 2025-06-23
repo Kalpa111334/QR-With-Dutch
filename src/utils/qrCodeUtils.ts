@@ -2,28 +2,41 @@ import JSZip from 'jszip';
 import { Employee, GatePass } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 
-// Helper function to generate QR code SVG data with improved error handling
+// Cache for QR code validation results
+const validationCache = new Map<string, { result: boolean; timestamp: number }>();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+// Optimized QR code generation with caching
+const qrCodeCache = new Map<string, { svg: string; timestamp: number }>();
+
+// Helper function to generate QR code SVG data with improved error handling and caching
 const generateQRSVG = async (data: string | Record<string, any>): Promise<string> => {
-  // We need to dynamically import QRCode library here
-  const QRCode = await import('qrcode');
+  const cacheKey = typeof data === 'string' ? data : JSON.stringify(data);
+  const cached = qrCodeCache.get(cacheKey);
   
-  // Convert object to JSON string if needed
-  const qrCodeData = typeof data === 'string' ? data : JSON.stringify(data);
-  
-  // Generate SVG string directly using QRCode library with better settings
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.svg;
+  }
+
   try {
-    // Use QRCode.toString to generate SVG string with optimized settings
+    const QRCode = await import('qrcode');
+    const qrCodeData = typeof data === 'string' ? data : JSON.stringify(data);
+    
     const svgString = await QRCode.toString(qrCodeData, {
       type: 'svg',
-      width: 400, // Larger size for better scanning
-      margin: 2,  // Slightly larger margin
+      width: 400,
+      margin: 2,
       color: {
         dark: '#000000',
         light: '#ffffff'
       },
-      errorCorrectionLevel: 'H' // Highest error correction
+      errorCorrectionLevel: 'H',
+      rendererOpts: {
+        quality: 1
+      }
     });
     
+    qrCodeCache.set(cacheKey, { svg: svgString, timestamp: Date.now() });
     return svgString;
   } catch (error) {
     console.error('Error generating QR code:', error);
@@ -31,85 +44,72 @@ const generateQRSVG = async (data: string | Record<string, any>): Promise<string
   }
 };
 
-// Generate QR code for employee with improved data format
+// Optimized employee QR code generation
 export const generateEmployeeQRSVG = async (employee: Employee): Promise<string> => {
-  // Always use the legacy format for better compatibility and reliability
   const qrCodeData = generateLegacyQR(employee);
-  console.log('Generated employee QR data:', qrCodeData);
-  
   return generateQRSVG(qrCodeData);
 };
 
-// Generate QR code for gate pass with improved data format
+// Optimized gate pass QR code generation
 export const generateGatePassQRSVG = async (pass: GatePass): Promise<string> => {
-  // Create QR code data that includes pass ID and code with clear type identification
   const qrCodeData = JSON.stringify({
     type: 'gatepass',
     id: pass.id,
     passCode: pass.passCode,
     employeeId: pass.employeeId
   });
-  console.log('Generated gate pass QR data:', qrCodeData);
-  
   return generateQRSVG(qrCodeData);
 };
 
-interface EmployeeQRData {
-  id: string;
-  name: string;
-  email: string;
-  department: string;
-}
-
-// Legacy format for backward compatibility
+// Optimized legacy QR format generation
 const generateLegacyQR = (employee: { id: string; name: string }): string => {
   return `EMP:${employee.id}:${employee.name.replace(/[^a-zA-Z0-9 ]/g, '')}`;
 };
 
 export const generateEmployeeQR = (employee: { id: string; name: string; email: string; department: string }): string => {
-  // Always use the legacy format
   return generateLegacyQR(employee);
 };
 
+// Optimized QR code validation with caching
 export const validateEmployeeQR = async (qrData: string): Promise<boolean> => {
-  try {
-    // Always try legacy format first as it's the standard format
-    const legacyMatch = qrData.match(/^EMP:([^:]+):(.+)$/);
-    if (legacyMatch) {
-      const [, employeeId] = legacyMatch;
-      
-      // Verify the employee exists in the database
-      const { data: employee, error } = await supabase
-        .from('employees')
-        .select('id, status')
-        .eq('id', employeeId)
-        .eq('status', 'active')
-        .single();
+  // Check cache first
+  const cached = validationCache.get(qrData);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.result;
+  }
 
-      if (error || !employee) {
-        console.error('Employee not found or inactive:', employeeId);
-        return false;
-      }
-      return true;
+  try {
+    const legacyMatch = qrData.match(/^EMP:([^:]+):(.+)$/);
+    if (!legacyMatch) {
+      validationCache.set(qrData, { result: false, timestamp: Date.now() });
+      return false;
     }
 
-    console.error('Invalid QR code format. Expected format: EMP:ID:NAME');
-    return false;
+    const [, employeeId] = legacyMatch;
+    
+    const { data: employee, error } = await supabase
+      .from('employees')
+      .select('id, status')
+      .eq('id', employeeId)
+      .eq('status', 'active')
+      .single();
+
+    const isValid = !error && !!employee;
+    validationCache.set(qrData, { result: isValid, timestamp: Date.now() });
+    return isValid;
   } catch (error) {
     console.error('Error validating QR code:', error);
     return false;
   }
 };
 
+// Optimized QR code parsing with validation
 export const parseQRCodeData = (qrData: string): { type: 'employee' | 'unknown', id: string } => {
   try {
-    // Always try legacy format first as it's the standard format
     const legacyMatch = qrData.match(/^EMP:([^:]+):(.+)$/);
     if (legacyMatch) {
       return { type: 'employee', id: legacyMatch[1] };
     }
-
-    console.error('Invalid QR code format. Expected format: EMP:ID:NAME');
     return { type: 'unknown', id: '' };
   } catch (error) {
     console.error('Error parsing QR code:', error);
@@ -117,8 +117,63 @@ export const parseQRCodeData = (qrData: string): { type: 'employee' | 'unknown',
   }
 };
 
-// Generate a PNG from SVG string with improved quality
+// Optimized PNG conversion with WebWorker support
+const createWorkerBlob = () => {
+  const workerCode = `
+    self.onmessage = function(e) {
+      const { svgString, width, height, scale } = e.data;
+      const img = new Image();
+      img.onload = function() {
+        const canvas = new OffscreenCanvas(width * scale, height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0);
+        
+        canvas.convertToBlob({ type: 'image/png', quality: 1 })
+          .then(blob => self.postMessage({ blob }))
+          .catch(error => self.postMessage({ error: error.message }));
+      };
+      img.onerror = function() {
+        self.postMessage({ error: 'Failed to load SVG' });
+      };
+      const svgBlob = new Blob([svgString], { type: 'image/svg+xml' });
+      img.src = URL.createObjectURL(svgBlob);
+    };
+  `;
+  return new Blob([workerCode], { type: 'application/javascript' });
+};
+
 const svgToPng = async (svgString: string): Promise<Blob> => {
+  if (typeof Worker !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      const workerBlob = createWorkerBlob();
+      const workerUrl = URL.createObjectURL(workerBlob);
+      const worker = new Worker(workerUrl);
+      
+      worker.onmessage = (e) => {
+        if (e.data.error) {
+          reject(new Error(e.data.error));
+        } else {
+          resolve(e.data.blob);
+        }
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+      };
+      
+      worker.postMessage({
+        svgString,
+        width: 400,
+        height: 400,
+        scale: 2
+      });
+    });
+  }
+  
+  // Fallback for environments without Worker support
   return new Promise((resolve, reject) => {
     const img = new Image();
     const canvas = document.createElement('canvas');
@@ -129,9 +184,7 @@ const svgToPng = async (svgString: string): Promise<Blob> => {
       return;
     }
     
-    // When the image is loaded, draw it on the canvas
     img.onload = () => {
-      // Set higher resolution for better quality
       const scale = 2;
       canvas.width = img.width * scale;
       canvas.height = img.height * scale;
@@ -140,103 +193,88 @@ const svgToPng = async (svgString: string): Promise<Blob> => {
       ctx.scale(scale, scale);
       ctx.drawImage(img, 0, 0);
       
-      // Convert the canvas to a blob and resolve
-      canvas.toBlob(blob => {
-        if (blob) {
-          resolve(blob);
-        } else {
-          reject(new Error('Could not convert canvas to blob'));
-        }
-      }, 'image/png', 1.0); // Use highest quality
+      canvas.toBlob(
+        blob => blob ? resolve(blob) : reject(new Error('Could not convert canvas to blob')),
+        'image/png',
+        1.0
+      );
     };
     
-    // Handle load errors
-    img.onerror = () => {
-      reject(new Error('Failed to load SVG as image'));
-    };
+    img.onerror = () => reject(new Error('Failed to load SVG'));
     
-    // Set the image source to the SVG
     const svgBlob = new Blob([svgString], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(svgBlob);
-    img.src = url;
+    img.src = URL.createObjectURL(svgBlob);
   });
 };
 
-// Download all QR codes as a ZIP file
+// Optimized batch processing for QR code generation
 export const downloadAllQRCodes = async (employees: Employee[]): Promise<void> => {
-  // Create a new ZIP file
   const zip = new JSZip();
-  
-  // Process employees in batches to avoid memory issues
   const batchSize = 10;
   const totalEmployees = employees.length;
-  
-  // Show progress to user
   let processedCount = 0;
+  
   const progressElement = document.createElement('div');
-  progressElement.style.position = 'fixed';
-  progressElement.style.top = '50%';
-  progressElement.style.left = '50%';
-  progressElement.style.transform = 'translate(-50%, -50%)';
-  progressElement.style.padding = '20px';
-  progressElement.style.background = 'rgba(0,0,0,0.7)';
-  progressElement.style.color = 'white';
-  progressElement.style.borderRadius = '5px';
-  progressElement.style.zIndex = '9999';
+  Object.assign(progressElement.style, {
+    position: 'fixed',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    padding: '20px',
+    background: 'rgba(0,0,0,0.7)',
+    color: 'white',
+    borderRadius: '5px',
+    zIndex: '9999'
+  });
   document.body.appendChild(progressElement);
   
-  for (let i = 0; i < totalEmployees; i += batchSize) {
-    const batch = employees.slice(i, i + batchSize);
+  try {
+    for (let i = 0; i < totalEmployees; i += batchSize) {
+      const batch = employees.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (employee) => {
+          try {
+            const svgData = await generateEmployeeQRSVG(employee);
+            const pngBlob = await svgToPng(svgData);
+            
+            const safeFileName = `${employee.id}_${(employee.name || `${employee.first_name}_${employee.last_name}`)
+              .replace(/[^\w\s]/gi, '_')
+              .replace(/\s+/g, '_')}_QRCode.png`;
+            
+            zip.file(safeFileName, pngBlob);
+            processedCount++;
+            progressElement.textContent = `Processing QR Codes: ${processedCount}/${totalEmployees}`;
+          } catch (error) {
+            console.error(`Error processing QR code for employee ${employee.id}:`, error);
+          }
+        })
+      );
+    }
     
-    // Process each employee in the current batch
-    await Promise.all(
-      batch.map(async (employee) => {
-        try {
-          // Generate SVG QR code
-          const svgData = await generateEmployeeQRSVG(employee);
-          
-          // Convert SVG to PNG
-          const pngBlob = await svgToPng(svgData);
-          
-          // Add to ZIP file - use a sanitized name for the file
-          const safeFileName = (employee.name || `${employee.first_name}_${employee.last_name}`)
-            .replace(/[^\w\s]/gi, '_').replace(/\s+/g, '_');
-          zip.file(`${safeFileName}_QRCode.png`, pngBlob);
-          processedCount++;
-          progressElement.textContent = `Processing QR Codes: ${processedCount}/${totalEmployees}`;
-        } catch (error) {
-          console.error(`Error generating QR code for ${employee.name || `${employee.first_name} ${employee.last_name}`}:`, error);
-          // Continue with other employees even if one fails
-        }
-      })
-    );
+    progressElement.textContent = 'Creating ZIP file...';
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: {
+        level: 6
+      }
+    });
+    
+    const downloadLink = document.createElement('a');
+    downloadLink.href = URL.createObjectURL(zipBlob);
+    downloadLink.download = `employee_qr_codes_${Date.now()}.zip`;
+    downloadLink.click();
+    URL.revokeObjectURL(downloadLink.href);
+  } finally {
+    document.body.removeChild(progressElement);
   }
-  
-  // Generate the ZIP file
-  progressElement.textContent = 'Creating ZIP file...';
-  const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  
-  // Remove progress indicator
-  document.body.removeChild(progressElement);
-  
-  // Create a download link and trigger download
-  const downloadLink = document.createElement('a');
-  downloadLink.href = URL.createObjectURL(zipBlob);
-  downloadLink.download = 'employee_qr_codes.zip';
-  document.body.appendChild(downloadLink);
-  downloadLink.click();
-  document.body.removeChild(downloadLink);
 };
 
-// Generate and download QR code for a single gate pass with improved output
+// Optimized gate pass QR code generation
 export const generateQRCodeForPass = async (pass: GatePass): Promise<Blob | null> => {
   try {
-    // Generate SVG QR code
     const svgData = await generateGatePassQRSVG(pass);
-    
-    // Convert SVG to PNG
-    const pngBlob = await svgToPng(svgData);
-    return pngBlob;
+    return await svgToPng(svgData);
   } catch (error) {
     console.error('Error generating gate pass QR code:', error);
     return null;
