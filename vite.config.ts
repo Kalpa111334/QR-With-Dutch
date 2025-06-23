@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => ({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'ui-vendor': ['@radix-ui/react-icons', '@radix-ui/react-slot', '@radix-ui/react-toast'],
+          'ui-vendor': ['@radix-ui/react-slot', '@radix-ui/react-toast'],
         }
       }
     }
@@ -25,11 +25,13 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@radix-ui/react-icons": "@radix-ui/react-icons/dist/index.mjs"
+      "@radix-ui/react-icons": "@radix-ui/react-icons/dist/index.js"
     },
-    dedupe: [
-      '@radix-ui/react-icons'
-    ]
+    conditions: ['import', 'module', 'browser', 'default']
+  },
+  optimizeDeps: {
+    include: ['@radix-ui/react-icons'],
+    force: true
   },
   plugins: [
     react(),
