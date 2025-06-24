@@ -289,13 +289,25 @@ export class RosterService {
         throw new Error('Roster system is not properly initialized. Please contact support.');
       }
 
-    const { error } = await supabase
-      .from('rosters')
-      .delete()
-      .eq('id', id);
+      // First delete the employee_rosters entries
+      const { error: employeeRosterError } = await supabase
+        .from('employee_rosters')
+        .delete()
+        .eq('roster_id', id);
 
-      if (error) {
-        console.error('Error deleting roster:', error);
+      if (employeeRosterError) {
+        console.error('Error deleting employee roster entries:', employeeRosterError);
+        throw new Error('Failed to delete roster associations. Please try again or contact support.');
+      }
+
+      // Then delete the roster itself
+      const { error: rosterError } = await supabase
+        .from('rosters')
+        .delete()
+        .eq('id', id);
+
+      if (rosterError) {
+        console.error('Error deleting roster:', rosterError);
         throw new Error('Failed to delete roster. Please try again or contact support.');
       }
     } catch (error) {
