@@ -48,7 +48,13 @@ const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({ employee }) => {
       });
     };
     
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    // Fix: Use a safer method to encode SVG data to Base64
+    const encodedSvgData = window.btoa(
+      encodeURIComponent(svgData).replace(/%([0-9A-F]{2})/g,
+        (match, p1) => String.fromCharCode(parseInt(p1, 16))
+      )
+    );
+    img.src = 'data:image/svg+xml;base64,' + encodedSvgData;
   };
 
   // Generate QR code data using the standardized format with system identifier
