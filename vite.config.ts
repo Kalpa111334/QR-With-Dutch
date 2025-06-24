@@ -5,17 +5,21 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  base: './',
+  base: mode === 'production' ? '/' : './',
   server: {
     host: true,
+    port: 8080,
+  },
+  preview: {
     port: 8080,
   },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
     emptyOutDir: true,
-    sourcemap: mode === 'production' ? false : true,
-    minify: mode === 'production' ? 'terser' : false,
+    sourcemap: false,
+    minify: 'terser',
+    target: 'esnext',
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
@@ -46,6 +50,11 @@ export default defineConfig(({ mode }) => ({
     react({
       jsxRuntime: 'automatic',
       fastRefresh: true,
+      babel: {
+        plugins: [
+          ['@babel/plugin-transform-react-jsx', { runtime: 'automatic' }]
+        ]
+      }
     }),
     VitePWA({
       registerType: 'autoUpdate',
@@ -83,7 +92,7 @@ export default defineConfig(({ mode }) => ({
               cacheName: 'google-fonts-cache',
               expiration: {
                 maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365 // <== 365 days
+                maxAgeSeconds: 60 * 60 * 24 * 365
               },
               cacheableResponse: {
                 statuses: [0, 200]
