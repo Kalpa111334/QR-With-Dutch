@@ -1129,64 +1129,7 @@ export async function getEmployeeRoster(employeeId: string): Promise<any> {
 
     if (rosterError) {
       console.error('Error fetching roster:', rosterError);
-      // If no roster found, try to get the default roster
-      const { data: defaultRoster, error: defaultError } = await supabase
-        .from('rosters')
-        .select('*')
-        .eq('employee_id', employeeId)
-        .eq('name', 'Default Day Shift')
-        .eq('is_active', true)
-        .single();
-
-      if (defaultError || !defaultRoster) {
-        // Create a default roster for the employee
-        const { data: newRoster, error: createError } = await supabase
-          .from('rosters')
-          .insert([
-            {
-              name: 'Default Day Shift',
-              description: 'Standard 9 AM to 5 PM shift with 1-hour lunch break',
-              employee_id: employeeId,
-              start_date: new Date().toISOString().split('T')[0],
-              end_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
-              start_time: '09:00:00',
-              end_time: '17:00:00',
-              break_start: '13:00:00',
-              break_end: '14:00:00',
-              break_duration: 60,
-              grace_period: 15,
-              early_departure_threshold: 30,
-              is_active: true,
-              status: 'active'
-            }
-          ])
-          .select()
-          .single();
-
-        if (createError) {
-          throw new Error('Failed to create default roster');
-        }
-
-        // Assign the new roster to the employee
-        const { error: assignError } = await supabase
-          .from('employee_rosters')
-          .insert([
-            {
-              employee_id: employeeId,
-              roster_id: newRoster.id,
-              effective_from: new Date().toISOString().split('T')[0],
-              is_primary: true
-            }
-          ]);
-
-        if (assignError) {
-          throw new Error('Failed to assign default roster');
-        }
-
-        return newRoster;
-      }
-
-      return defaultRoster;
+      throw new Error('No active roster found for employee');
     }
 
     return employeeRosters?.roster;

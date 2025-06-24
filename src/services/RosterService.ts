@@ -210,54 +210,38 @@ export class RosterService {
         throw new Error('Roster system is not properly initialized. Please contact support.');
       }
 
-    // Ensure shift_pattern is never null by providing a default empty array
-    const shiftPattern = roster.shift_pattern || [];
+      // Ensure shift_pattern is never null by providing a default empty array
+      const shiftPattern = roster.shift_pattern || [];
 
-    // If start_date and end_date are provided but shift_pattern is empty,
-    // create a default pattern with 'off' shifts for each day
-    if (roster.start_date && roster.end_date && shiftPattern.length === 0) {
-      const startDate = new Date(roster.start_date);
-      const endDate = new Date(roster.end_date);
-      const currentDate = new Date(startDate);
-
-      while (currentDate <= endDate) {
-        shiftPattern.push({
-          date: currentDate.toISOString().split('T')[0],
-          shift: 'off'
-        });
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
-    }
-
-    const { data, error } = await supabase
-      .from('rosters')
-      .insert([{
-        employee_id: roster.employee_id,
+      const { data, error } = await supabase
+        .from('rosters')
+        .insert([{
+          employee_id: roster.employee_id,
           department_id: roster.department_id || null,
-        position: roster.position || 'Unassigned',
-        start_date: roster.start_date,
-        end_date: roster.end_date,
-        shift_pattern: shiftPattern,
-        notes: roster.notes,
+          position: roster.position || 'Unassigned',
+          start_date: roster.start_date,
+          end_date: roster.end_date,
+          shift_pattern: shiftPattern,
+          notes: roster.notes,
           is_active: true,
           status: 'active',
-        created_by: roster.created_by,
-        updated_by: roster.updated_by,
-        assignment_time: new Date().toISOString()
-      }])
-      .select()
-      .single();
+          created_by: roster.created_by,
+          updated_by: roster.updated_by,
+          assignment_time: new Date().toISOString()
+        }])
+        .select()
+        .single();
 
-    if (error) {
-      console.error('Supabase error:', error);
-      throw new Error(error.message);
-    }
-    
-    if (!data) {
-      throw new Error('No data returned from roster creation');
-    }
+      if (error) {
+        console.error('Supabase error:', error);
+        throw new Error(error.message);
+      }
+      
+      if (!data) {
+        throw new Error('No data returned from roster creation');
+      }
 
-    return data;
+      return data;
     } catch (error) {
       console.error('Error in createRoster:', error);
       throw error;
