@@ -631,16 +631,16 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
           record.first_check_in_time 
             ? format(new Date(record.first_check_in_time), 'HH:mm') 
             : '-',
-          record.first_check_out_time
-            ? format(new Date(record.first_check_out_time), 'HH:mm')
+          record.first_check_out_time 
+            ? format(new Date(record.first_check_out_time), 'HH:mm') 
             : '-',
-          record.second_check_in_time
-            ? format(new Date(record.second_check_in_time), 'HH:mm')
+          record.second_check_in_time 
+            ? format(new Date(record.second_check_in_time), 'HH:mm') 
             : '-',
-          record.second_check_out_time
-            ? format(new Date(record.second_check_out_time), 'HH:mm')
+          record.second_check_out_time 
+            ? format(new Date(record.second_check_out_time), 'HH:mm') 
             : '-',
-          record.break_duration_minutes
+          record.break_duration_minutes 
             ? formatDuration(record.break_duration_minutes)
             : '-',
           record.working_duration_minutes
@@ -656,17 +656,17 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
       // Add table with enhanced styling for A4 portrait
       (doc as any).autoTable({
         head: [['Date', 'Employee Name', 'Department', 'First In', 'First Out', 'Second In', 'Second Out', 'Break', 'Hours', 'Late', 'Status']],
-        body: tableData,
+      body: tableData,
         startY: 115,
         theme: 'grid',
-        styles: {
+      styles: {
           font: 'helvetica',
           fontSize: 8,
           cellPadding: 3,
           lineColor: [200, 200, 200],
           lineWidth: 0.1,
-        },
-        columnStyles: {
+      },
+      columnStyles: {
           0: { cellWidth: 20 }, // Date
           1: { cellWidth: 35 }, // Name
           2: { cellWidth: 25 }, // Department
@@ -687,8 +687,8 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
         },
         alternateRowStyles: {
           fillColor: [245, 245, 245],
-        },
-      });
+      },
+    });
 
       // Add footer text
       doc.setFontSize(8);
@@ -740,7 +740,7 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
     const onTimeCount = data.filter(record => record.minutes_late === 0).length;
     const lateCount = data.filter(record => record.minutes_late > 0).length;
     const totalHours = data.reduce((sum, record) => sum + (record.working_duration_minutes || 0), 0) / 60;
-
+    
     return (
       <div className="mt-4 space-y-3">
         <h3 className="text-sm font-medium">Preview ({data.length} records)</h3>
@@ -1010,15 +1010,15 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
                     <SelectValue placeholder="Select department">
                       {departments.find(d => d.id === selectedDepartment)?.name || 'Select department'}
                     </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
+                </SelectTrigger>
+                <SelectContent>
                     {departments.map((dept) => (
                       <SelectItem key={dept.id} value={dept.id}>
                         {dept.name}
                       </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  ))}
+                </SelectContent>
+              </Select>
               </div>
             </div>
 
@@ -1057,12 +1057,12 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
                       Download PDF
                     </>
                   )}
-                </Button>
-              </div>
+            </Button>
+          </div>
             </div>
 
             {reportData.length > 0 && renderPreviewTable(reportData)}
-          </div>
+            </div>
         </DialogContent>
       </Dialog>
     </>
