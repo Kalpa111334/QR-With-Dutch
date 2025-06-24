@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
-import { PushNotificationToggle } from './PushNotificationToggle';
+import { RealTimeNotificationToggle } from './RealTimeNotificationToggle';
 
 // Error boundary component
 class ErrorBoundary extends React.Component<
@@ -347,7 +347,7 @@ const Dashboard: React.FC = () => {
       <div className="container mx-auto p-4">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">Dashboard</h1>
-          <PushNotificationToggle />
+          <RealTimeNotificationToggle />
         </div>
         <Tabs defaultValue="overview" onValueChange={(value) => setActiveTab(value as 'overview' | 'settings')}>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-2">
