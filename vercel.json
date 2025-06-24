@@ -44,6 +44,5 @@
   ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "comment": "Production deployment configuration"
+  ]
 } 
