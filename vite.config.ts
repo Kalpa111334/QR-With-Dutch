@@ -39,23 +39,14 @@ export default defineConfig(({ mode }) => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@radix-ui/react-icons": "@radix-ui/react-icons/dist/index.js"
-    },
-    conditions: ['import', 'module', 'browser', 'default']
+    }
   },
   optimizeDeps: {
     include: ['@radix-ui/react-icons'],
     force: true
   },
   plugins: [
-    react({
-      jsxRuntime: 'automatic',
-      fastRefresh: true,
-      babel: {
-        plugins: [
-          ['@babel/plugin-transform-react-jsx', { runtime: 'automatic' }]
-        ]
-      }
-    }),
+    react(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt', 'icons/*.png'],
