@@ -199,258 +199,67 @@ const generateUniqueTimestamp = async (
 // Enhanced Attendance Recording Function
 export const recordAttendance = async (employeeId: string): Promise<any> => {
   try {
-    // First validate that the employee exists
+    // First get the employee's roster
+    const roster = await getEmployeeRoster(employeeId);
+    if (!roster || !roster.id) {
+      throw new AttendanceError(
+        'No active roster found for employee',
+        'ROSTER_ERROR',
+        { employeeId }
+      );
+    }
+
+    // Call the database function to process attendance
+    const { data: result, error } = await supabase.rpc('process_roster_attendance', { 
+      p_employee_id: employeeId,
+      p_current_time: new Date().toISOString(),
+      p_roster_id: roster.id
+    });
+
+    if (error) {
+      console.error('Error processing attendance:', error);
+      // Check if it's a roster-related error
+      if (error.message.includes('roster_id')) {
+        throw new AttendanceError(
+          'Invalid roster configuration',
+          'ROSTER_ERROR',
+          { employeeId, rosterId: roster.id }
+        );
+      }
+      throw new AttendanceError(`Failed to process attendance: ${error.message}`);
+    }
+
+    if (!result) {
+      throw new AttendanceError('No response from attendance processor');
+    }
+
+    // Get employee details
     const { data: employee, error: employeeError } = await supabase
       .from('employees')
-      .select('id, first_name, last_name, status')
+      .select('first_name, last_name')
       .eq('id', employeeId)
       .single();
 
-    if (employeeError || !employee) {
-      console.error('Employee validation error:', employeeError);
-      throw new AttendanceError('Employee not found or invalid employee ID');
-    }
-
-    if (employee.status !== 'active') {
-      throw new AttendanceError('Employee is not active in the system');
-    }
-
-    // Get today's date and current time
-    const today = new Date().toISOString().split('T')[0];
-    const currentTime = new Date();
-
-    // Get employee's active roster
-    const roster = await getEmployeeRoster(employeeId);
-    if (!roster || !roster.id) {
-      console.error('No valid roster found for employee:', employeeId);
-      throw new AttendanceError('No valid roster found for employee');
-    }
-
-    // Get existing attendance record for today
-    const { data: existingRecord, error: recordError } = await supabase
-      .from('attendance')
-      .select('*')
-      .eq('employee_id', employeeId)
-      .eq('date', today)
-      .maybeSingle();
-
-    if (recordError) {
-      console.error('Error checking existing attendance:', recordError);
-      throw new AttendanceError('Failed to check existing attendance');
-    }
-
-    // Determine the next action and status
-    let nextAction: AttendanceAction = 'first_check_in';
-    let nextStatus = 'CHECKED_IN';
-
-    if (existingRecord) {
-      // Determine next action based on existing record
-      if (!existingRecord.first_check_out_time && existingRecord.first_check_in_time) {
-        nextAction = 'first_check_out';
-        nextStatus = 'ON_BREAK';
-      } else if (!existingRecord.second_check_in_time && existingRecord.first_check_out_time) {
-        nextAction = 'second_check_in';
-        nextStatus = 'CHECKED_IN';
-      } else if (!existingRecord.second_check_out_time && existingRecord.second_check_in_time) {
-        nextAction = 'second_check_out';
-        nextStatus = 'COMPLETED';
-      } else {
-        throw new AttendanceError('All attendance actions completed for today');
-      }
-
-      // Validate check times sequence
-      const newTime = currentTime.getTime();
-      switch (nextAction) {
-      case 'first_check_out':
-          if (newTime <= new Date(existingRecord.first_check_in_time).getTime()) {
-            throw new AttendanceError('Check-out time must be after check-in time');
-          }
-          break;
-        case 'second_check_in':
-          if (newTime <= new Date(existingRecord.first_check_out_time).getTime()) {
-            throw new AttendanceError('Second check-in time must be after first check-out time');
-          }
-          break;
-        case 'second_check_out':
-          if (newTime <= new Date(existingRecord.second_check_in_time).getTime()) {
-            throw new AttendanceError('Second check-out time must be after second check-in time');
-          }
-          break;
-      }
-    }
-
-    // Calculate metrics
-    const minutesLate = calculateLateness(
-      nextAction === 'first_check_in' ? currentTime : new Date(existingRecord?.first_check_in_time || ''),
-      roster.start_time,
-      roster.grace_period
-    );
-
-    const earlyDepartureMinutes = nextAction === 'second_check_out' ? 
-      calculateEarlyDeparture(currentTime, roster.end_time, roster.early_departure_threshold) : 0;
-
-    const expectedHours = calculateExpectedHours(
-      roster.start_time,
-      roster.end_time,
-      roster.break_duration
-    );
-
-    // For second session, create a new record
-    if (nextAction === 'second_check_in') {
-      const attendanceData = {
-        employee_id: employeeId,
-        roster_id: roster.id,
-        date: today,
-        first_check_in_time: currentTime.toISOString(),
-        first_check_out_time: null,
-          second_check_in_time: null,
-          second_check_out_time: null,
-        is_second_session: true,
-        previous_session_id: existingRecord?.id,
-        status: nextStatus,
-        minutes_late: minutesLate,
-        early_departure_minutes: earlyDepartureMinutes,
-        break_duration: roster.break_duration,
-        expected_hours: expectedHours,
-        last_action: currentTime.toISOString()
-      };
-
-      // Process attendance
-      const { data: processedAttendance, error: processError } = await supabase
-        .from('attendance')
-        .insert(attendanceData)
-        .select('*, employees(first_name, last_name)')
-        .single();
-
-      if (processError) {
-        console.error('Error processing attendance:', {
-          error: processError,
-          details: processError.details,
-          hint: processError.hint,
-          code: processError.code,
-          message: processError.message,
-          data: attendanceData
-        });
-
-        // Check for specific error cases
-        if (processError.message?.includes('valid_check_times')) {
-          throw new AttendanceError('Invalid check-in/out sequence. Please try again.');
-        } else if (processError.message?.includes('unique_daily_attendance')) {
-          throw new AttendanceError('Attendance record already exists for today.');
-        } else {
-          throw new AttendanceError(`Failed to process attendance: ${processError.message}`);
-        }
-      }
-
-      if (!processedAttendance) {
-        throw new AttendanceError('No attendance record was created');
-      }
-
-      // Return the processed attendance record with additional info
-        return {
-        ...processedAttendance,
-        action: nextAction,
-        employeeName: `${employee.first_name} ${employee.last_name}`,
-        isLate: minutesLate > 0,
-        lateMinutes: minutesLate,
-        earlyDepartureMinutes: earlyDepartureMinutes,
-        actualHours: processedAttendance.actual_hours || 0,
-        expectedHours: processedAttendance.expected_hours || expectedHours
-      };
-    }
-
-    // For other actions, update existing record
-    const attendanceData = {
-      id: existingRecord?.id, // Include the ID to ensure we update the existing record
-      employee_id: employeeId,
-      roster_id: roster.id,
-      date: today,
-      first_check_in_time: nextAction === 'first_check_in' ? currentTime.toISOString() : existingRecord?.first_check_in_time,
-      first_check_out_time: nextAction === 'first_check_out' ? currentTime.toISOString() : existingRecord?.first_check_out_time,
-      second_check_in_time: nextAction === 'second_check_in' ? currentTime.toISOString() : existingRecord?.second_check_in_time,
-      second_check_out_time: nextAction === 'second_check_out' ? currentTime.toISOString() : existingRecord?.second_check_out_time,
-      is_second_session: false,
-      previous_session_id: null,
-      status: nextStatus,
-      minutes_late: minutesLate,
-      early_departure_minutes: earlyDepartureMinutes,
-      break_duration: roster.break_duration,
-      expected_hours: expectedHours,
-      last_action: currentTime.toISOString()
-    };
-
-    // Log the attendance data before processing
-    console.log('Processing attendance with data:', {
-      nextAction,
-      nextStatus,
-      attendanceData,
-      existingRecord: existingRecord ? {
-        id: existingRecord.id,
-        status: existingRecord.status,
-        first_check_in_time: existingRecord.first_check_in_time,
-        first_check_out_time: existingRecord.first_check_out_time,
-        second_check_in_time: existingRecord.second_check_in_time,
-        second_check_out_time: existingRecord.second_check_out_time
-      } : null
-    });
-
-    // Process attendance
-    const { data: processedAttendance, error: processError } = await supabase
-      .from('attendance')
-      .upsert(attendanceData)
-      .select('*, employees(first_name, last_name)')
-      .single();
-
-    if (processError) {
-      console.error('Error processing attendance:', {
-        error: processError,
-        details: processError.details,
-        hint: processError.hint,
-        code: processError.code,
-        message: processError.message,
-        data: attendanceData,
-        existingRecord: existingRecord ? {
-          id: existingRecord.id,
-          status: existingRecord.status,
-          first_check_in_time: existingRecord.first_check_in_time,
-          first_check_out_time: existingRecord.first_check_out_time,
-          second_check_in_time: existingRecord.second_check_in_time,
-          second_check_out_time: existingRecord.second_check_out_time
-        } : null
-      });
-
-      // Check for specific error cases
-      if (processError.message?.includes('valid_check_times')) {
-        throw new AttendanceError('Invalid check-in/out sequence. Please try again.');
-      } else if (processError.message?.includes('unique_daily_attendance')) {
-        throw new AttendanceError('Attendance record already exists for today.');
-      } else {
-        throw new AttendanceError(`Failed to process attendance: ${processError.message}`);
-      }
-    }
-
-    if (!processedAttendance) {
-      throw new AttendanceError('No attendance record was created/updated');
+    if (employeeError) {
+      console.error('Error fetching employee details:', employeeError);
+      throw new AttendanceError('Failed to fetch employee details');
     }
 
     // Return the processed attendance record with additional info
     return {
-      ...processedAttendance,
-      action: nextAction,
-      employeeName: `${employee.first_name} ${employee.last_name}`,
-      isLate: minutesLate > 0,
-      lateMinutes: minutesLate,
-      earlyDepartureMinutes: earlyDepartureMinutes,
-      actualHours: processedAttendance.actual_hours || 0,
-      expectedHours: processedAttendance.expected_hours || expectedHours
+      ...result,
+      employeeName: employee ? `${employee.first_name} ${employee.last_name}` : 'Unknown',
+      timestamp: new Date().toISOString(),
+      rosterId: roster.id // Include roster ID in response
     };
   } catch (error) {
     console.error('Error recording attendance:', error);
     if (error instanceof AttendanceError) {
-    throw error;
+      throw error;
     }
     throw new AttendanceError(
-      error instanceof Error ? error.message : 'Failed to record attendance'
+      error instanceof Error ? error.message : 'Failed to record attendance',
+      'ATTENDANCE_ERROR'
     );
   }
 };
@@ -1046,32 +855,85 @@ export const singleScanAttendance = async (employeeId: string) => {
       throw new Error('Employee is not active in the system');
     }
 
-    // Perform attendance action (check-in or check-out)
-    const { data: result, error } = await supabase.rpc('process_double_attendance', { 
-      p_employee_id: employeeId,
-      p_current_time: new Date().toISOString()
-    });
+    // Get today's date
+    const today = new Date().toISOString().split('T')[0];
+
+    // Check for existing attendance record
+    const { data: existingRecord, error: existingError } = await supabase
+      .from('attendance')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('date', today)
+      .order('created_at', { ascending: false })
+      .maybeSingle();
     
-    if (error) {
-      console.error('Attendance processing error:', error);
-      throw new Error(error.message || 'Failed to process attendance');
-    }
-    
-    if (!result) {
-      throw new Error('No response from attendance processor');
+    if (existingError) {
+      console.error('Error checking existing attendance:', existingError);
+      throw new Error('Failed to check existing attendance');
     }
 
-    // Check if the result indicates an error
-    if (result.status === 'Error') {
-      throw new Error(result.message || 'Failed to process attendance');
+    // Determine the next action based on existing record
+    let nextAction = 'FIRST_CHECK_IN';
+    if (existingRecord) {
+      if (!existingRecord.first_check_out_time) {
+        nextAction = 'FIRST_CHECK_OUT';
+      } else if (!existingRecord.second_check_in_time) {
+        nextAction = 'SECOND_CHECK_IN';
+      } else if (!existingRecord.second_check_out_time) {
+        nextAction = 'SECOND_CHECK_OUT';
+      } else {
+        throw new Error('All attendance actions completed for today');
+      }
+    }
+
+    // Process the attendance based on the next action
+    let result;
+    const currentTime = new Date().toISOString();
+
+    if (nextAction === 'FIRST_CHECK_IN') {
+      const { data, error } = await supabase
+        .from('attendance')
+        .insert({
+          employee_id: employeeId,
+          date: today,
+          first_check_in_time: currentTime,
+          status: 'PRESENT',
+          is_second_session: false
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error('Failed to record first check-in');
+      result = data;
+    } else {
+      // Update existing record
+      const updateData = {
+        first_check_out_time: nextAction === 'FIRST_CHECK_OUT' ? currentTime : existingRecord.first_check_out_time,
+        second_check_in_time: nextAction === 'SECOND_CHECK_IN' ? currentTime : existingRecord.second_check_in_time,
+        second_check_out_time: nextAction === 'SECOND_CHECK_OUT' ? currentTime : existingRecord.second_check_out_time,
+        status: nextAction === 'SECOND_CHECK_OUT' ? 'COMPLETED' : 
+                nextAction === 'FIRST_CHECK_OUT' ? 'ON_BREAK' : 'PRESENT',
+        is_second_session: nextAction === 'SECOND_CHECK_IN' || nextAction === 'SECOND_CHECK_OUT'
+      };
+
+      const { data, error } = await supabase
+        .from('attendance')
+        .update(updateData)
+        .eq('id', existingRecord.id)
+        .select()
+        .single();
+
+      if (error) throw new Error(`Failed to record ${nextAction.toLowerCase()}`);
+      result = data;
     }
 
     // Return the result with employee name
     return {
       ...result,
       employeeName: `${employee.first_name} ${employee.last_name}`,
-      timestamp: result.timestamp || new Date().toISOString(),
-      status: result.status || 'present'
+      timestamp: currentTime,
+      action: nextAction,
+      message: `Successfully recorded ${nextAction.toLowerCase().replace('_', ' ')}`
     };
   } catch (error) {
     console.error('Single scan attendance error:', error);
@@ -1110,89 +972,76 @@ export const deleteAttendanceRecord = async (recordId: string, deletionType: 'fi
 // Get active roster for an employee
 export async function getEmployeeRoster(employeeId: string): Promise<any> {
   try {
-    if (!employeeId) {
-      throw new Error('Employee ID is required');
-    }
-
-    const { data: employeeRosters, error: rosterError } = await supabase
-      .from('employee_rosters')
-      .select(`
-        *,
-        roster:rosters(*)
-      `)
+    // First try to get an existing active roster
+    const { data: roster, error } = await supabase
+      .from('rosters')
+      .select('*')
       .eq('employee_id', employeeId)
-      .eq('is_primary', true)
-      .gte('effective_from', new Date().toISOString().split('T')[0])
-      .order('effective_from', { ascending: true })
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
       .limit(1)
       .single();
 
-    if (rosterError) {
-      console.error('Error fetching roster:', rosterError);
-      // If no roster found, try to get the default roster
-      const { data: defaultRoster, error: defaultError } = await supabase
-        .from('rosters')
-        .select('*')
-        .eq('employee_id', employeeId)
-        .eq('name', 'Default Day Shift')
-        .eq('is_active', true)
-        .single();
-
-      if (defaultError || !defaultRoster) {
-        // Create a default roster for the employee
-        const { data: newRoster, error: createError } = await supabase
-          .from('rosters')
-          .insert([
-            {
-              name: 'Default Day Shift',
-              description: 'Standard 9 AM to 5 PM shift with 1-hour lunch break',
-              employee_id: employeeId,
-              start_date: new Date().toISOString().split('T')[0],
-              end_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
-              start_time: '09:00:00',
-              end_time: '17:00:00',
-              break_start: '13:00:00',
-              break_end: '14:00:00',
-              break_duration: 60,
-              grace_period: 15,
-              early_departure_threshold: 30,
-              is_active: true,
-              status: 'active'
-            }
-          ])
-          .select()
-          .single();
-
-        if (createError) {
-          throw new Error('Failed to create default roster');
-        }
-
-        // Assign the new roster to the employee
-        const { error: assignError } = await supabase
-          .from('employee_rosters')
-          .insert([
-            {
-              employee_id: employeeId,
-              roster_id: newRoster.id,
-              effective_from: new Date().toISOString().split('T')[0],
-              is_primary: true
-            }
-          ]);
-
-        if (assignError) {
-          throw new Error('Failed to assign default roster');
-        }
-
-        return newRoster;
-      }
-
-      return defaultRoster;
+    if (!error && roster) {
+      return roster;
     }
 
-    return employeeRosters?.roster;
+    // If no roster exists, get employee details first
+    const { data: employee, error: employeeError } = await supabase
+      .from('employees')
+      .select('department_id, position')
+      .eq('id', employeeId)
+      .single();
+
+    if (employeeError) {
+      console.error('Error fetching employee details:', employeeError);
+      throw new Error('Failed to fetch employee details');
+    }
+
+    // Create a default roster with proper data
+    const defaultRoster = {
+      name: 'Default Day Shift',
+      description: 'Standard 9 AM to 5 PM shift with 1-hour lunch break',
+      employee_id: employeeId,
+      department_id: employee?.department_id,
+      position: employee?.position || 'General',
+      start_date: new Date().toISOString().split('T')[0],
+      end_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      start_time: '09:00:00',
+      end_time: '17:00:00',
+      break_start: '13:00:00',
+      break_end: '14:00:00',
+      break_duration: 60,
+      grace_period: 15,
+      early_departure_threshold: 30,
+      shift_pattern: '[]',
+      is_active: true,
+      status: 'active'
+    };
+
+    // Insert the new roster
+    const { data: newRoster, error: createError } = await supabase
+      .from('rosters')
+      .insert([defaultRoster])
+      .select()
+      .single();
+
+    if (createError) {
+      console.error('Error creating default roster:', createError);
+      throw new Error('Failed to create default roster');
+    }
+
+    if (!newRoster) {
+      throw new Error('Failed to create roster - no data returned');
+    }
+
+    return newRoster;
   } catch (error) {
     console.error('Error in getEmployeeRoster:', error);
-    throw new Error('Failed to fetch roster information. Please try again.');
+    throw new AttendanceError(
+      error instanceof Error ? error.message : 'Failed to get or create roster',
+      'ROSTER_ERROR'
+    );
   }
 }
 
@@ -1202,7 +1051,7 @@ export const markAttendance = async (
   action: 'check_in' | 'start_break' | 'end_break' | 'check_out',
   deviceInfo?: string,
   location?: string
-): Promise<{ success: boolean; message: string; action: 'check_in' | 'start_break' | 'end_break' | 'check_out' | 'completed' }> => {
+): Promise<{ success: boolean; message: string; action: string }> => {
   try {
     // First, determine the next valid action for this employee
     const nextAction = await getNextAttendanceAction(employeeId);
@@ -1212,7 +1061,7 @@ export const markAttendance = async (
     return {
         success: false,
         message: 'All attendance actions completed for today',
-        action: 'completed'
+        action: 'COMPLETED'
       };
     }
 
@@ -1221,7 +1070,7 @@ export const markAttendance = async (
     return {
         success: false,
         message: `Invalid action. Expected ${nextAction}, but got ${action}`,
-        action: nextAction
+        action: nextAction.toUpperCase()
       };
     }
 
@@ -1232,7 +1081,7 @@ export const markAttendance = async (
       return {
         success: false,
         message: 'Failed to record attendance',
-        action: nextAction
+        action: nextAction.toUpperCase()
       };
     }
 
@@ -1246,14 +1095,14 @@ export const markAttendance = async (
     return {
       success: true,
       message: `Successfully recorded ${action}`,
-      action: action
+      action: action.toUpperCase()
     };
   } catch (error) {
     console.error('Error in markAttendance:', error);
     return {
       success: false,
       message: error instanceof Error ? error.message : 'An unknown error occurred',
-      action: 'check_in' // Default to check_in on error
+      action: 'CHECK_IN' // Default to CHECK_IN on error
     };
   }
 };
