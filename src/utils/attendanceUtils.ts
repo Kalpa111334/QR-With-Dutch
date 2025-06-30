@@ -227,7 +227,7 @@ export const recordAttendance = async (employeeId: string): Promise<any> => {
         );
       }
       throw new AttendanceError(`Failed to process attendance: ${error.message}`);
-    }
+      }
 
     if (!result) {
       throw new AttendanceError('No response from attendance processor');
@@ -255,7 +255,7 @@ export const recordAttendance = async (employeeId: string): Promise<any> => {
   } catch (error) {
     console.error('Error recording attendance:', error);
     if (error instanceof AttendanceError) {
-      throw error;
+    throw error;
     }
     throw new AttendanceError(
       error instanceof Error ? error.message : 'Failed to record attendance',
@@ -991,7 +991,7 @@ export async function getEmployeeRoster(employeeId: string): Promise<any> {
       .from('employees')
       .select('department_id, position')
       .eq('id', employeeId)
-      .single();
+        .single();
 
     if (employeeError) {
       console.error('Error fetching employee details:', employeeError);
@@ -1000,42 +1000,42 @@ export async function getEmployeeRoster(employeeId: string): Promise<any> {
 
     // Create a default roster with proper data
     const defaultRoster = {
-      name: 'Default Day Shift',
-      description: 'Standard 9 AM to 5 PM shift with 1-hour lunch break',
-      employee_id: employeeId,
+              name: 'Default Day Shift',
+              description: 'Standard 9 AM to 5 PM shift with 1-hour lunch break',
+              employee_id: employeeId,
       department_id: employee?.department_id,
       position: employee?.position || 'General',
-      start_date: new Date().toISOString().split('T')[0],
+              start_date: new Date().toISOString().split('T')[0],
       end_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      start_time: '09:00:00',
-      end_time: '17:00:00',
-      break_start: '13:00:00',
-      break_end: '14:00:00',
-      break_duration: 60,
-      grace_period: 15,
-      early_departure_threshold: 30,
+              start_time: '09:00:00',
+              end_time: '17:00:00',
+              break_start: '13:00:00',
+              break_end: '14:00:00',
+              break_duration: 60,
+              grace_period: 15,
+              early_departure_threshold: 30,
       shift_pattern: '[]',
-      is_active: true,
-      status: 'active'
+              is_active: true,
+              status: 'active'
     };
 
     // Insert the new roster
     const { data: newRoster, error: createError } = await supabase
       .from('rosters')
       .insert([defaultRoster])
-      .select()
-      .single();
+          .select()
+          .single();
 
-    if (createError) {
+        if (createError) {
       console.error('Error creating default roster:', createError);
-      throw new Error('Failed to create default roster');
-    }
+          throw new Error('Failed to create default roster');
+        }
 
     if (!newRoster) {
       throw new Error('Failed to create roster - no data returned');
-    }
+        }
 
-    return newRoster;
+        return newRoster;
   } catch (error) {
     console.error('Error in getEmployeeRoster:', error);
     throw new AttendanceError(

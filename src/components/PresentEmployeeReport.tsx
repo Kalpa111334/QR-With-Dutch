@@ -113,7 +113,10 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
   const [reportData, setReportData] = useState<AttendanceRecord[]>([]);
 
   // Function to validate department selection
-  const validateDepartment = (departmentId: string): Department | null => {
+  const validateDepartment = (departmentId: string): Department | { id: 'all', name: 'All Departments' } | null => {
+    if (departmentId === 'all') {
+      return { id: 'all', name: 'All Departments' };
+    }
     const dept = departments.find(d => d.id === departmentId);
     if (!dept) {
       console.error('Invalid department selected:', departmentId);
@@ -409,10 +412,10 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
   };
 
   const fetchAttendanceData = async () => {
-    if (!startDate || !endDate || !selectedDepartment) {
+    if (!startDate || !endDate) {
       toast({
         title: 'Validation Error',
-        description: 'Please select date range and department',
+        description: 'Please select date range',
         variant: 'destructive',
       });
       return null;
@@ -427,11 +430,10 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
         availableDepartments: departments
       });
 
-      // First get employees in the selected department
+      // First get all active employees with their department info
       const { data: employeesData, error: employeesError } = await supabase
         .from('employees')
         .select('id, name, first_name, last_name, department_id')
-        .eq('department_id', selectedDepartment)
         .eq('status', 'active');
 
       if (employeesError) {
@@ -439,22 +441,48 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
         throw new Error(`Failed to fetch employees: ${employeesError.message}`);
       }
 
-      // Double check that all employees belong to the selected department
-      const validEmployees = employeesData?.filter(emp => emp.department_id === selectedDepartment) || [];
+      // Get departments info separately
+      const { data: departmentsData, error: departmentsError } = await supabase
+        .from('departments')
+        .select('id, name');
+
+      if (departmentsError) {
+        console.error('Error fetching departments:', departmentsError);
+        throw new Error(`Failed to fetch departments: ${departmentsError.message}`);
+      }
+
+      // Create a map of department IDs to department names
+      const departmentMap = departmentsData.reduce((map, dept) => {
+        map[dept.id] = dept.name;
+        return map;
+      }, {} as Record<string, string>);
+
+      // Add department names to employees data
+      const employeesWithDept = employeesData.map(emp => ({
+        ...emp,
+        department: {
+          id: emp.department_id,
+          name: departmentMap[emp.department_id] || 'Unassigned'
+        }
+      }));
+
+      // Filter employees based on department selection
+      const validEmployees = selectedDepartment === 'all'
+        ? employeesWithDept
+        : employeesWithDept?.filter(emp => emp.department_id === selectedDepartment) || [];
 
       if (!validEmployees || validEmployees.length === 0) {
-        console.log('No active employees found in department:', selectedDepartment);
-        console.log('Department data:', departments.find(d => d.id === selectedDepartment));
+        console.log('No active employees found', selectedDepartment === 'all' ? 'across all departments' : `in department: ${selectedDepartment}`);
         toast({
           title: 'No Employees',
-          description: 'No active employees found in the selected department',
+          description: 'No active employees found in the selected department(s)',
           variant: 'default',
         });
         return [];
       }
 
       const employeeIds = validEmployees.map(emp => emp.id);
-      console.log(`Found ${employeeIds.length} active employees in department`);
+      console.log(`Found ${employeeIds.length} active employees ${selectedDepartment === 'all' ? 'across all departments' : 'in department'}`);
 
       // Fetch attendance records for these employees
       const { data: attendanceData, error: attendanceError } = await supabase
@@ -470,18 +498,7 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
           working_duration_minutes,
           status,
           minutes_late,
-          employee:employee_id (
-            id,
-            name,
-            first_name,
-            last_name,
-            department_id,
-            position,
-            department:department_id (
-              id,
-              name
-            )
-          )
+          employee_id
         `)
         .in('employee_id', employeeIds)
         .gte('date', format(startDate, 'yyyy-MM-dd'))
@@ -502,18 +519,52 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
         return [];
       }
 
-      // Log successful data fetch with department info
+      // Add employee and department info to attendance records
+      const enrichedAttendanceData = attendanceData.map(record => {
+        const employee = validEmployees.find(emp => emp.id === record.employee_id);
+        return {
+          ...record,
+          employee: {
+            id: employee?.id || '',
+            name: employee?.name || '',
+            first_name: employee?.first_name || '',
+            last_name: employee?.last_name || '',
+            department_id: employee?.department_id || '',
+            department: employee?.department || { id: '', name: 'Unassigned' }
+          }
+        };
+      });
+
+      // Group attendance data by department for "All Departments" case
+      if (selectedDepartment === 'all') {
+        const departmentGroups = enrichedAttendanceData.reduce((groups, record) => {
+          const deptId = record.employee?.department_id || 'unassigned';
+          const deptName = record.employee?.department?.name || 'Unassigned';
+          if (!groups[deptId]) {
+            groups[deptId] = {
+              name: deptName,
+              records: []
+            };
+          }
+          groups[deptId].records.push(record);
+          return groups;
+        }, {} as Record<string, { name: string; records: typeof enrichedAttendanceData }>);
+
+        // Add department grouping to the records
+        enrichedAttendanceData.forEach(record => {
+          record.departmentGroup = record.employee?.department?.name || 'Unassigned';
+        });
+      }
+
+      // Log successful data fetch
       console.log('Successfully fetched attendance data:', {
-        recordCount: attendanceData.length,
+        recordCount: enrichedAttendanceData.length,
         dateRange: `${format(startDate, 'yyyy-MM-dd')} to ${format(endDate, 'yyyy-MM-dd')}`,
         employeeCount: employeeIds.length,
-        sampleRecord: attendanceData[0],
         departments: departments
       });
 
-      // Type assertion to ensure data matches our interface
-      const typedData = attendanceData as unknown as AttendanceRecord[];
-      return typedData;
+      return enrichedAttendanceData;
     } catch (error) {
       console.error('Error in fetchAttendanceData:', error);
       toast({
@@ -534,50 +585,34 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
         return;
       }
 
-      // Get department name
-      const selectedDepartmentData = departments.find(d => d.id === selectedDepartment);
-      if (!selectedDepartmentData) {
-        console.error('Selected department not found:', selectedDepartment);
-        toast({
-          title: 'Error',
-          description: 'Selected department not found',
-          variant: 'destructive',
-        });
-        return;
-      }
-      
-      // Initialize PDF with A4 portrait for better readability
+      // Initialize PDF with A4 portrait
       const doc = new jsPDF('portrait', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 10;
       const contentWidth = pageWidth - (2 * margin);
 
-      // Add header with company logo/name and department
-      doc.setFillColor(41, 128, 185); // Professional blue color
+      // Add header
+      doc.setFillColor(41, 128, 185);
       doc.rect(0, 0, pageWidth, 50, 'F');
       
-      // Add subtle accent line
       doc.setDrawColor(255, 255, 255);
       doc.setLineWidth(0.5);
       doc.line(margin, 47, pageWidth - margin, 47);
 
-      // Add company name with enhanced styling
       doc.setFontSize(32);
       doc.setTextColor(255, 255, 255);
       doc.setFont('helvetica', 'bold');
       doc.text('DUTCH TRAILS', pageWidth / 2, 20, { align: 'center' });
 
-      // Add department name with professional styling
-    doc.setFontSize(20);
+      doc.setFontSize(20);
       doc.setFont('helvetica', 'normal');
-      doc.text(selectedDepartmentData.name.toUpperCase(), pageWidth / 2, 32, { align: 'center' });
+      doc.text('ATTENDANCE REPORT', pageWidth / 2, 32, { align: 'center' });
 
-      // Add report title with subtle separator
       doc.setFontSize(16);
-      doc.text('PRESENT EMPLOYEES REPORT', pageWidth / 2, 44, { align: 'center' });
+      doc.text(selectedDepartment === 'all' ? 'ALL DEPARTMENTS' : departments.find(d => d.id === selectedDepartment)?.name?.toUpperCase() || 'UNKNOWN DEPARTMENT', pageWidth / 2, 44, { align: 'center' });
 
-      // Add date range and generation info with enhanced styling
+      // Add date range and generation info
       doc.setFontSize(10);
       doc.setTextColor(44, 62, 80);
       const dateRange = `Period: ${format(startDate, 'dd/MM/yyyy')} - ${format(endDate, 'dd/MM/yyyy')}`;
@@ -585,112 +620,137 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
       doc.text(dateRange, margin, 60);
       doc.text(generatedAt, pageWidth - margin, 60, { align: 'right' });
 
-      // Calculate statistics
-      const totalEmployees = new Set(attendanceData.map(record => record.employee?.id)).size;
-      const totalDays = new Set(attendanceData.map(record => record.date)).size;
-      const onTimeCount = attendanceData.filter(record => record.minutes_late === 0).length;
-      const lateCount = attendanceData.filter(record => record.minutes_late > 0).length;
-      const totalHours = attendanceData.reduce((sum, record) => sum + (record.working_duration_minutes || 0), 0) / 60;
+      // If "All Departments" is selected, create a department breakdown
+      if (selectedDepartment === 'all') {
+        // Group data by department
+        const departmentGroups = attendanceData.reduce((groups, record) => {
+          const deptName = record.employee?.department?.name || 'Unassigned';
+          if (!groups[deptName]) {
+            groups[deptName] = [];
+          }
+          groups[deptName].push(record);
+          return groups;
+        }, {} as Record<string, typeof attendanceData>);
 
-      // Add statistics section with enhanced box styling
-      doc.setDrawColor(41, 128, 185);
-      doc.setFillColor(240, 244, 248);
-      doc.roundedRect(margin, 65, contentWidth, 45, 3, 3, 'FD');
-      
-      doc.setFontSize(14);
-      doc.setTextColor(41, 128, 185);
-      doc.setFont('helvetica', 'bold');
-      doc.text('SUMMARY STATISTICS', margin + 5, 73);
-      
-      // Create two columns for statistics
-      doc.setFontSize(10);
-    doc.setTextColor(44, 62, 80);
-      doc.setFont('helvetica', 'normal');
-      
-      // Left column
-      doc.text([
-        `Total Employees: ${totalEmployees}`,
-        `Total Days: ${totalDays}`,
-        `Total Hours: ${Math.round(totalHours * 10) / 10}h`
-      ], margin + 5, 82, { lineHeightFactor: 1.5 });
+        let currentY = 70;
 
-      // Right column
-      doc.text([
-        `On Time: ${onTimeCount} (${Math.round((onTimeCount/attendanceData.length)*100)}%)`,
-        `Late: ${lateCount} (${Math.round((lateCount/attendanceData.length)*100)}%)`
-      ], pageWidth / 2, 82, { lineHeightFactor: 1.5 });
+        // Add department summaries
+        Object.entries(departmentGroups).sort(([a], [b]) => a.localeCompare(b)).forEach(([deptName, records]) => {
+          // Check if we need a new page
+          if (currentY > pageHeight - 60) {
+            doc.addPage();
+            currentY = 20;
+          }
 
-      // Prepare table data
-      const tableData = attendanceData.map(record => {
-        return [
-          format(new Date(record.date), 'dd/MM/yyyy'),
-          record.employee?.first_name && record.employee?.last_name 
-            ? `${record.employee.first_name} ${record.employee.last_name}`
-            : record.employee?.name || 'Unknown',
-          record.employee?.department?.name || selectedDepartmentData?.name || '-',
-          record.first_check_in_time 
-            ? format(new Date(record.first_check_in_time), 'HH:mm') 
-            : '-',
-          record.first_check_out_time 
-            ? format(new Date(record.first_check_out_time), 'HH:mm') 
-            : '-',
-          record.second_check_in_time 
-            ? format(new Date(record.second_check_in_time), 'HH:mm') 
-            : '-',
-          record.second_check_out_time 
-            ? format(new Date(record.second_check_out_time), 'HH:mm') 
-            : '-',
-          record.break_duration_minutes 
-            ? formatDuration(record.break_duration_minutes)
-            : '-',
-          record.working_duration_minutes
-            ? formatDuration(record.working_duration_minutes)
-            : '-',
-          record.minutes_late > 0
-            ? formatDuration(record.minutes_late)
-            : '-',
-          record.status?.toUpperCase() || 'UNKNOWN'
-        ];
-      });
+          // Add department header
+          doc.setFillColor(240, 244, 248);
+          doc.rect(margin, currentY, contentWidth, 10, 'F');
+          doc.setFontSize(12);
+          doc.setTextColor(41, 128, 185);
+          doc.setFont('helvetica', 'bold');
+          doc.text(deptName.toUpperCase(), margin + 2, currentY + 7);
+          currentY += 15;
 
-      // Add table with enhanced styling for A4 portrait
-      (doc as any).autoTable({
-        head: [['Date', 'Employee Name', 'Department', 'First In', 'First Out', 'Second In', 'Second Out', 'Break', 'Hours', 'Late', 'Status']],
-      body: tableData,
-        startY: 115,
-        theme: 'grid',
-      styles: {
-          font: 'helvetica',
-          fontSize: 8,
-          cellPadding: 3,
-          lineColor: [200, 200, 200],
-          lineWidth: 0.1,
-      },
-      columnStyles: {
-          0: { cellWidth: 20 }, // Date
-          1: { cellWidth: 35 }, // Name
-          2: { cellWidth: 25 }, // Department
-          3: { cellWidth: 15 }, // First In
-          4: { cellWidth: 15 }, // First Out
-          5: { cellWidth: 15 }, // Second In
-          6: { cellWidth: 15 }, // Second Out
-          7: { cellWidth: 15 }, // Break
-          8: { cellWidth: 15 }, // Hours
-          9: { cellWidth: 15 }, // Late
-          10: { cellWidth: 15 }, // Status
-        },
-        headStyles: {
-          fillColor: [41, 128, 185],
-          textColor: 255,
-          fontSize: 8,
-          fontStyle: 'bold',
-        },
-        alternateRowStyles: {
-          fillColor: [245, 245, 245],
-      },
-    });
+          // Calculate department statistics
+          const totalEmployees = new Set(records.map(r => r.employee?.id)).size;
+          const onTimeCount = records.filter(r => r.minutes_late === 0).length;
+          const lateCount = records.filter(r => r.minutes_late > 0).length;
+          const totalHours = records.reduce((sum, r) => sum + (r.working_duration_minutes || 0), 0) / 60;
 
-      // Add footer text
+          // Add department statistics
+          doc.setFontSize(10);
+          doc.setTextColor(44, 62, 80);
+          doc.setFont('helvetica', 'normal');
+          doc.text([
+            `Total Employees: ${totalEmployees}`,
+            `On Time: ${onTimeCount} (${Math.round((onTimeCount/records.length)*100)}%)`,
+            `Late: ${lateCount} (${Math.round((lateCount/records.length)*100)}%)`,
+            `Total Hours: ${Math.round(totalHours * 10) / 10}h`
+          ], margin + 5, currentY, { lineHeightFactor: 1.5 });
+
+          currentY += 25;
+
+          // Add department records table
+          (doc as any).autoTable({
+            head: [['Date', 'Employee Name', 'First In', 'First Out', 'Second In', 'Second Out', 'Break', 'Hours', 'Late', 'Status']],
+            body: records.map(record => [
+              format(new Date(record.date), 'dd/MM/yyyy'),
+              record.employee?.first_name && record.employee?.last_name 
+                ? `${record.employee.first_name} ${record.employee.last_name}`
+                : record.employee?.name || 'Unknown',
+              record.first_check_in_time ? format(new Date(record.first_check_in_time), 'HH:mm') : '-',
+              record.first_check_out_time ? format(new Date(record.first_check_out_time), 'HH:mm') : '-',
+              record.second_check_in_time ? format(new Date(record.second_check_in_time), 'HH:mm') : '-',
+              record.second_check_out_time ? format(new Date(record.second_check_out_time), 'HH:mm') : '-',
+              formatDuration(record.break_duration_minutes),
+              formatDuration(record.working_duration_minutes),
+              record.minutes_late > 0 ? formatDuration(record.minutes_late) : '-',
+              record.status?.toUpperCase() || 'UNKNOWN'
+            ]),
+            startY: currentY,
+            theme: 'grid',
+            styles: {
+              font: 'helvetica',
+              fontSize: 8,
+              cellPadding: 2,
+              lineColor: [200, 200, 200],
+              lineWidth: 0.1,
+            },
+            headStyles: {
+              fillColor: [41, 128, 185],
+              textColor: 255,
+              fontSize: 8,
+              fontStyle: 'bold',
+            },
+            alternateRowStyles: {
+              fillColor: [245, 245, 245],
+            },
+            margin: { left: margin, right: margin },
+          });
+
+          currentY = (doc as any).lastAutoTable.finalY + 20;
+        });
+      } else {
+        // Original single department table
+        (doc as any).autoTable({
+          head: [['Date', 'Employee Name', 'First In', 'First Out', 'Second In', 'Second Out', 'Break', 'Hours', 'Late', 'Status']],
+          body: attendanceData.map(record => [
+            format(new Date(record.date), 'dd/MM/yyyy'),
+            record.employee?.first_name && record.employee?.last_name 
+              ? `${record.employee.first_name} ${record.employee.last_name}`
+              : record.employee?.name || 'Unknown',
+            record.first_check_in_time ? format(new Date(record.first_check_in_time), 'HH:mm') : '-',
+            record.first_check_out_time ? format(new Date(record.first_check_out_time), 'HH:mm') : '-',
+            record.second_check_in_time ? format(new Date(record.second_check_in_time), 'HH:mm') : '-',
+            record.second_check_out_time ? format(new Date(record.second_check_out_time), 'HH:mm') : '-',
+            formatDuration(record.break_duration_minutes),
+            formatDuration(record.working_duration_minutes),
+            record.minutes_late > 0 ? formatDuration(record.minutes_late) : '-',
+            record.status?.toUpperCase() || 'UNKNOWN'
+          ]),
+          startY: 115,
+          theme: 'grid',
+          styles: {
+            font: 'helvetica',
+            fontSize: 8,
+            cellPadding: 2,
+            lineColor: [200, 200, 200],
+            lineWidth: 0.1,
+          },
+          headStyles: {
+            fillColor: [41, 128, 185],
+            textColor: 255,
+            fontSize: 8,
+            fontStyle: 'bold',
+          },
+          alternateRowStyles: {
+            fillColor: [245, 245, 245],
+          },
+          margin: { left: margin, right: margin },
+        });
+      }
+
+      // Add footer
       doc.setFontSize(8);
       doc.setTextColor(128, 128, 128);
       doc.text(
@@ -700,14 +760,14 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
         { align: 'center' }
       );
 
-      // Save the PDF with a descriptive filename
-      const filename = `present_employees_report_${selectedDepartmentData.name.replace(/\s+/g, '_')}_${format(startDate, 'yyyyMMdd')}-${format(endDate, 'yyyyMMdd')}.pdf`;
+      // Save the PDF
+      const filename = `attendance_report_${selectedDepartment === 'all' ? 'all_departments' : departments.find(d => d.id === selectedDepartment)?.name?.toLowerCase()}_${format(startDate, 'yyyyMMdd')}-${format(endDate, 'yyyyMMdd')}.pdf`;
       doc.save(filename);
-    
-    toast({
-      title: 'Success',
-      description: 'PDF report generated successfully',
-    });
+
+      toast({
+        title: 'Success',
+        description: 'PDF report generated successfully',
+      });
 
       setIsDialogOpen(false);
       onSuccess?.();
@@ -731,8 +791,10 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
   };
 
   const renderPreviewTable = (data: AttendanceRecord[]) => {
-    // Get the selected department name
-    const selectedDepartmentData = departments.find(d => d.id === selectedDepartment);
+    // Get the department title - handle "All Departments" case
+    const departmentTitle = selectedDepartment === 'all' 
+      ? 'All Departments' 
+      : departments.find(d => d.id === selectedDepartment)?.name || 'Unknown Department';
     
     // Calculate statistics
     const totalEmployees = new Set(data.map(record => record.employee?.id)).size;
@@ -740,47 +802,125 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
     const onTimeCount = data.filter(record => record.minutes_late === 0).length;
     const lateCount = data.filter(record => record.minutes_late > 0).length;
     const totalHours = data.reduce((sum, record) => sum + (record.working_duration_minutes || 0), 0) / 60;
-    
+
     return (
-      <div className="mt-4 space-y-3">
-        <h3 className="text-sm font-medium">Preview ({data.length} records)</h3>
-        
+      <div className="space-y-4">
+        {/* Statistics Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <Card>
+            <CardHeader className="py-4">
+              <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalEmployees}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="py-4">
+              <CardTitle className="text-sm font-medium">Total Days</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalDays}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="py-4">
+              <CardTitle className="text-sm font-medium">On Time</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{onTimeCount}</div>
+              <div className="text-xs text-muted-foreground">
+                {Math.round((onTimeCount/data.length)*100)}%
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="py-4">
+              <CardTitle className="text-sm font-medium">Late</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{lateCount}</div>
+              <div className="text-xs text-muted-foreground">
+                {Math.round((lateCount/data.length)*100)}%
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="py-4">
+              <CardTitle className="text-sm font-medium">Total Hours</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{Math.round(totalHours * 10) / 10}h</div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Mobile Card View */}
-        <div className="block sm:hidden space-y-3">
+        <div className="block sm:hidden">
           {data.slice(0, 5).map((record) => (
-            <Card key={record.id} className="p-3">
-              <div className="space-y-2">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="font-medium text-sm">
+            <Card key={record.id} className="mb-4">
+              <CardContent className="pt-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Date:</span>
+                    <span className="text-sm">{format(new Date(record.date), 'dd/MM/yyyy')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Employee:</span>
+                    <span className="text-sm">
                       {record.employee?.first_name && record.employee?.last_name 
                         ? `${record.employee.first_name} ${record.employee.last_name}`
                         : record.employee?.name || 'Unknown'}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {format(new Date(record.date), 'dd/MM/yyyy')}
-                    </div>
+                    </span>
                   </div>
-                  <Badge variant="outline" className="text-xs">
-                    {record.status}
-                  </Badge>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Department:</span>
+                    <span className="text-sm">
+                      {record.employee?.department?.name || departmentTitle || '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">First In:</span>
+                    <span className="text-sm">
+                      {record.first_check_in_time ? format(new Date(record.first_check_in_time), 'HH:mm') : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">First Out:</span>
+                    <span className="text-sm">
+                      {record.first_check_out_time ? format(new Date(record.first_check_out_time), 'HH:mm') : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Second In:</span>
+                    <span className="text-sm">
+                      {record.second_check_in_time ? format(new Date(record.second_check_in_time), 'HH:mm') : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Second Out:</span>
+                    <span className="text-sm">
+                      {record.second_check_out_time ? format(new Date(record.second_check_out_time), 'HH:mm') : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Break:</span>
+                    <span className="text-sm">{formatDuration(record.break_duration_minutes)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Duration:</span>
+                    <span className="text-sm">{formatDuration(record.working_duration_minutes)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Late:</span>
+                    <span className="text-sm">{record.minutes_late > 0 ? formatDuration(record.minutes_late) : '-'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm font-medium">Status:</span>
+                    <span className="text-sm">{record.status?.toUpperCase() || 'UNKNOWN'}</span>
+                  </div>
                 </div>
-                
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-muted-foreground">In:</span> {record.first_check_in_time ? format(new Date(record.first_check_in_time), 'HH:mm') : '-'}
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Out:</span> {record.first_check_out_time ? format(new Date(record.first_check_out_time), 'HH:mm') : '-'}
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Duration:</span> {formatDuration(record.working_duration_minutes)}
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Late:</span> {formatDuration(record.minutes_late > 0 ? record.minutes_late : null)}
-                  </div>
-                </div>
-              </div>
+              </CardContent>
             </Card>
           ))}
           {data.length > 5 && (
@@ -821,7 +961,7 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
                         : record.employee?.name || 'Unknown'}
                     </td>
                     <td className="p-2 text-center text-xs">
-                      {record.employee?.department?.name || selectedDepartmentData?.name || '-'}
+                      {record.employee?.department?.name || departmentTitle || '-'}
                     </td>
                     <td className="p-2 text-center text-xs">
                       {record.first_check_in_time ? format(new Date(record.first_check_in_time), 'HH:mm') : '-'}
@@ -842,117 +982,16 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
                       {formatDuration(record.working_duration_minutes)}
                     </td>
                     <td className="p-2 text-center text-xs">
-                      {formatDuration(record.minutes_late > 0 ? record.minutes_late : null)}
+                      {record.minutes_late > 0 ? formatDuration(record.minutes_late) : '-'}
                     </td>
                     <td className="p-2 text-center text-xs">
-                      <Badge 
-                        variant={
-                          record.status === 'completed' ? 'default' :
-                          record.status === 'present' ? 'default' :
-                          record.status === 'checked-out' ? 'secondary' :
-                          record.status === 'on_break' ? 'outline' :
-                          'secondary'
-                        }
-                      >
-                        {record.status === 'present' ? 'CHECKED IN' : 
-                         record.status === 'checked-out' ? 'COMPLETED' :
-                         record.status === 'on_break' ? 'ON BREAK' :
-                         record.status?.toUpperCase() || 'UNKNOWN'}
-                      </Badge>
+                      {record.status?.toUpperCase() || 'UNKNOWN'}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {data.length > 10 && (
-            <div className="text-center text-xs text-muted-foreground mt-2">
-              Showing 10 of {data.length} records. Download PDF for complete list.
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Attendance Overview</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Total Employees</span>
-                  <span className="text-sm font-medium">{totalEmployees}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Total Days</span>
-                  <span className="text-sm font-medium">{totalDays}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Total Hours</span>
-                  <span className="text-sm font-medium">{Math.round(totalHours * 10) / 10}H</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Punctuality Stats</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">On Time</span>
-                  <span className="text-sm font-medium text-green-600">
-                    {onTimeCount} ({Math.round((onTimeCount/data.length)*100)}%)
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Late Arrivals</span>
-                  <span className="text-sm font-medium text-yellow-600">
-                    {lateCount} ({Math.round((lateCount/data.length)*100)}%)
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Very Late (&gt;30M)</span>
-                  <span className="text-sm font-medium text-red-600">
-                    {data.filter(r => r.minutes_late > 30).length}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Work Duration</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Full Day (&gt;8H)</span>
-                  <span className="text-sm font-medium text-green-600">
-                    {data.filter(r => (r.working_duration_minutes || 0) >= 480).length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Half Day (4-8H)</span>
-                  <span className="text-sm font-medium text-yellow-600">
-                    {data.filter(r => {
-                      const mins = r.working_duration_minutes || 0;
-                      return mins >= 240 && mins < 480;
-                    }).length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Partial (&lt;4H)</span>
-                  <span className="text-sm font-medium text-red-600">
-                    {data.filter(r => (r.working_duration_minutes || 0) < 240).length}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     );
@@ -1010,15 +1049,16 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
                     <SelectValue placeholder="Select department">
                       {departments.find(d => d.id === selectedDepartment)?.name || 'Select department'}
                     </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Departments</SelectItem>
                     {departments.map((dept) => (
                       <SelectItem key={dept.id} value={dept.id}>
                         {dept.name}
                       </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -1028,7 +1068,7 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
                   onClick={handleRefresh}
                   variant="outline"
                   size="sm"
-                  disabled={loading || !startDate || !endDate || !selectedDepartment}
+                  disabled={loading || !startDate || !endDate}
                   className="flex items-center gap-2"
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -1042,7 +1082,7 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
               <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
                 <Button
                   onClick={generatePDF}
-                  disabled={loading || !startDate || !endDate || !selectedDepartment}
+                  disabled={loading || !startDate || !endDate}
                   className="flex items-center gap-2 w-full sm:w-auto"
                   size="sm"
                 >
@@ -1057,12 +1097,12 @@ export function PresentEmployeeReport({ className, onSuccess }: PresentEmployeeR
                       Download PDF
                     </>
                   )}
-            </Button>
-          </div>
+                </Button>
+              </div>
             </div>
 
             {reportData.length > 0 && renderPreviewTable(reportData)}
-            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </>
